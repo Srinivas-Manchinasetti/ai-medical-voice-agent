@@ -1,0 +1,43 @@
+# ==============================================================================
+# AI Medical Voice Agent - Requirements & Dependencies
+# ==============================================================================
+# 
+# Node.js Project Runtime Requirements:
+# - Node.js >= 18.17.0
+# - npm >= 9.0.0
+# 
+# Python Microservice & Audio/AI Processing Backend Requirements:
+# Install using: pip install -r requirements.txt
+# ==============================================================================
+
+# Core API & Server Frameworks
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+websockets>=12.0
+
+# AI Models, LLM Integrations & Voice Speech-to-Text / Text-to-Speech
+openai>=1.14.0
+anthropic>=0.18.0
+langchain>=0.1.12
+openai-whisper>=20231117
+gTTS>=2.5.1
+pyttsx3>=2.90
+
+# Audio Processing & DSP Libraries
+PyAudio>=0.2.14
+soundfile>=0.12.1
+scipy>=1.12.0
+numpy>=1.26.4
+SpeechRecognition>=3.10.1
+
+# Data Validation, Serialization & HTTP Utilities
+pydantic>=2.6.4
+pydantic-settings>=2.2.1
+python-dotenv>=1.0.1
+requests>=2.31.0
+httpx>=0.27.0
+aiohttp>=3.9.3
+
+# Optional Machine Learning Utilities
+torch>=2.2.1; platform_system != "Windows" or platform_machine == "AMD64"
+torchaudio>=2.2.1; platform_system != "Windows" or platform_machine == "AMD64"
