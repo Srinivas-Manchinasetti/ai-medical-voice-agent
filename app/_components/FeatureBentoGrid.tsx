@@ -1,338 +1,120 @@
 "use client";
-import { cn } from "@/lib/utils";
-import React from "react";
 
-import {
-  IconBoxAlignRightFilled,
-  IconClipboardCopy,
-  IconFileBroken,
-  IconSignature,
-  IconTableColumn,
-} from "@tabler/icons-react";
-import { motion } from "motion/react";
-import { BentoGrid, BentoGridItem } from "@/components/ui/bento-grid";
-
+import React, { useState } from "react";
+import { Activity, ShieldCheck, Globe2, AlertTriangle, FileSpreadsheet, Sparkles, CheckCircle2 } from "lucide-react";
 
 export function FeatureBentoGrid() {
+  const [activeLang, setActiveLang] = useState<string>("en");
+
+  const LANGUAGES = [
+    { code: "en", label: "English", sample: "I'm having difficulty breathing." },
+    { code: "es", label: "Español", sample: "Tengo dificultad para respirar." },
+    { code: "zh", label: "中文", sample: "我感觉呼吸困难。" },
+    { code: "hi", label: "हिन्दी", sample: "मुझे सांस लेने में तकलीफ हो रही है।" },
+  ];
+
   return (
-    <BentoGrid className="max-w-4xl mx-auto md:auto-rows-[20rem]">
-      {items.map((item, i) => (
-        <BentoGridItem
-          key={i}
-          title={item.title}
-          description={item.description}
-          header={item.header}
-          className={cn("[&>p:text-lg]", item.className)}
-          icon={item.icon}
-        />
-      ))}
-    </BentoGrid>
+    <section id="capabilities" className="w-full py-16 bg-slate-50 border-t border-slate-200">
+      <div className="mx-auto max-w-5xl px-4">
+        {/* Title */}
+        <div className="flex flex-col items-center text-center mb-12">
+          <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+            Built for High-Precision Clinical Workflows
+          </h2>
+          <p className="mt-3 max-w-xl text-base text-slate-600">
+            From emergency intake routing to multilingual patient interaction, discover the technology powering instant medical voice assistance.
+          </p>
+        </div>
+
+        {/* Bento Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Card 1 */}
+          <div className="md:col-span-2 rounded-3xl bg-white border border-slate-200 p-8 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
+                <Activity className="h-5 w-5" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">Real-Time Symptom & Entity Extraction</h3>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed mb-6">
+              As the patient speaks naturally, our clinical voice LLM isolates chief complaints, symptom duration, severity, and automatically tags ICD-10 medical codes.
+            </p>
+
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
+              <span className="rounded-md bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700">
+                🚨 Chest Pain (R07.9)
+              </span>
+              <span className="rounded-md bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700">
+                Diaphoresis (R61)
+              </span>
+              <span className="rounded-md bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                Shortness of Breath (R06.02)
+              </span>
+            </div>
+          </div>
+
+          {/* Card 2 */}
+          <div className="md:col-span-1 rounded-3xl bg-white border border-slate-200 p-8 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
+                  <Globe2 className="h-5 w-5" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900">Multilingual Care</h3>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed mb-4">
+                Break language barriers. The voice agent seamlessly switches dialects in real-time over 30+ languages.
+              </p>
+
+              <div className="grid grid-cols-2 gap-1.5 mb-4">
+                {LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => setActiveLang(lang.code)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      activeLang === lang.code
+                        ? "bg-black text-white"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    {lang.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 p-3 text-xs font-semibold text-slate-700 border border-slate-200">
+              "{LANGUAGES.find((l) => l.code === activeLang)?.sample}"
+            </div>
+          </div>
+
+          {/* Card 3 */}
+          <div className="md:col-span-1 rounded-3xl bg-white border border-slate-200 p-8 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center font-bold">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">Emergency Escalation</h3>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed mb-4">
+              Critical red-flag symptoms auto-trigger direct patching to hospital ER on-call triage nurses or 911 dispatch.
+            </p>
+          </div>
+
+          {/* Card 4 */}
+          <div className="md:col-span-2 rounded-3xl bg-white border border-slate-200 p-8 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center font-bold">
+                <FileSpreadsheet className="h-5 w-5" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">Automated SOAP Notes & EHR Writeback</h3>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed mb-4">
+              Eliminate manual charting. Every patient voice call generates a structured Subjective, Objective, Assessment, and Plan (SOAP) note synced to Epic & Cerner.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
-
-const SkeletonOne = () => {
-  const variants = {
-    initial: {
-      x: 0,
-    },
-    animate: {
-      x: 10,
-      rotate: 5,
-      transition: {
-        duration: 0.2,
-      },
-    },
-  };
-  const variantsSecond = {
-    initial: {
-      x: 0,
-    },
-    animate: {
-      x: -10,
-      rotate: -5,
-      transition: {
-        duration: 0.2,
-      },
-    },
-  };
-
-  return (
-    <motion.div
-      initial="initial"
-      whileHover="animate"
-      className="flex flex-1 w-full h-full min-h-[6rem] dark:bg-dot-white/[0.2] bg-dot-black/[0.2] flex-col space-y-2"
-    >
-      <motion.div
-        variants={variants}
-        className="flex flex-row rounded-full border border-neutral-100 dark:border-white/[0.2] p-2  items-center space-x-2 bg-white dark:bg-black"
-      >
-        <div className="h-6 w-6 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 shrink-0" />
-        <div className="w-full bg-gray-100 h-4 rounded-full dark:bg-neutral-900" />
-      </motion.div>
-      <motion.div
-        variants={variantsSecond}
-        className="flex flex-row rounded-full border border-neutral-100 dark:border-white/[0.2] p-2 items-center space-x-2 w-3/4 ml-auto bg-white dark:bg-black"
-      >
-        <div className="w-full bg-gray-100 h-4 rounded-full dark:bg-neutral-900" />
-        <div className="h-6 w-6 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 shrink-0" />
-      </motion.div>
-      <motion.div
-        variants={variants}
-        className="flex flex-row rounded-full border border-neutral-100 dark:border-white/[0.2] p-2 items-center space-x-2 bg-white dark:bg-black"
-      >
-        <div className="h-6 w-6 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 shrink-0" />
-        <div className="w-full bg-gray-100 h-4 rounded-full dark:bg-neutral-900" />
-      </motion.div>
-    </motion.div>
-  );
-};
-const SkeletonTwo = () => {
-  const variants = {
-    initial: {
-      width: 0,
-    },
-    animate: {
-      width: "100%",
-      transition: {
-        duration: 0.2,
-      },
-    },
-    hover: {
-      width: ["0%", "100%"],
-      transition: {
-        duration: 2,
-      },
-    },
-  };
-  const widths = ["60%", "85%", "45%", "90%", "70%", "55%"];
-  return (
-    <motion.div
-      initial="initial"
-      animate="animate"
-      whileHover="hover"
-      className="flex flex-1 w-full h-full min-h-[6rem] dark:bg-dot-white/[0.2] bg-dot-black/[0.2] flex-col space-y-2"
-    >
-      {widths.map((width, i) => (
-        <motion.div
-          key={"skeleton-two" + i}
-          variants={variants}
-          style={{
-            maxWidth: width,
-          }}
-          className="flex flex-row rounded-full border border-neutral-100 dark:border-white/[0.2] p-2  items-center space-x-2 bg-neutral-100 dark:bg-black w-full h-4"
-        ></motion.div>
-      ))}
-    </motion.div>
-  );
-};
-const SkeletonThree = () => {
-  const variants = {
-    initial: {
-      backgroundPosition: "0 50%",
-    },
-    animate: {
-      backgroundPosition: ["0, 50%", "100% 50%", "0 50%"],
-    },
-  };
-  return (
-    <motion.div
-      initial="initial"
-      animate="animate"
-      variants={variants}
-      transition={{
-        duration: 5,
-        repeat: Infinity,
-        repeatType: "reverse",
-      }}
-      className="flex flex-1 w-full h-full min-h-[6rem] dark:bg-dot-white/[0.2] rounded-lg bg-dot-black/[0.2] flex-col space-y-2"
-      style={{
-        background:
-          "linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab)",
-        backgroundSize: "400% 400%",
-      }}
-    >
-      <motion.div className="h-full w-full rounded-lg"></motion.div>
-    </motion.div>
-  );
-};
-const SkeletonFour = () => {
-  const first = {
-    initial: {
-      x: 20,
-      rotate: -5,
-    },
-    hover: {
-      x: 0,
-      rotate: 0,
-    },
-  };
-  const second = {
-    initial: {
-      x: -20,
-      rotate: 5,
-    },
-    hover: {
-      x: 0,
-      rotate: 0,
-    },
-  };
-  return (
-    <motion.div
-      initial="initial"
-      animate="animate"
-      whileHover="hover"
-      className="flex flex-1 w-full h-full min-h-[6rem] dark:bg-dot-white/[0.2] bg-dot-black/[0.2] flex-row space-x-2"
-    >
-      <motion.div
-        variants={first}
-        className="h-full w-1/3 rounded-2xl bg-white p-4 dark:bg-black dark:border-white/[0.1] border border-neutral-200 flex flex-col items-center justify-center"
-      >
-        <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-950 flex items-center justify-center text-lg">
-          🤒
-        </div>
-        <p className="sm:text-sm text-xs text-center font-semibold text-neutral-500 mt-4">
-          "I have a fever and sore throat"
-        </p>
-        <p className="border border-yellow-500 bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 text-xs rounded-full px-2 py-0.5 mt-4">
-          Moderate Priority
-        </p>
-      </motion.div>
-      <motion.div className="h-full relative z-20 w-1/3 rounded-2xl bg-white p-4 dark:bg-black dark:border-white/[0.1] border border-neutral-200 flex flex-col items-center justify-center">
-        <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-lg">
-          🎙️
-        </div>
-        <p className="sm:text-sm text-xs text-center font-semibold text-neutral-500 mt-4">
-          AI Voice Triage Active
-        </p>
-        <p className="border border-green-500 bg-green-100 dark:bg-green-900/20 text-green-600 text-xs rounded-full px-2 py-0.5 mt-4">
-          Routing to Doctor
-        </p>
-      </motion.div>
-      <motion.div
-        variants={second}
-        className="h-full w-1/3 rounded-2xl bg-white p-4 dark:bg-black dark:border-white/[0.1] border border-neutral-200 flex flex-col items-center justify-center"
-      >
-        <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center text-lg">
-          🚨
-        </div>
-        <p className="sm:text-sm text-xs text-center font-semibold text-neutral-500 mt-4">
-          "Chest pain & shortness of breath"
-        </p>
-        <p className="border border-red-500 bg-red-100 dark:bg-red-900/20 text-red-600 text-xs rounded-full px-2 py-0.5 mt-4">
-          Emergency ER
-        </p>
-      </motion.div>
-    </motion.div>
-  );
-};
-const SkeletonFive = () => {
-  const variants = {
-    initial: {
-      x: 0,
-    },
-    animate: {
-      x: 10,
-      rotate: 5,
-      transition: {
-        duration: 0.2,
-      },
-    },
-  };
-  const variantsSecond = {
-    initial: {
-      x: 0,
-    },
-    animate: {
-      x: -10,
-      rotate: -5,
-      transition: {
-        duration: 0.2,
-      },
-    },
-  };
-
-  return (
-    <motion.div
-      initial="initial"
-      whileHover="animate"
-      className="flex flex-1 w-full h-full min-h-[6rem] dark:bg-dot-white/[0.2] bg-dot-black/[0.2] flex-col space-y-2"
-    >
-      <motion.div
-        variants={variants}
-        className="flex flex-row rounded-2xl border border-neutral-100 dark:border-white/[0.2] p-2  items-start space-x-2 bg-white dark:bg-black"
-      >
-        <div className="h-8 w-8 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-xs font-bold">
-          AI
-        </div>
-        <p className="text-xs text-neutral-500">
-          "Hello! I can schedule your follow-up appointment with Dr. Smith for Thursday at 10 AM."
-        </p>
-      </motion.div>
-      <motion.div
-        variants={variantsSecond}
-        className="flex flex-row rounded-full border border-neutral-100 dark:border-white/[0.2] p-2 items-center justify-end space-x-2 w-3/4 ml-auto bg-white dark:bg-black"
-      >
-        <p className="text-xs text-neutral-500">Confirmed! Add to my calendar.</p>
-        <div className="h-6 w-6 rounded-full bg-gradient-to-r from-teal-500 to-blue-500 shrink-0" />
-      </motion.div>
-    </motion.div>
-  );
-};
-const items = [
-  {
-    title: "Instant Voice Triage",
-    description: (
-      <span className="text-sm">
-        Assess patient symptoms in real-time using natural speech recognition.
-      </span>
-    ),
-    header: <SkeletonOne />,
-    className: "md:col-span-1",
-    icon: <IconClipboardCopy className="h-4 w-4 text-neutral-500" />,
-  },
-  {
-    title: "HIPAA Compliant Security",
-    description: (
-      <span className="text-sm">
-        Bank-grade encryption protecting patient data and medical records.
-      </span>
-    ),
-    header: <SkeletonTwo />,
-    className: "md:col-span-1",
-    icon: <IconFileBroken className="h-4 w-4 text-neutral-500" />,
-  },
-  {
-    title: "Multi-Lingual Support",
-    description: (
-      <span className="text-sm">
-        Communicate effortlessly with patients in over 30+ spoken languages.
-      </span>
-    ),
-    header: <SkeletonThree />,
-    className: "md:col-span-1",
-    icon: <IconSignature className="h-4 w-4 text-neutral-500" />,
-  },
-  {
-    title: "Smart Symptom Evaluation",
-    description: (
-      <span className="text-sm">
-        Categorize medical urgency and escalate critical cases directly to ER services.
-      </span>
-    ),
-    header: <SkeletonFour />,
-    className: "md:col-span-2",
-    icon: <IconTableColumn className="h-4 w-4 text-neutral-500" />,
-  },
-
-  {
-    title: "Automated Scheduling",
-    description: (
-      <span className="text-sm">
-        Seamlessly book and manage clinic appointments with zero wait times.
-      </span>
-    ),
-    header: <SkeletonFive />,
-    className: "md:col-span-1",
-    icon: <IconBoxAlignRightFilled className="h-4 w-4 text-neutral-500" />,
-  },
-];
