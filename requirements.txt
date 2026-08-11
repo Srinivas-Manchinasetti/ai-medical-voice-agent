@@ -14,9 +14,11 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
 websockets>=12.0
+python-multipart>=0.0.9
 
 # AI Models, LLM Integrations & Voice Speech-to-Text / Text-to-Speech
 openai>=1.14.0
+groq>=0.9.0
 anthropic>=0.18.0
 langchain>=0.1.12
 openai-whisper>=20231117
@@ -38,6 +40,6 @@ requests>=2.31.0
 httpx>=0.27.0
 aiohttp>=3.9.3
 
-# Optional Machine Learning Utilities
+# Machine Learning Utilities
 torch>=2.2.1; platform_system != "Windows" or platform_machine == "AMD64"
 torchaudio>=2.2.1; platform_system != "Windows" or platform_machine == "AMD64"
