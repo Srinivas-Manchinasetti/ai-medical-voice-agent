@@ -29,7 +29,7 @@ export function Navbar() {
             <Activity className="h-5 w-5 text-teal-400" />
           </div>
           <span className="text-xl font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
-            MediVoice
+            MedVoice
             <span className="font-mono text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
               AI
             </span>

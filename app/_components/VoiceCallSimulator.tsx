@@ -1,105 +1,46 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { Mic, PhoneCall, Volume2, CheckCircle2, HeartPulse, Send, Sparkles, Activity } from "lucide-react";
+import {
+  Mic,
+  Send,
+  Sparkles,
+  Activity,
+  HeartPulse,
+  CheckCircle2,
+  FileText,
+  AlertTriangle,
+  BrainCircuit,
+  Zap,
+  Terminal
+} from "lucide-react";
 
-interface Scenario {
-  id: string;
-  title: string;
-  patientIntro: string;
-  transcriptText: string;
-  dialogue: {
-    speaker: "Patient" | "MediVoice";
-    text: string;
-  }[];
-  summary: {
-    symptoms: string[];
-    action: string;
-    soap: string;
-    urgency: "Emergency ER" | "Priority Care" | "Routine Refill";
-  };
+interface TriageResult {
+  triage_level: "emergency" | "priority" | "routine";
+  detected_symptoms: string[];
+  recommended_action: string;
+  soap_summary: string;
 }
 
-const PRESET_SCENARIOS: Scenario[] = [
-  {
-    id: "chest-pain",
-    title: "🚨 Urgent Chest Pain",
-    patientIntro: "Patient calling with severe chest pressure & dyspnea.",
-    transcriptText: "Hello, I'm feeling a heavy crushing pressure in the center of my chest that radiates to my left arm. I'm sweating heavily and feeling short of breath.",
-    dialogue: [
-      {
-        speaker: "Patient",
-        text: "Hello, I'm feeling a heavy crushing pressure in the center of my chest that radiates to my left arm. I'm sweating heavily and feeling short of breath.",
-      },
-      {
-        speaker: "MediVoice",
-        text: "I understand you are experiencing severe chest pressure. Based on your symptoms, this requires immediate emergency evaluation. I am immediately alerting 911 and patching you to our on-call ER triage nurse.",
-      },
-    ],
-    summary: {
-      symptoms: ["Substernal Chest Pain", "Left Arm Radiation", "Diaphoresis", "Dyspnea"],
-      action: "Direct ER Transfer & Alert On-Call Cardiology",
-      soap: "S: 58yo male presents with acute onset crushing chest pain. P: Activate EMS immediately.",
-      urgency: "Emergency ER",
-    },
-  },
-  {
-    id: "pediatric-fever",
-    title: "🤒 Pediatric Fever",
-    patientIntro: "Parent calling regarding 4-year-old child's fever.",
-    transcriptText: "My 4-year-old son Leo has a fever of 102.4°F. He's lethargic and coughing, but he is drinking water.",
-    dialogue: [
-      {
-        speaker: "Patient",
-        text: "My 4-year-old son Leo has a fever of 102.4°F. He's lethargic and coughing, but he is drinking water.",
-      },
-      {
-        speaker: "MediVoice",
-        text: "Since Leo is responsive and drinking fluids, I can schedule an urgent same-day appointment with Dr. Vance today at 2:30 PM.",
-      },
-    ],
-    summary: {
-      symptoms: ["Pediatric Pyrexia (102.4°F)", "Lethargy", "Acute Cough"],
-      action: "Book Same-Day Urgent Telehealth Visit",
-      soap: "S: 4yo male with 102.4F fever. P: Scheduled same-day pediatric telehealth appointment.",
-      urgency: "Priority Care",
-    },
-  },
-  {
-    id: "post-op-refill",
-    label: "💊 Post-Op Rx Refill",
-    title: "💊 Post-Op Refill",
-    patientIntro: "Patient requesting routine medication refill.",
-    transcriptText: "Hi, I had wisdom tooth surgery 3 days ago and need a refill on my prescribed pain medication.",
-    dialogue: [
-      {
-        speaker: "Patient",
-        text: "Hi, I had wisdom tooth surgery 3 days ago and need a refill on my prescribed pain medication.",
-      },
-      {
-        speaker: "MediVoice",
-        text: "I see your recent procedure. I've verified your allergy profile—no active contraindications found. I'm submitting the refill request now.",
-      },
-    ],
-    summary: {
-      symptoms: ["Post-surgical Dental Pain", "Routine Refill Request"],
-      action: "Automated e-Prescribing Queue & Pharmacy Routing",
-      soap: "S: 34yo post-op dental patient requesting routine Rx refill. P: Digital Rx sent to designated pharmacy.",
-      urgency: "Routine Refill",
-    },
-  },
+const SAMPLE_PROMPTS = [
+  "58yo male with severe crushing chest pain radiating to left arm and cold sweats",
+  "4yo child with 102.8°F fever, lethargy, coughing, drinking fluids",
+  "34yo post-op dental patient requesting routine pain medication refill",
+  "22yo athlete with sudden right lower quadrant abdominal pain and nausea",
 ];
 
 export function VoiceCallSimulator() {
-  const [activeId, setActiveId] = useState<string>("chest-pain");
-  const [customInput, setCustomInput] = useState<string>("");
+  const [customInput, setCustomInput] = useState<string>(SAMPLE_PROMPTS[0]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [liveTriage, setLiveTriage] = useState<any>(null);
+  const [liveTriage, setLiveTriage] = useState<TriageResult | null>({
+    triage_level: "emergency",
+    detected_symptoms: ["Substernal Chest Pain", "Left Arm Radiation", "Diaphoresis", "Dyspnea"],
+    recommended_action: "Direct 911 EMS Dispatch & Warm Transfer to ER Nurse Triage",
+    soap_summary: "S: 58yo M presenting with acute onset crushing chest pressure (9/10), diaphoresis & radiation. P: Trigger emergency cardiology pathway.",
+  });
 
-  const scenario = PRESET_SCENARIOS.find((s) => s.id === activeId) || PRESET_SCENARIOS[0];
-
-  const handleRunTriage = async (textToTriage: str) => {
+  const handleRunTriage = async (textToTriage: string) => {
     setIsProcessing(true);
     try {
       const res = await fetch("/api/triage", {
@@ -108,7 +49,7 @@ export function VoiceCallSimulator() {
         body: JSON.stringify({
           transcript: textToTriage,
           patient_id: "P-1002",
-          patient_name: "Robert Miller",
+          patient_name: "Live Test Patient",
         }),
       });
 
@@ -125,177 +66,153 @@ export function VoiceCallSimulator() {
     }
   };
 
-  const handleSelectScenario = (id: string) => {
-    setActiveId(id);
-    setLiveTriage(null);
-    const selected = PRESET_SCENARIOS.find((s) => s.id === id);
-    if (selected) {
-      handleRunTriage(selected.transcriptText);
-    }
+  const handlePromptClick = (promptText: string) => {
+    setCustomInput(promptText);
+    handleRunTriage(promptText);
   };
 
-  const handleCustomSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customInput.trim()) return;
     handleRunTriage(customInput);
   };
 
-  const displayUrgency = liveTriage
-    ? liveTriage.triage_level === "emergency"
-      ? "Emergency ER"
-      : liveTriage.triage_level === "priority"
-      ? "Priority Care"
-      : "Routine Refill"
-    : scenario.summary.urgency;
-
-  const displaySymptoms = liveTriage?.detected_symptoms || scenario.summary.symptoms;
-  const displayAction = liveTriage?.recommended_action || scenario.summary.action;
-  const displaySoap = liveTriage?.soap_summary || scenario.summary.soap;
+  const getUrgencyBadge = (level: string) => {
+    if (level === "emergency") {
+      return "bg-rose-50 text-rose-700 border-rose-200 font-bold animate-pulse";
+    }
+    if (level === "priority") {
+      return "bg-amber-50 text-amber-700 border-amber-200 font-semibold";
+    }
+    return "bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold";
+  };
 
   return (
-    <div id="playground" className="w-full py-6">
+    <section id="playground" className="w-full py-16 bg-white border-y border-slate-200/80">
       <div className="mx-auto max-w-5xl px-4">
-        {/* Scenario Selection Buttons */}
-        <div className="flex flex-wrap items-center justify-center gap-2 mb-6">
-          <span className="text-xs font-semibold text-slate-500 mr-2">Try a scenario:</span>
-          {PRESET_SCENARIOS.map((s) => (
+        {/* SECTION HEADER */}
+        <div className="text-center max-w-2xl mx-auto mb-10">
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200/80 px-3.5 py-1 text-xs font-semibold text-blue-700 mb-3">
+            <Terminal className="w-3.5 h-3.5 text-blue-600" />
+            <span>Interactive API Playground</span>
+          </div>
+          <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+            Test Live Voice Triage & NLP Mining
+          </h2>
+          <p className="mt-2 text-base text-slate-500 font-normal">
+            Type any custom patient complaint below to execute MedVoice AI's live FastAPI speech recognition, symptom mining, and SOAP note generation engine.
+          </p>
+        </div>
+
+        {/* QUICK SAMPLE PROMPT CHIPS */}
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-6 max-w-4xl mx-auto">
+          <span className="text-xs font-semibold text-slate-500 mr-1">Quick Prompts:</span>
+          {SAMPLE_PROMPTS.map((prompt, idx) => (
             <button
-              key={s.id}
-              onClick={() => handleSelectScenario(s.id)}
-              className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer ${
-                activeId === s.id && !customInput
-                  ? "bg-black text-white shadow-md scale-105"
-                  : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
-              }`}
+              key={idx}
+              onClick={() => handlePromptClick(prompt)}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80 transition-all cursor-pointer truncate max-w-xs"
             >
-              {s.title}
+              {prompt.slice(0, 42)}...
             </button>
           ))}
         </div>
 
-        {/* Custom Complaint Input Form */}
-        <form onSubmit={handleCustomSubmit} className="mb-6 flex gap-2 max-w-2xl mx-auto">
+        {/* CUSTOM INPUT FORM */}
+        <form onSubmit={handleSubmit} className="mb-8 max-w-3xl mx-auto flex flex-col sm:flex-row gap-3">
           <input
             type="text"
             value={customInput}
             onChange={(e) => setCustomInput(e.target.value)}
-            placeholder="Or type a custom patient complaint (e.g. Sharp pain in lower right abdomen...)"
-            className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 shadow-sm"
+            placeholder="Type any patient symptom complaint..."
+            className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 shadow-2xs font-sans"
           />
           <button
             type="submit"
             disabled={isProcessing}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition-all cursor-pointer disabled:opacity-50"
           >
             {isProcessing ? (
               <span>Analyzing...</span>
             ) : (
               <>
-                <Send className="h-3.5 w-3.5" />
-                <span>Test Live API</span>
+                <Zap className="w-4 h-4 text-emerald-400" />
+                <span>Run Live API Triage</span>
               </>
             )}
           </button>
         </form>
 
-        {/* Main Preview Container */}
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
-          {/* Header Bar */}
-          <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-4 mb-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 font-bold">
-                <HeartPulse className="h-5 w-5" />
+        {/* LIVE TRIAGE API OUTPUT SHOWCASE CARD */}
+        {liveTriage && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-slate-200 bg-slate-50/70 p-6 shadow-xl max-w-4xl mx-auto"
+          >
+            {/* Header Status Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-4 mb-6">
+              <div className="flex items-center gap-2.5">
+                <BrainCircuit className="w-5 h-5 text-blue-600" />
+                <span className="font-bold text-sm text-slate-900">
+                  FastAPI Triage Model Output
+                </span>
+                <span className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  STATUS 200 OK
+                </span>
               </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">Triage Level:</span>
+                <span className={`px-3 py-1 text-xs font-mono font-bold rounded-full border ${getUrgencyBadge(liveTriage.triage_level)}`}>
+                  {liveTriage.triage_level.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            {/* Results Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Left Column: Symptoms & Action */}
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
+                    Extracted Symptoms (ICD-10 NLP)
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {liveTriage.detected_symptoms.map((symptom, i) => (
+                      <span
+                        key={i}
+                        className="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-800 text-xs font-semibold shadow-2xs"
+                      >
+                        {symptom}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono block mb-1">
+                    Recommended Triage Action
+                  </label>
+                  <p className="text-xs font-semibold text-slate-900 bg-white p-3 rounded-xl border border-slate-200 leading-relaxed">
+                    {liveTriage.recommended_action}
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Column: SOAP Note Summary */}
               <div>
-                <h3 className="text-base font-bold text-slate-800">{scenario.patientName}</h3>
-                <p className="text-xs text-slate-500">
-                  {customInput ? `Custom Input: "${customInput}"` : scenario.chiefComplaint}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 mt-3 sm:mt-0">
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-bold ${
-                  displayUrgency === "Emergency ER"
-                    ? "bg-red-100 text-red-700 border border-red-200"
-                    : displayUrgency === "Priority Care"
-                    ? "bg-amber-100 text-amber-700 border border-amber-200"
-                    : "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                }`}
-              >
-                {displayUrgency}
-              </span>
-            </div>
-          </div>
-
-          {/* Dialogue & Summary Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-            {/* Dialogue Stream (7 cols) */}
-            <div className="md:col-span-7 space-y-4 border-b md:border-b-0 md:border-r border-slate-200 pb-6 md:pb-0 md:pr-6">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Live Patient Speech Stream
-                </span>
-                <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                  ● FASTAPI BACKEND CONNECTED
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <span className="text-[11px] font-semibold text-slate-500">Patient Speech</span>
-                  <div className="rounded-2xl bg-slate-100 text-slate-800 border border-slate-200 p-4 text-xs sm:text-sm leading-relaxed">
-                    {customInput || scenario.transcriptText}
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-[11px] font-semibold text-slate-500">Dr. Maya (AI Voice Assistant)</span>
-                  <div className="rounded-2xl bg-slate-900 text-white p-4 text-xs sm:text-sm leading-relaxed">
-                    {displayUrgency === "Emergency ER"
-                      ? "I understand you are experiencing severe emergency symptoms. Based on your statement, I am immediately routing you to 911 and our on-call ER nurse."
-                      : displayUrgency === "Priority Care"
-                      ? "Thank you for calling. I've flagged your symptoms for same-day priority clinical evaluation."
-                      : "I can help with that request right away. I've logged your information and routed it to your care team."}
-                  </div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
+                  Generated SOAP Chart Note
+                </label>
+                <div className="bg-white p-3.5 rounded-xl border border-slate-200 font-mono text-xs text-slate-800 leading-relaxed shadow-2xs">
+                  {liveTriage.soap_summary}
                 </div>
               </div>
             </div>
-
-            {/* Structured Triage Output (5 cols) */}
-            <div className="md:col-span-5 space-y-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                FastAPI Triage Output
-              </span>
-
-              <div className="space-y-3">
-                <span className="text-xs font-semibold text-slate-600 block">Extracted Symptoms:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {displaySymptoms.map((sym: string, i: number) => (
-                    <span
-                      key={i}
-                      className="rounded-md bg-blue-50 border border-blue-200 px-2.5 py-1 text-xs font-semibold text-blue-700"
-                    >
-                      {sym}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-slate-50 p-3.5 border border-slate-200 text-xs space-y-1">
-                <span className="font-bold text-slate-700 block">Recommended Action:</span>
-                <p className="text-slate-600">{displayAction}</p>
-              </div>
-
-              <div className="rounded-xl bg-slate-50 p-3.5 border border-slate-200 font-mono text-xs text-slate-600 space-y-1">
-                <span className="font-bold text-slate-700 block font-sans">SOAP Note Output:</span>
-                <p>{displaySoap}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+          </motion.div>
+        )}
       </div>
-    </div>
+    </section>
   );
 }

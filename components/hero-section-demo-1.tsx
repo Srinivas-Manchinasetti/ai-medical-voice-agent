@@ -3,6 +3,8 @@
 
 import { motion } from "motion/react";
 
+import { MedicalHeroDashboardPreview } from "@/app/_components/MedicalHeroDashboardPreview";
+
 export default function HeroSectionOne() {
   return (
     <div className="relative mx-auto my-10 flex max-w-7xl flex-col items-center justify-center">
@@ -18,7 +20,7 @@ export default function HeroSectionOne() {
       </div>
       <div className="px-4 py-10 md:py-20">
         <h1 className="relative z-10 mx-auto max-w-4xl text-center text-2xl font-bold text-slate-700 md:text-4xl lg:text-7xl dark:text-slate-300">
-          {"Launch your website in hours, not days"
+          {"🩺 Revolutionize Patient Care with AI Voice Agents"
             .split(" ")
             .map((word, index) => (
               <motion.span
@@ -49,9 +51,8 @@ export default function HeroSectionOne() {
           }}
           className="relative z-10 mx-auto max-w-xl py-4 text-center text-lg font-normal text-neutral-600 dark:text-neutral-400"
         >
-          With AI, you can launch your website in hours, not days. Try our best
-          in class, state of the art, cutting edge AI tools to get your website
-          up.
+          Deliver instant, accurate medical assistance through natural voice conversations.
+          Automate appointment scheduling, symptom triage, and follow-up care—24/7.
         </motion.p>
         <motion.div
           initial={{
@@ -86,16 +87,10 @@ export default function HeroSectionOne() {
             duration: 0.3,
             delay: 1.2,
           }}
-          className="relative z-10 mt-20 rounded-3xl border border-neutral-200 bg-neutral-100 p-4 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
+          className="relative z-10 mt-12 text-left rounded-3xl border border-slate-200/90 bg-slate-50/80 p-2 md:p-3 shadow-xl"
         >
-          <div className="w-full overflow-hidden rounded-xl border border-gray-300 dark:border-gray-700">
-            <img
-              src="https://assets.aceternity.com/pro/aceternity-landing.webp"
-              alt="Landing page preview"
-              className="aspect-[16/9] h-auto w-full object-cover"
-              height={1000}
-              width={1000}
-            />
+          <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <MedicalHeroDashboardPreview />
           </div>
         </motion.div>
       </div>
