@@ -4,6 +4,7 @@ import React from "react";
 import { Navbar } from "./_components/Navbar";
 import { LivingHeroSection } from "./_components/LivingHeroSection";
 import { VoiceCallSimulator } from "./_components/VoiceCallSimulator";
+import { EmergencyHospitalLocator } from "./_components/EmergencyHospitalLocator";
 import { FeatureBentoGrid } from "./_components/FeatureBentoGrid";
 import { WorkflowSection } from "./_components/WorkflowSection";
 import { SecuritySection } from "./_components/SecuritySection";
@@ -21,6 +22,11 @@ export default function HomePage() {
         {/* INTERACTIVE VOICE CALL SIMULATOR PLAYGROUND */}
         <div id="demo" className="relative z-10 py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
           <VoiceCallSimulator />
+        </div>
+
+        {/* EMERGENCY GPS HOSPITAL & SPECIALTY LOCATOR */}
+        <div className="relative z-10">
+          <EmergencyHospitalLocator />
         </div>
 
         {/* CLINICAL CAPABILITIES BENTO GRID */}
@@ -43,3 +49,4 @@ export default function HomePage() {
     </div>
   );
 }
+

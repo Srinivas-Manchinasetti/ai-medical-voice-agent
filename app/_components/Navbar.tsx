@@ -40,25 +40,32 @@ export function Navbar() {
         <div className="hidden md:flex items-center gap-2 text-sm font-bold text-slate-600">
           <a
             href="#playground"
-            className="rounded-xl px-5 py-2.5 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
+            className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
             Playground
           </a>
           <a
+            href="#nearest-hospitals"
+            className="rounded-xl px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 font-extrabold transition-all cursor-pointer flex items-center gap-1.5 border border-rose-200/80"
+          >
+            <span>Find Hospital</span>
+            <span className="text-xs">🏥</span>
+          </a>
+          <a
             href="#capabilities"
-            className="rounded-xl px-5 py-2.5 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
+            className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
             Capabilities
           </a>
           <a
             href="#solutions"
-            className="rounded-xl px-5 py-2.5 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
+            className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
             Solutions
           </a>
           <a
             href="#security"
-            className="rounded-xl px-5 py-2.5 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
+            className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
             Security
           </a>
