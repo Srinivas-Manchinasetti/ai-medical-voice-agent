@@ -16,27 +16,27 @@ export default function HomePage() {
       <div>
         <Navbar />
 
-        {/* LIVING PRODUCT DEMO HERO SECTION */}
+        {/* HERO PRODUCT VISUALIZATION */}
         <LivingHeroSection />
 
-        {/* INTERACTIVE VOICE CALL SIMULATOR PLAYGROUND */}
-        <div id="demo" className="relative z-10 py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        {/* LISTEN -> UNDERSTAND -> ACT EDITORIAL STORYTELLING */}
+        <div className="relative z-10">
+          <WorkflowSection />
+        </div>
+
+        {/* VOICE-FIRST INTERACTIVE DEMO */}
+        <div id="demo" className="relative z-10">
           <VoiceCallSimulator />
         </div>
 
-        {/* EMERGENCY GPS HOSPITAL & SPECIALTY LOCATOR */}
-        <div className="relative z-10">
+        {/* FULL INTERACTIVE GPS HOSPITAL DIRECTORY */}
+        <div id="nearest-hospitals" className="relative z-10">
           <EmergencyHospitalLocator />
         </div>
 
         {/* CLINICAL CAPABILITIES BENTO GRID */}
         <div id="capabilities" className="relative z-10">
           <FeatureBentoGrid />
-        </div>
-
-        {/* SIMPLE WORKFLOW: CONVERSATION TO CARE */}
-        <div id="workflow" className="relative z-10">
-          <WorkflowSection />
         </div>
 
         {/* SECURITY & HIPAA SAFEGUARDS */}
@@ -49,4 +49,5 @@ export default function HomePage() {
     </div>
   );
 }
+
 

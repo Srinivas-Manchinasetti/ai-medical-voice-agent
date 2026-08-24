@@ -1,27 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Mic,
-  Send,
-  Sparkles,
   Activity,
-  HeartPulse,
-  CheckCircle2,
-  FileText,
-  AlertTriangle,
-  BrainCircuit,
   Zap,
-  Terminal,
-  MapPin,
-  Navigation,
   PhoneCall,
   ExternalLink,
-  Search,
-  Crosshair,
   Building2,
-  Stethoscope
+  ArrowRight,
+  Sparkles,
+  Check,
+  Search,
+  Crosshair
 } from "lucide-react";
 
 interface TriageResult {
@@ -58,23 +50,18 @@ const SAMPLE_PROMPTS = [
 ];
 
 export function VoiceCallSimulator() {
-  const [customInput, setCustomInput] = useState<string>(SAMPLE_PROMPTS[0]);
+  const [customInput, setCustomInput] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [liveTriage, setLiveTriage] = useState<TriageResult | null>({
-    triage_level: "emergency",
-    detected_symptoms: ["Substernal Chest Pain", "Left Arm Radiation", "Diaphoresis", "Dyspnea"],
-    recommended_action: "Direct 911 EMS Dispatch & Warm Transfer to ER Nurse Triage",
-    soap_summary: "S: 58yo M presenting with acute onset crushing chest pressure (9/10), diaphoresis & radiation. P: Trigger emergency cardiology pathway.",
-  });
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [hasInteracted, setHasInteracted] = useState<boolean>(false);
+  const [liveTriage, setLiveTriage] = useState<TriageResult | null>(null);
 
-  // Automatically generated hospitals state inside report
   const [reportHospitals, setReportHospitals] = useState<HospitalItem[]>([]);
   const [hospitalsLoading, setHospitalsLoading] = useState<boolean>(false);
   const [locationSearchInput, setLocationSearchInput] = useState<string>("");
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [detectedCategoryName, setDetectedCategoryName] = useState<string>("Emergency & Cardiac Trauma Centers");
 
-  // Fetch hospital recommendations based on prompt & location
   const fetchReportHospitals = useCallback(
     async (promptText: string, searchLocation?: string, coords?: { lat: number; lng: number } | null) => {
       setHospitalsLoading(true);
@@ -110,7 +97,7 @@ export function VoiceCallSimulator() {
         if (res.ok) {
           const data = await res.json();
           if (data.hospitals) {
-            setReportHospitals(data.hospitals.slice(0, 4)); // Show top 4 closest
+            setReportHospitals(data.hospitals.slice(0, 4));
           }
         }
       } catch (e) {
@@ -122,26 +109,21 @@ export function VoiceCallSimulator() {
     []
   );
 
-  // Auto-fetch GPS on initial load
   useEffect(() => {
     if (typeof window !== "undefined" && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setUserCoords(coords);
-          fetchReportHospitals(SAMPLE_PROMPTS[0], "", coords);
         },
-        () => {
-          fetchReportHospitals(SAMPLE_PROMPTS[0], "", null);
-        }
+        () => {}
       );
-    } else {
-      fetchReportHospitals(SAMPLE_PROMPTS[0], "", null);
     }
-  }, [fetchReportHospitals]);
+  }, []);
 
   const handleRunTriage = async (textToTriage: string) => {
     setIsProcessing(true);
+    setHasInteracted(true);
     try {
       const res = await fetch("/api/triage", {
         method: "POST",
@@ -167,6 +149,40 @@ export function VoiceCallSimulator() {
     }
   };
 
+  const handleLocationSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    fetchReportHospitals(customInput || SAMPLE_PROMPTS[0], locationSearchInput, userCoords);
+  };
+
+  const handleDetectGPSInReport = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserCoords(coords);
+        fetchReportHospitals(customInput || SAMPLE_PROMPTS[0], locationSearchInput, coords);
+      });
+    }
+  };
+
+  const handleMicClick = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (customInput.trim()) {
+        handleRunTriage(customInput);
+      }
+    } else {
+      setIsListening(true);
+      if (!customInput.trim()) {
+        const defaultPrompt = SAMPLE_PROMPTS[0];
+        setCustomInput(defaultPrompt);
+        setTimeout(() => {
+          setIsListening(false);
+          handleRunTriage(defaultPrompt);
+        }, 1800);
+      }
+    }
+  };
+
   const handlePromptClick = (promptText: string) => {
     setCustomInput(promptText);
     handleRunTriage(promptText);
@@ -176,21 +192,6 @@ export function VoiceCallSimulator() {
     e.preventDefault();
     if (!customInput.trim()) return;
     handleRunTriage(customInput);
-  };
-
-  const handleLocationSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    fetchReportHospitals(customInput, locationSearchInput, userCoords);
-  };
-
-  const handleDetectGPSInReport = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setUserCoords(coords);
-        fetchReportHospitals(customInput, locationSearchInput, coords);
-      });
-    }
   };
 
   const getUrgencyBadge = (level: string) => {
@@ -203,264 +204,333 @@ export function VoiceCallSimulator() {
     return "bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold";
   };
 
+  const getReasoningText = (level: string, promptText: string) => {
+    const textLower = promptText.toLowerCase();
+    if (textLower.includes("chest pain") || textLower.includes("heart") || level === "emergency") {
+      return "Recommended because this assessment requires immediate emergency cardiac evaluation.";
+    }
+    if (textLower.includes("cancer") || textLower.includes("oncology")) {
+      return "Recommended because this patient presents with high-risk oncology complications.";
+    }
+    if (textLower.includes("fever") || textLower.includes("child")) {
+      return "Recommended for urgent pediatric evaluation and fever management.";
+    }
+    return "Recommended based on active clinical triage assessment & proximity.";
+  };
+
+  const parseSoap = (soapRaw: string) => {
+    let subjective = "Patient presents with acute symptoms requiring evaluation.";
+    let assessment = "Urgent clinical indicators identified by NLP engine.";
+    let plan = "Direct clinical pathway transfer initiated.";
+
+    if (soapRaw.includes("S:") || soapRaw.includes("P:")) {
+      const parts = soapRaw.split(/(?:S:|O:|A:|P:)/g).filter(Boolean);
+      if (parts.length >= 1) subjective = parts[0].trim();
+      if (parts.length >= 2) assessment = parts[1].trim();
+      if (parts.length >= 3) plan = parts[parts.length - 1].trim();
+    } else {
+      subjective = soapRaw;
+    }
+
+    return { subjective, assessment, plan };
+  };
+
   return (
-    <section id="playground" className="w-full py-16 bg-white border-y border-slate-200/80">
-      <div className="mx-auto max-w-5xl px-4">
-        {/* SECTION HEADER */}
-        <div className="text-center max-w-2xl mx-auto mb-10">
-          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200/80 px-3.5 py-1 text-xs font-semibold text-blue-700 mb-3">
-            <Terminal className="w-3.5 h-3.5 text-blue-600" />
-            <span>Interactive API Playground</span>
-          </div>
-          <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
-            Test Live Voice Triage & NLP Mining
+    <section id="playground" className="w-full py-8 md:py-12 bg-[#FAF9F6] border-b border-slate-200/80">
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 space-y-6">
+        <div className="text-center max-w-xl mx-auto space-y-2">
+          <span className="text-xs font-mono font-semibold uppercase tracking-wider text-cyan-700">
+            TRY MEDVOICE
+          </span>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-950">
+            Tell MedVoice what's happening.
           </h2>
-          <p className="mt-2 text-base text-slate-500 font-normal">
-            Type any custom patient complaint below to execute MedVoice AI's live FastAPI speech recognition, symptom mining, and SOAP note generation engine.
+          <p className="text-xs sm:text-sm font-normal text-slate-600">
+            Hold to speak or type patient complaint below to trigger live clinical triage.
           </p>
         </div>
 
-        {/* QUICK SAMPLE PROMPT CHIPS */}
-        <div className="flex flex-wrap items-center justify-center gap-2 mb-6 max-w-4xl mx-auto">
-          <span className="text-xs font-semibold text-slate-500 mr-1">Quick Prompts:</span>
-          {SAMPLE_PROMPTS.map((prompt, idx) => (
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-7 shadow-sm space-y-5 text-center">
+          <div className="flex flex-col items-center justify-center pt-2 pb-1 space-y-2">
             <button
-              key={idx}
-              onClick={() => handlePromptClick(prompt)}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80 transition-all cursor-pointer truncate max-w-xs"
+              type="button"
+              onClick={handleMicClick}
+              className={`relative w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer ${
+                isListening
+                  ? "bg-rose-600 text-white ring-8 ring-rose-500/20 scale-110 shadow-lg"
+                  : "bg-cyan-600 hover:bg-cyan-500 text-white shadow-md hover:scale-105 hover:shadow-cyan-500/25"
+              }`}
+              title={isListening ? "Click to stop listening" : "Click to start voice input"}
             >
-              {prompt.slice(0, 42)}...
-            </button>
-          ))}
-        </div>
-
-        {/* CUSTOM INPUT FORM */}
-        <form onSubmit={handleSubmit} className="mb-8 max-w-3xl mx-auto flex flex-col sm:flex-row gap-3">
-          <input
-            type="text"
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            placeholder="Type any patient symptom complaint (e.g. Cancer emergency, Chest pain)..."
-            className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 shadow-2xs font-sans"
-          />
-          <button
-            type="submit"
-            disabled={isProcessing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition-all cursor-pointer disabled:opacity-50"
-          >
-            {isProcessing ? (
-              <span>Analyzing...</span>
-            ) : (
-              <>
-                <Zap className="w-4 h-4 text-emerald-400" />
-                <span>Run Live API Triage</span>
-              </>
-            )}
-          </button>
-        </form>
-
-        {/* LIVE TRIAGE API OUTPUT SHOWCASE CARD */}
-        {liveTriage && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-slate-200 bg-slate-50/70 p-6 shadow-xl max-w-4xl mx-auto space-y-6"
-          >
-            {/* Header Status Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
-              <div className="flex items-center gap-2.5">
-                <BrainCircuit className="w-5 h-5 text-blue-600" />
-                <span className="font-bold text-sm text-slate-900">
-                  FastAPI Triage Model Output
-                </span>
-                <span className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  STATUS 200 OK
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-medium">Triage Level:</span>
-                <span className={`px-3 py-1 text-xs font-mono font-bold rounded-full border ${getUrgencyBadge(liveTriage.triage_level)}`}>
-                  {liveTriage.triage_level.toUpperCase()}
-                </span>
-              </div>
-            </div>
-
-            {/* Results Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left Column: Symptoms & Action */}
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
-                    Extracted Symptoms (ICD-10 NLP)
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {liveTriage.detected_symptoms.map((symptom, i) => (
-                      <span
-                        key={i}
-                        className="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-800 text-xs font-semibold shadow-2xs"
-                      >
-                        {symptom}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono block mb-1">
-                    Recommended Triage Action
-                  </label>
-                  <p className="text-xs font-semibold text-slate-900 bg-white p-3 rounded-xl border border-slate-200 leading-relaxed">
-                    {liveTriage.recommended_action}
-                  </p>
-                </div>
-              </div>
-
-              {/* Right Column: SOAP Note Summary */}
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
-                  Generated SOAP Chart Note
-                </label>
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 font-mono text-xs text-slate-800 leading-relaxed shadow-2xs">
-                  {liveTriage.soap_summary}
-                </div>
-              </div>
-            </div>
-
-            {/* AUTOMATICALLY GENERATED NEAREST HOSPITALS FOR THIS REPORT */}
-            <div className="pt-6 border-t border-slate-200/90">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-rose-600" />
-                    <h3 className="text-sm font-bold text-slate-900">
-                      Nearest Hospitals for {detectedCategoryName}
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Calculated automatically based on patient condition & location
-                  </p>
-                </div>
-
-                {/* Report Inline Location Search */}
-                <form onSubmit={handleLocationSearchSubmit} className="flex items-center gap-1.5 w-full sm:w-auto">
-                  <div className="relative flex-1 sm:w-48">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                    <input
-                      type="text"
-                      value={locationSearchInput}
-                      onChange={(e) => setLocationSearchInput(e.target.value)}
-                      placeholder="City/Pincode..."
-                      className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer shrink-0"
-                  >
-                    Set City
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDetectGPSInReport}
-                    title="Use GPS"
-                    className="p-1.5 rounded-lg bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 cursor-pointer"
-                  >
-                    <Crosshair className="w-3.5 h-3.5 text-emerald-600" />
-                  </button>
-                </form>
-              </div>
-
-              {/* Nearest Hospitals List Inside Report */}
-              {hospitalsLoading ? (
-                <div className="py-6 text-center text-xs text-slate-500 font-medium">
-                  Locating nearest hospitals for this report...
-                </div>
-              ) : reportHospitals.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-500 bg-white rounded-xl border border-slate-200">
-                  No matching hospital records found for this location. Try setting city to "Hyderabad", "Mumbai", or "Delhi".
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {reportHospitals.map((hosp) => (
-                    <div
-                      key={hosp.id}
-                      className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:border-cyan-400 transition-all flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-1 mb-1.5">
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                            <Navigation className="w-2.5 h-2.5" />
-                            <span>{hosp.distanceKm} km away</span>
-                          </span>
-
-                          <span className="text-[10px] font-bold text-slate-500 truncate max-w-[120px]">
-                            {hosp.city}, {hosp.state}
-                          </span>
-                        </div>
-
-                        <h4 className="text-xs font-bold text-slate-900 leading-snug line-clamp-1">
-                          {hosp.name}
-                        </h4>
-                        <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
-                          {hosp.address}
-                        </p>
-
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {hosp.specialty.slice(0, 2).map((s, idx) => (
-                            <span
-                              key={idx}
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
-                                s.toLowerCase().includes("cancer") || s.toLowerCase().includes("oncology")
-                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                  : "bg-slate-100 text-slate-700 border border-slate-200"
-                              }`}
-                            >
-                              {s}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-3 mt-2 border-t border-slate-100">
-                        <a
-                          href={`tel:${hosp.emergencyPhone || hosp.phone}`}
-                          className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer"
-                        >
-                          <PhoneCall className="w-3 h-3" />
-                          <span>Call ER</span>
-                        </a>
-
-                        <a
-                          href={hosp.googleMapsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] cursor-pointer"
-                        >
-                          <ExternalLink className="w-3 h-3 text-slate-400" />
-                          <span>Navigate</span>
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <Mic className={`w-7 h-7 ${isListening ? "animate-bounce" : ""}`} />
+              {isListening && (
+                <span className="absolute -inset-1 rounded-full border-2 border-rose-400 animate-ping opacity-75" />
               )}
+            </button>
+            <span className="text-[11px] font-mono font-medium text-slate-500">
+              {isListening ? "● Listening to voice input..." : "Click microphone or hold to speak"}
+            </span>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="relative">
+              <textarea
+                rows={2}
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                placeholder="Describe what is happening (e.g. 58yo male with severe crushing chest pain, 103°F fever)..."
+                className="w-full rounded-xl border border-slate-300/90 bg-slate-50/50 p-3.5 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-950 font-sans resize-none shadow-2xs"
+              />
             </div>
 
-            {/* View Full Interactive Locator Button */}
-            <div className="pt-2 text-center">
-              <a
-                href="#nearest-hospitals"
-                className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 hover:text-slate-950 underline decoration-slate-300 underline-offset-4"
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-1.5 text-left">
+                <span className="text-xs font-mono font-medium text-slate-400 mr-1">Scenarios:</span>
+                {SAMPLE_PROMPTS.map((prompt, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handlePromptClick(prompt)}
+                    className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80 transition-all cursor-pointer"
+                  >
+                    {idx === 0 ? "Pediatric Fever" : idx === 1 ? "Oncology ER" : idx === 2 ? "Chest Pain" : "Abdominal Pain"}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-950 hover:bg-slate-800 text-white px-5 py-2.5 text-xs font-semibold shadow-md transition-all cursor-pointer disabled:opacity-40 shrink-0"
               >
-                <span>View Full Interactive GPS Hospital Directory & Filters →</span>
-              </a>
+                {isProcessing ? (
+                  <span>◌ Analyzing patient complaint...</span>
+                ) : hasInteracted ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>✓ Analysis complete</span>
+                  </>
+                ) : customInput.trim() ? (
+                  <>
+                    <span>→ Analyze complaint</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>Start voice session</span>
+                  </>
+                )}
+              </button>
             </div>
-          </motion.div>
-        )}
+          </form>
+
+          <AnimatePresence>
+            {hasInteracted && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="pt-5 border-t border-slate-200/80 space-y-5 text-left"
+              >
+                {isProcessing ? (
+                  <div className="py-6 text-center space-y-2">
+                    <div className="inline-flex items-center gap-2 text-xs font-mono text-cyan-700 animate-pulse">
+                      <Activity className="w-4 h-4" />
+                      <span>MedVoice is analyzing patient symptoms & clinical pathways...</span>
+                    </div>
+                  </div>
+                ) : liveTriage ? (
+                  <div className="space-y-5">
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.12 }}
+                      className="space-y-2"
+                    >
+                      <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                        Clinical Findings (ICD-10 NLP)
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {liveTriage.detected_symptoms.map((symptom, i) => (
+                          <span
+                            key={i}
+                            className="px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-800 text-xs font-medium"
+                          >
+                            {symptom}
+                          </span>
+                        ))}
+                      </div>
+                    </motion.div>
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.24 }}
+                      className="space-y-2 pt-2 border-t border-slate-100"
+                    >
+                      <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                        Triage Assessment
+                      </span>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className={`px-3 py-1 text-xs font-mono font-bold rounded-full border ${getUrgencyBadge(liveTriage.triage_level)}`}>
+                          {liveTriage.triage_level.toUpperCase()}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-800">
+                          {liveTriage.recommended_action}
+                        </span>
+                      </div>
+                    </motion.div>
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.36 }}
+                      className="space-y-2 pt-2 border-t border-slate-100"
+                    >
+                      <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                        Clinical Note Document
+                      </span>
+                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2.5 font-sans text-xs">
+                        {(() => {
+                          const soap = parseSoap(liveTriage.soap_summary);
+                          return (
+                            <>
+                              <div>
+                                <span className="font-bold text-slate-900 block mb-0.5">Subjective Intake:</span>
+                                <p className="text-slate-600 leading-relaxed">{soap.subjective}</p>
+                              </div>
+                              <div>
+                                <span className="font-bold text-slate-900 block mb-0.5">Clinical Assessment:</span>
+                                <p className="text-slate-600 leading-relaxed">{soap.assessment}</p>
+                              </div>
+                              <div>
+                                <span className="font-bold text-slate-900 block mb-0.5">Care Plan & Dispatch:</span>
+                                <p className="text-slate-600 leading-relaxed">{soap.plan}</p>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </motion.div>
+
+                    {reportHospitals.length > 0 && reportHospitals[0] && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.48 }}
+                        className="space-y-3 pt-2 border-t border-slate-100"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                            Recommended Care Facility
+                          </span>
+
+                          {/* CITY / PINCODE GPS LOCATION SEARCH FORM */}
+                          <form onSubmit={handleLocationSearchSubmit} className="flex items-center gap-1.5">
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={locationSearchInput}
+                                onChange={(e) => setLocationSearchInput(e.target.value)}
+                                placeholder="City/Pincode..."
+                                className="w-32 px-2.5 py-1 text-xs rounded-lg border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 font-sans"
+                              />
+                              <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={hospitalsLoading}
+                              className="px-2.5 py-1 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-all cursor-pointer"
+                            >
+                              Set City
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleDetectGPSInReport}
+                              title="Use my current GPS location"
+                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all cursor-pointer"
+                            >
+                              <Crosshair className="w-3.5 h-3.5 text-cyan-600" />
+                            </button>
+                          </form>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200/90 p-4 sm:p-5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-bold text-sm text-slate-900">{reportHospitals[0].name}</h4>
+                              <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
+                                {reportHospitals[0].distanceKm} km away
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500">{reportHospitals[0].address}</p>
+                            <p className="text-[11px] text-cyan-800 font-medium pt-1">
+                              {getReasoningText(liveTriage.triage_level, customInput)}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                            <a
+                              href={`tel:${reportHospitals[0].emergencyPhone || reportHospitals[0].phone}`}
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition-all"
+                            >
+                              <PhoneCall className="w-3.5 h-3.5" />
+                              <span>Call Emergency</span>
+                            </a>
+                            <a
+                              href={reportHospitals[0].googleMapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Directions</span>
+                            </a>
+                          </div>
+                        </div>
+
+                        {reportHospitals.length > 1 && (
+                          <details className="group pt-1">
+                            <summary className="text-xs font-mono text-slate-500 hover:text-slate-900 cursor-pointer transition-all flex items-center gap-1">
+                              <span>View {reportHospitals.length - 1} other suitable care options →</span>
+                            </summary>
+                            <div className="mt-3 space-y-2 pt-1">
+                              {reportHospitals.slice(1).map((hosp) => (
+                                <div key={hosp.id} className="bg-white p-3 rounded-lg border border-slate-200 text-xs flex items-center justify-between gap-3">
+                                  <div>
+                                    <h5 className="font-semibold text-slate-900">{hosp.name}</h5>
+                                    <span className="text-[11px] font-mono text-slate-500">{hosp.distanceKm} km · {hosp.city}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <a
+                                      href={`tel:${hosp.emergencyPhone || hosp.phone}`}
+                                      className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 font-bold text-[11px] border border-emerald-200"
+                                    >
+                                      Call
+                                    </a>
+                                    <a
+                                      href={hosp.googleMapsUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-2.5 py-1 rounded bg-slate-100 text-slate-700 font-bold text-[11px]"
+                                    >
+                                      Directions
+                                    </a>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
+                      </motion.div>
+                    )}
+                  </div>
+                ) : null}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </section>
   );
 }
-
-

@@ -6,6 +6,32 @@ import { Activity, ShieldCheck, CheckCircle2, ArrowUpRight, Lock, Radio } from "
 export function Footer() {
   return (
     <footer className="w-full bg-slate-950 text-slate-400 text-xs border-t border-slate-800">
+      {/* FINAL LANDING PAGE PAYOFF CTA BANNER */}
+      <div className="border-b border-slate-800 bg-slate-900/50 py-16 px-6 text-center">
+        <div className="max-w-2xl mx-auto space-y-4">
+          <span className="text-xs font-mono font-semibold uppercase tracking-wider text-cyan-400">
+            LISTEN · UNDERSTAND · ACT
+          </span>
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+            Give every patient conversation a next step.
+          </h2>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <a
+              href="#playground"
+              className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 text-sm font-bold shadow-md transition-all cursor-pointer"
+            >
+              <span>See MedVoice in Action →</span>
+            </a>
+            <a
+              href="#playground"
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 px-6 py-3 text-sm font-bold border border-slate-700 transition-all cursor-pointer"
+            >
+              <span>Book a Demo</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
       <div className="mx-auto max-w-7xl px-6 pt-14 pb-10">
         {/* Main Footer Grid */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-10 border-b border-slate-800/80">

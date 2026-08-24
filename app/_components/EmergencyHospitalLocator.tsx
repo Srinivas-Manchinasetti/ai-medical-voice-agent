@@ -63,11 +63,15 @@ export function EmergencyHospitalLocator() {
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "locating" | "success" | "denied">("idle");
   const [locationAddressName, setLocationAddressName] = useState<string>("India (Auto-Sorted by Proximity)");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [selectedSpecialtyFilter, setSelectedSpecialtyFilter] = useState<string>("all");
+  const ITEMS_PER_PAGE = 6;
 
   const executeSearch = useCallback(async (queryStr?: string, specialtyStr?: string, coords?: { lat: number; lng: number } | null) => {
     setLoading(true);
     setError(null);
     setHasSearched(true);
+    setCurrentPage(1);
 
     const term = queryStr !== undefined ? queryStr : searchQuery;
     setActiveFilterTitle(term || specialtyStr || "All Emergency Facilities");
@@ -142,7 +146,27 @@ export function EmergencyHospitalLocator() {
     setSearchQuery("");
     setHospitals([]);
     setError(null);
+    setCurrentPage(1);
+    setSelectedSpecialtyFilter("all");
   };
+
+  // Filter hospitals list based on active sub-filter
+  const filteredHospitals = hospitals.filter((hosp) => {
+    if (selectedSpecialtyFilter === "24x7") return hosp.isEmergency24x7;
+    if (selectedSpecialtyFilter === "oncology")
+      return hosp.specialty.some((s) => s.toLowerCase().includes("cancer") || s.toLowerCase().includes("oncology"));
+    if (selectedSpecialtyFilter === "cardiology")
+      return hosp.specialty.some((s) => s.toLowerCase().includes("cardiology") || s.toLowerCase().includes("heart"));
+    if (selectedSpecialtyFilter === "pediatrics")
+      return hosp.specialty.some((s) => s.toLowerCase().includes("pediatric"));
+    return true;
+  });
+
+  const totalPages = Math.ceil(filteredHospitals.length / ITEMS_PER_PAGE) || 1;
+  const paginatedHospitals = filteredHospitals.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
 
   return (
     <section id="nearest-hospitals" className="w-full py-20 bg-[#FAF9F6] border-y border-slate-200/80 text-slate-900">
@@ -246,23 +270,46 @@ export function EmergencyHospitalLocator() {
         {/* RESULTS SECTION WHEN USER HAS SEARCHED */}
         {hasSearched && (
           <div>
-            {/* Results Header Status Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-500">Search Results for:</span>
-                <span className="px-3 py-1 bg-cyan-50 text-cyan-800 border border-cyan-200 rounded-lg text-xs font-bold font-mono">
-                  "{activeFilterTitle}"
-                </span>
-                <span className="text-xs text-slate-400">({hospitals.length} facilities found)</span>
+            {/* Results Header Status Bar & Category Sub-Filters */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-500">Filter Specialty:</span>
+                {[
+                  { id: "all", label: "All Facilities" },
+                  { id: "24x7", label: "24/7 ER Open 🚨" },
+                  { id: "oncology", label: "Oncology / Cancer 🎗️" },
+                  { id: "cardiology", label: "Cardiology 🫀" },
+                  { id: "pediatrics", label: "Pediatrics 👶" },
+                ].map((filterBtn) => (
+                  <button
+                    key={filterBtn.id}
+                    onClick={() => {
+                      setSelectedSpecialtyFilter(filterBtn.id);
+                      setCurrentPage(1);
+                    }}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      selectedSpecialtyFilter === filterBtn.id
+                        ? "bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-2xs"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200"
+                    }`}
+                  >
+                    {filterBtn.label}
+                  </button>
+                ))}
               </div>
 
-              <button
-                onClick={handleResetSearch}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 cursor-pointer transition-all"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                <span>Reset Search</span>
-              </button>
+              <div className="flex items-center gap-3 self-end sm:self-auto">
+                <span className="text-xs text-slate-400 font-mono">
+                  ({filteredHospitals.length} facilities found)
+                </span>
+                <button
+                  onClick={handleResetSearch}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1 rounded-lg border border-slate-200 cursor-pointer transition-all"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Reset</span>
+                </button>
+              </div>
             </div>
 
             {/* HOSPITALS GRID / CONTENT */}
@@ -276,101 +323,149 @@ export function EmergencyHospitalLocator() {
                 <AlertCircle className="w-8 h-8 text-rose-600 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-rose-800">{error}</p>
               </div>
-            ) : hospitals.length === 0 ? (
+            ) : filteredHospitals.length === 0 ? (
               <div className="py-16 text-center bg-white rounded-2xl border border-slate-200/90 shadow-2xs">
                 <Building2 className="w-12 h-12 text-slate-400 mx-auto mb-3" />
                 <h3 className="text-lg font-bold text-slate-900 mb-1">No Matching Hospitals Found</h3>
                 <p className="text-sm text-slate-500 max-w-md mx-auto">
-                  No hospital records matched your search query. Try searching for a condition like "Cancer" or city like "Hyderabad", "Mumbai", or "Delhi".
+                  No hospital records matched your active filter. Try resetting filters or searching for a city like "Hyderabad", "Mumbai", or "Delhi".
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <AnimatePresence>
-                  {hospitals.map((hosp) => (
-                    <motion.div
-                      key={hosp.id}
-                      layout
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-white border border-slate-200/90 hover:border-cyan-500/60 rounded-2xl p-6 flex flex-col justify-between transition-all duration-300 shadow-sm hover:shadow-xl hover:shadow-slate-900/5 group"
-                    >
-                      <div>
-                        {/* Top Distance & Status Badges */}
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold font-mono">
-                            <Navigation className="w-3 h-3 text-emerald-600" />
-                            <span>{hosp.distanceKm} km away</span>
-                          </span>
-
-                          {hosp.isEmergency24x7 && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                              <span>24/7 ER Open</span>
+              <div className="space-y-8">
+                {/* 6 CARDS PER PAGE GRID WITH SMOOTH MOTION TRANSITION */}
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={`${currentPage}-${selectedSpecialtyFilter}`}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.25 }}
+                    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+                  >
+                    {paginatedHospitals.map((hosp) => (
+                      <div
+                        key={hosp.id}
+                        className="bg-white border border-slate-200/90 hover:border-cyan-500/60 rounded-2xl p-6 flex flex-col justify-between transition-all duration-300 shadow-sm hover:shadow-xl hover:shadow-slate-900/5 group"
+                      >
+                        <div>
+                          {/* Top Distance & Status Badges */}
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold font-mono">
+                              <Navigation className="w-3 h-3 text-emerald-600" />
+                              <span>{hosp.distanceKm} km away</span>
                             </span>
+
+                            {hosp.isEmergency24x7 && (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                <span>24/7 ER Open</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Hospital Name */}
+                          <h3 className="text-lg font-bold text-slate-950 group-hover:text-cyan-700 transition-colors leading-snug mb-2">
+                            {hosp.name}
+                          </h3>
+
+                          {/* Address & City */}
+                          <div className="flex items-start gap-1.5 text-xs text-slate-600 mb-4">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                            <span className="line-clamp-2">{hosp.address}</span>
+                          </div>
+
+                          {/* Specialties Badges */}
+                          <div className="flex flex-wrap gap-1.5 mb-4">
+                            {hosp.specialty.map((spec, i) => (
+                              <span
+                                key={i}
+                                className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border ${
+                                  spec.toLowerCase().includes("cancer") || spec.toLowerCase().includes("oncology")
+                                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                                    : "bg-slate-100 text-slate-700 border-slate-200"
+                                }`}
+                              >
+                                {spec}
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* Accreditations */}
+                          {hosp.accreditation.length > 0 && (
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono mb-4">
+                              <Award className="w-3.5 h-3.5 text-amber-500" />
+                              <span>Accreditation: {hosp.accreditation.join(" • ")}</span>
+                            </div>
                           )}
                         </div>
 
-                        {/* Hospital Name */}
-                        <h3 className="text-lg font-bold text-slate-950 group-hover:text-cyan-700 transition-colors leading-snug mb-2">
-                          {hosp.name}
-                        </h3>
+                        {/* Action Buttons */}
+                        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2 mt-2">
+                          <a
+                            href={`tel:${hosp.emergencyPhone || hosp.phone}`}
+                            className="flex-1 inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all cursor-pointer shadow-sm"
+                          >
+                            <PhoneCall className="w-3.5 h-3.5" />
+                            <span>Call ER Hotline</span>
+                          </a>
 
-                        {/* Address & City */}
-                        <div className="flex items-start gap-1.5 text-xs text-slate-600 mb-4">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                          <span className="line-clamp-2">{hosp.address}</span>
+                          <a
+                            href={hosp.googleMapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs transition-all cursor-pointer shadow-sm"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Get Directions</span>
+                          </a>
                         </div>
-
-                        {/* Specialties Badges */}
-                        <div className="flex flex-wrap gap-1.5 mb-4">
-                          {hosp.specialty.map((spec, i) => (
-                            <span
-                              key={i}
-                              className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border ${
-                                spec.toLowerCase().includes("cancer") || spec.toLowerCase().includes("oncology")
-                                  ? "bg-rose-50 text-rose-700 border-rose-200"
-                                  : "bg-slate-100 text-slate-700 border-slate-200"
-                              }`}
-                            >
-                              {spec}
-                            </span>
-                          ))}
-                        </div>
-
-                        {/* Accreditations */}
-                        {hosp.accreditation.length > 0 && (
-                          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono mb-4">
-                            <Award className="w-3.5 h-3.5 text-amber-500" />
-                            <span>Accreditation: {hosp.accreditation.join(" • ")}</span>
-                          </div>
-                        )}
                       </div>
-
-                      {/* Action Buttons */}
-                      <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2 mt-2">
-                        <a
-                          href={`tel:${hosp.emergencyPhone || hosp.phone}`}
-                          className="flex-1 inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all cursor-pointer shadow-sm"
-                        >
-                          <PhoneCall className="w-3.5 h-3.5" />
-                          <span>Call ER Hotline</span>
-                        </a>
-
-                        <a
-                          href={hosp.googleMapsUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs transition-all cursor-pointer shadow-sm"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Get Directions</span>
-                        </a>
-                      </div>
-                    </motion.div>
-                  ))}
+                    ))}
+                  </motion.div>
                 </AnimatePresence>
+
+                {/* PAGINATION CONTROLS */}
+                {totalPages > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-slate-200/90 bg-white p-4 rounded-xl shadow-2xs">
+                    <span className="text-xs font-mono text-slate-500 font-medium">
+                      Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
+                      {Math.min(currentPage * ITEMS_PER_PAGE, filteredHospitals.length)} of {filteredHospitals.length} care facilities
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                        className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-bold transition-all cursor-pointer"
+                      >
+                        ← Previous
+                      </button>
+
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            currentPage === pageNum
+                              ? "bg-slate-950 text-white shadow-2xs"
+                              : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      ))}
+
+                      <button
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                        className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -39,29 +39,22 @@ export function Navbar() {
         {/* Center Nav Links */}
         <div className="hidden md:flex items-center gap-2 text-sm font-bold text-slate-600">
           <a
-            href="#playground"
+            href="#hero"
             className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
-            Playground
+            Product
           </a>
           <a
-            href="#nearest-hospitals"
-            className="rounded-xl px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 font-extrabold transition-all cursor-pointer flex items-center gap-1.5 border border-rose-200/80"
+            href="#how-it-works"
+            className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
-            <span>Find Hospital</span>
-            <span className="text-xs">🏥</span>
+            How It Works
           </a>
           <a
             href="#capabilities"
             className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
           >
             Capabilities
-          </a>
-          <a
-            href="#solutions"
-            className="rounded-xl px-4 py-2 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer"
-          >
-            Solutions
           </a>
           <a
             href="#security"
@@ -74,7 +67,7 @@ export function Navbar() {
         {/* Action Buttons */}
         <div className="flex items-center gap-3">
           <a
-            href="#"
+            href="/sign-in"
             className="hidden sm:inline-flex rounded-xl px-5 py-2.5 text-sm font-bold text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
           >
             Sign in
