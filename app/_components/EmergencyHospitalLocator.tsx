@@ -35,7 +35,9 @@ interface HospitalItem {
   isEmergency24x7: boolean;
   rating: number;
   accreditation: string[];
-  distanceKm: number;
+  distanceKm?: number | null;
+  hasDistanceContext?: boolean;
+  distanceSource?: string;
   googleMapsUrl: string;
   cancerSpecialistsAvailable?: boolean;
 }
@@ -45,6 +47,7 @@ const POPULAR_SEARCH_CHIPS = [
   { label: "24/7 Emergency ER 🚨", query: "emergency", type: "specialty" },
   { label: "Cardiology / Heart 🫀", query: "cardiology", type: "specialty" },
   { label: "Pediatrics 👶", query: "pediatrics", type: "specialty" },
+  { label: "Guntur Hospitals 📍", query: "Guntur", type: "city" },
   { label: "Hyderabad Hospitals 📍", query: "Hyderabad", type: "city" },
   { label: "Mumbai Hospitals 📍", query: "Mumbai", type: "city" },
   { label: "Delhi NCR Hospitals 📍", query: "Delhi", type: "city" },
@@ -62,7 +65,7 @@ export function EmergencyHospitalLocator() {
   // Location states
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "locating" | "success" | "denied">("idle");
-  const [locationAddressName, setLocationAddressName] = useState<string>("India (Auto-Sorted by Proximity)");
+  const [locationAddressName, setLocationAddressName] = useState<string>("Directory View (No Location Context)");
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [selectedSpecialtyFilter, setSelectedSpecialtyFilter] = useState<string>("all");
   const ITEMS_PER_PAGE = 6;
@@ -120,7 +123,7 @@ export function EmergencyHospitalLocator() {
       (err) => {
         console.warn("GPS Permission error:", err);
         setLocationStatus("denied");
-        setLocationAddressName("Metro Proximity Sort");
+        setLocationAddressName("Facility Directory");
         executeSearch(searchQuery, "", null);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
@@ -148,6 +151,8 @@ export function EmergencyHospitalLocator() {
     setError(null);
     setCurrentPage(1);
     setSelectedSpecialtyFilter("all");
+    setLocationStatus("idle");
+    setUserCoords(null);
   };
 
   // Filter hospitals list based on active sub-filter
@@ -188,7 +193,7 @@ export function EmergencyHospitalLocator() {
           </h2>
 
           <p className="mt-3 text-base text-slate-500 font-normal leading-relaxed">
-            Search any medical condition (e.g. Cancer, Heart Emergency) or City in India to find nearest hospitals sorted by GPS distance.
+            Search any medical condition or city (e.g. Guntur, Hyderabad, Cancer, Heart) to calculate real proximity distances.
           </p>
         </div>
 
@@ -220,7 +225,7 @@ export function EmergencyHospitalLocator() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Enter medical issue (e.g. Cancer, Heart) or City (e.g. Hyderabad, Mumbai, Delhi)..."
+                placeholder="Enter medical issue (e.g. Heart) or City (e.g. Guntur, Hyderabad)..."
                 className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
@@ -262,7 +267,7 @@ export function EmergencyHospitalLocator() {
               Ready to Search Nearest Hospitals
             </h3>
             <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-              Enter your specific medical condition or location above, or select one of the quick suggestion chips to view nearest verified hospitals with distance tracking.
+              Enable GPS location or enter your city/medical condition above to calculate real travel distances and view verified emergency care facilities.
             </p>
           </div>
         )}
@@ -328,7 +333,7 @@ export function EmergencyHospitalLocator() {
                 <Building2 className="w-12 h-12 text-slate-400 mx-auto mb-3" />
                 <h3 className="text-lg font-bold text-slate-900 mb-1">No Matching Hospitals Found</h3>
                 <p className="text-sm text-slate-500 max-w-md mx-auto">
-                  No hospital records matched your active filter. Try resetting filters or searching for a city like "Hyderabad", "Mumbai", or "Delhi".
+                  No hospital records matched your active filter. Try resetting filters or searching for a city like "Guntur", "Hyderabad", "Mumbai", or "Delhi".
                 </p>
               </div>
             ) : (
@@ -351,10 +356,17 @@ export function EmergencyHospitalLocator() {
                         <div>
                           {/* Top Distance & Status Badges */}
                           <div className="flex items-center justify-between gap-2 mb-3">
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold font-mono">
-                              <Navigation className="w-3 h-3 text-emerald-600" />
-                              <span>{hosp.distanceKm} km away</span>
-                            </span>
+                            {hosp.hasDistanceContext && hosp.distanceKm !== null ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold font-mono">
+                                <Navigation className="w-3 h-3 text-emerald-600" />
+                                <span>{hosp.distanceKm} km away</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium font-mono">
+                                <Building2 className="w-3 h-3 text-slate-400" />
+                                <span>{hosp.city}, {hosp.state}</span>
+                              </span>
+                            )}
 
                             {hosp.isEmergency24x7 && (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">

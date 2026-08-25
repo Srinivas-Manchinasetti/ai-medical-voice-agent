@@ -50,7 +50,7 @@ export function LivingHeroSection() {
           {/* Direct Call to Action Triggers */}
           <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
             <a
-              href="#playground"
+              href="/demo"
               className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-xs font-medium text-white shadow-[0_4px_16px_rgba(15,23,42,0.12)] transition-all hover:bg-slate-800 hover:scale-[1.02] active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
             >
               <PhoneCall className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
@@ -59,7 +59,7 @@ export function LivingHeroSection() {
             </a>
 
             <a
-              href="#capabilities"
+              href="/capabilities"
               className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200/90 px-5 py-3 text-xs font-medium text-slate-700 shadow-2xs transition-all hover:bg-slate-50 hover:text-slate-950 hover:border-slate-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900"
             >
               <span>Explore Capabilities</span>
@@ -69,13 +69,13 @@ export function LivingHeroSection() {
           {/* Micro Safeguard Badges */}
           <div className="flex flex-wrap items-center justify-center gap-5 pt-1 text-[11px] font-medium text-slate-500 tracking-tight">
             <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> HIPAA Compliant
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> HIPAA Technical Safeguards
             </span>
             <span className="flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-amber-500" /> Instant EHR Integration
+              <Zap className="w-3.5 h-3.5 text-amber-500" /> FHIR Standard Compatible
             </span>
             <span className="flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5 text-cyan-600" /> Zero Voice Retention
+              <Lock className="w-3.5 h-3.5 text-cyan-600" /> Zero Voice Memory Retention
             </span>
           </div>
 

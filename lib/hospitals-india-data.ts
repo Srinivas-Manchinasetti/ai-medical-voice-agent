@@ -13,6 +13,8 @@ export interface Hospital {
   rating: number;
   accreditation: string[];
   cancerSpecialistsAvailable?: boolean;
+  capabilities?: string[];
+  emergencyLevel?: "Level-1 Tertiary" | "Secondary ER" | "Primary Care";
 }
 
 /**
@@ -38,6 +40,88 @@ export function calculateDistanceKm(
 }
 
 export const INDIAN_HOSPITALS_DATASET: Hospital[] = [
+  // --- GUNTUR & ANDHRA PRADESH ---
+  {
+    id: "hosp-gtr-01",
+    name: "Ramesh Hospitals - Guntur Main Campus",
+    specialty: ["Cardiology", "Emergency & Trauma", "Neurology", "Oncology / Cancer"],
+    city: "Guntur",
+    state: "Andhra Pradesh",
+    address: "Collectorate Road, Nagarampalem, Guntur, Andhra Pradesh 522004",
+    phone: "+91 863 237 7777",
+    emergencyPhone: "1066",
+    latitude: 16.3067,
+    longitude: 80.4365,
+    isEmergency24x7: true,
+    rating: 4.9,
+    accreditation: ["NABH", "NABL"],
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-gtr-02",
+    name: "AIIMS Mangalagiri (Guntur District)",
+    specialty: ["Emergency & Trauma", "Oncology / Cancer", "Cardiology", "Neurology", "Pediatrics"],
+    city: "Guntur",
+    state: "Andhra Pradesh",
+    address: "NH-16, Mangalagiri, Guntur District, Andhra Pradesh 522503",
+    phone: "+91 8645 280 000",
+    emergencyPhone: "+91 8645 280 000",
+    latitude: 16.4380,
+    longitude: 80.5590,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["Govt Center of Excellence", "NABH"],
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-gtr-03",
+    name: "NRI General Hospital & Medical College",
+    specialty: ["Emergency & Trauma", "Oncology / Cancer", "Cardiology", "Pediatrics"],
+    city: "Guntur",
+    state: "Andhra Pradesh",
+    address: "NH-16, China Kakani, Mangalagiri, Guntur District, Andhra Pradesh 522503",
+    phone: "+91 8645 230 101",
+    emergencyPhone: "+91 8645 230 101",
+    latitude: 16.4258,
+    longitude: 80.5512,
+    isEmergency24x7: true,
+    rating: 4.7,
+    accreditation: ["NABH"],
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-gtr-04",
+    name: "Manipal Hospital Tadepalle (Guntur Region)",
+    specialty: ["Oncology / Cancer", "Cardiology", "Emergency & Trauma", "Neurology"],
+    city: "Guntur",
+    state: "Andhra Pradesh",
+    address: "Near Kanaka Durga Varadhi, Tadepalle, Guntur District, Andhra Pradesh 522501",
+    phone: "+91 866 242 4242",
+    emergencyPhone: "105533",
+    latitude: 16.4912,
+    longitude: 80.6124,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["NABH", "NABL"],
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-gtr-05",
+    name: "Government General Hospital (GGH Guntur)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Pediatrics", "Oncology / Cancer"],
+    city: "Guntur",
+    state: "Andhra Pradesh",
+    address: "Opp. Bus Stand, Sambasiva Pet, Guntur, Andhra Pradesh 522001",
+    phone: "+91 863 222 0101",
+    emergencyPhone: "108",
+    latitude: 16.2985,
+    longitude: 80.4412,
+    isEmergency24x7: true,
+    rating: 4.5,
+    accreditation: ["Govt Hospital"],
+    cancerSpecialistsAvailable: true,
+  },
+
   // --- HYDERABAD & TELANGANA ---
   {
     id: "hosp-hyd-01",

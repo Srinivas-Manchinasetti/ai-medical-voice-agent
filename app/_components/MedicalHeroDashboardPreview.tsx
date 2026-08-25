@@ -143,9 +143,10 @@ export function MedicalHeroDashboardPreview({ scrollProgress }: Props) {
     CALL_SCENARIOS.find((s) => s.id === activeScenarioId) ||
     CALL_SCENARIOS[0];
 
-  const dialogueOpacity = scrollProgress
-    ? useTransform(scrollProgress, [0, 0.2, 0.45], [0.88, 0.96, 1])
-    : undefined;
+  // Unconditional hook call compliant with React Rules of Hooks
+  const defaultProgress = new MotionValue(0);
+  const effectiveProgress = scrollProgress || defaultProgress;
+  const dialogueOpacity = useTransform(effectiveProgress, [0, 0.2, 0.45], [0.88, 0.96, 1]);
 
   return (
     <div className="w-full bg-white text-slate-900 font-sans rounded-2xl shadow-xl border border-slate-200/90 overflow-hidden flex flex-col">

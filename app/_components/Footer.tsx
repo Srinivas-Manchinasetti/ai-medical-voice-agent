@@ -7,26 +7,26 @@ export function Footer() {
   return (
     <footer className="w-full bg-slate-950 text-slate-400 text-xs border-t border-slate-800">
       {/* FINAL LANDING PAGE PAYOFF CTA BANNER */}
-      <div className="border-b border-slate-800 bg-slate-900/50 py-16 px-6 text-center">
-        <div className="max-w-2xl mx-auto space-y-4">
-          <span className="text-xs font-mono font-semibold uppercase tracking-wider text-cyan-400">
+      <div className="border-b border-slate-800 bg-[#0B0F17] py-24 sm:py-32 px-6 text-center">
+        <div className="max-w-3xl mx-auto space-y-6">
+          <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-400">
             LISTEN · UNDERSTAND · ACT
           </span>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+          <h2 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
             Give every patient conversation a next step.
           </h2>
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
             <a
-              href="#playground"
-              className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 text-sm font-bold shadow-md transition-all cursor-pointer"
+              href="/demo"
+              className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white px-7 py-3.5 text-sm font-bold shadow-lg transition-all cursor-pointer"
             >
-              <span>See MedVoice in Action →</span>
+              <span>Book a Demo →</span>
             </a>
             <a
-              href="#playground"
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 px-6 py-3 text-sm font-bold border border-slate-700 transition-all cursor-pointer"
+              href="/product"
+              className="inline-flex items-center gap-2 text-slate-300 hover:text-white px-5 py-3 text-sm font-semibold transition-all cursor-pointer"
             >
-              <span>Book a Demo</span>
+              <span>See MedVoice in action</span>
             </a>
           </div>
         </div>
@@ -72,22 +72,22 @@ export function Footer() {
             </span>
             <ul className="space-y-2 text-slate-400 font-medium">
               <li>
-                <a href="#playground" className="hover:text-white transition-colors flex items-center gap-1">
+                <a href="/demo" className="hover:text-white transition-colors flex items-center gap-1">
                   Voice Simulator Playground <ArrowUpRight className="h-3 w-3 text-slate-500" />
                 </a>
               </li>
               <li>
-                <a href="#capabilities" className="hover:text-white transition-colors">
+                <a href="/#capabilities" className="hover:text-white transition-colors">
                   Real-Time Voice Triage
                 </a>
               </li>
               <li>
-                <a href="#capabilities" className="hover:text-white transition-colors">
+                <a href="/#capabilities" className="hover:text-white transition-colors">
                   ICD-10 NLP Symptom Mining
                 </a>
               </li>
               <li>
-                <a href="#capabilities" className="hover:text-white transition-colors">
+                <a href="/" className="hover:text-white transition-colors">
                   Automated SOAP Note Generator
                 </a>
               </li>
@@ -101,23 +101,23 @@ export function Footer() {
             </span>
             <ul className="space-y-2 text-slate-400 font-medium">
               <li>
-                <a href="#workflow" className="hover:text-white transition-colors">
+                <a href="/#how-it-works" className="hover:text-white transition-colors">
                   5-Step Clinical Workflow
                 </a>
               </li>
               <li>
-                <a href="#security" className="hover:text-white transition-colors flex items-center gap-1.5">
-                  <ShieldCheck className="h-3.5 w-3.5 text-teal-400" /> HIPAA Architecture
+                <a href="/privacy" className="hover:text-white transition-colors flex items-center gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5 text-teal-400" /> Technical Safeguards Architecture
                 </a>
               </li>
               <li>
-                <a href="#security" className="hover:text-white transition-colors flex items-center gap-1.5">
+                <a href="/privacy" className="hover:text-white transition-colors flex items-center gap-1.5">
                   <Lock className="h-3.5 w-3.5 text-blue-400" /> TLS 1.3 & Zero-Retention
                 </a>
               </li>
               <li>
-                <a href="#security" className="hover:text-white transition-colors flex items-center gap-1.5">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> Epic / Cerner Integration
+                <a href="/privacy" className="hover:text-white transition-colors flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> FHIR Standard Compatibility
                 </a>
               </li>
             </ul>
