@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Activity, ArrowRight, LifeBuoy, ShieldCheck } from "lucide-react";
+import { Activity, ArrowRight, ShieldCheck } from "lucide-react";
 import { useUser, UserButton } from "@clerk/nextjs";
 
 export function Navbar() {
