@@ -3,11 +3,13 @@
 import React from "react";
 import { Navbar } from "./_components/Navbar";
 import { LivingHeroSection } from "./_components/LivingHeroSection";
+import { ProcessStrip } from "./_components/ProcessStrip";
 import { WorkflowSection } from "./_components/WorkflowSection";
 import { CapabilitiesSection } from "./_components/CapabilitiesSection";
 import { SecuritySection } from "./_components/SecuritySection";
+import { FaqSection } from "./_components/FaqSection";
 import { Footer } from "./_components/Footer";
-import { Mic, ArrowRight, Activity, PhoneCall } from "lucide-react";
+import { Mic, ArrowRight } from "lucide-react";
 
 export default function HomePage() {
   return (
@@ -18,7 +20,10 @@ export default function HomePage() {
         {/* HERO PRODUCT VISUALIZATION */}
         <LivingHeroSection />
 
-        {/* LISTEN -> UNDERSTAND -> ACT EDITORIAL STORYTELLING */}
+        {/* THREE-STEP PROCESS STRIP (LaunchFolio-style compact overview) */}
+        <ProcessStrip />
+
+        {/* LISTEN -> UNDERSTAND -> ACT EDITORIAL STORYTELLING (full depth) */}
         <div className="relative z-10">
           <WorkflowSection />
         </div>
@@ -53,6 +58,9 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* FAQ */}
+        <FaqSection />
       </div>
 
       {/* FINAL PAYOFF BANNER & FOOTER */}
@@ -60,9 +68,3 @@ export default function HomePage() {
     </div>
   );
 }
-
-
-
-
-
-
