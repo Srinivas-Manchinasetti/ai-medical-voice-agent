@@ -20,8 +20,8 @@ export default function SignInPage() {
           <span>Back to MedVoice</span>
         </Link>
         <div className="flex items-center gap-2 font-extrabold text-slate-900 text-sm">
-          <div className="w-7 h-7 rounded-xl bg-slate-950 flex items-center justify-center text-teal-400 shadow-sm">
-            <Activity className="w-4 h-4" />
+          <div className="relative flex items-center justify-center w-7 h-7 overflow-hidden rounded-lg border border-sky-200 bg-white shadow-sm">
+            <img src="/images/medvoice-logo.png" alt="MedVoice AI" className="h-full w-full object-cover scale-110" />
           </div>
           <span>MedVoice <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">AI</span></span>
         </div>

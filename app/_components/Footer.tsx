@@ -38,8 +38,8 @@ export function Footer() {
           {/* Brand Column (6 cols) */}
           <div className="md:col-span-6 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-white shadow-sm">
-                <Activity className="h-5 w-5 text-teal-400" />
+              <div className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border border-sky-400/30 bg-white shadow-sm">
+                <img src="/images/medvoice-logo.png" alt="MedVoice AI" className="h-full w-full object-cover scale-110" />
               </div>
               <span className="text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
                 MedVoice
