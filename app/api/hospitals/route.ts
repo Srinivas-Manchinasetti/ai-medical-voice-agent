@@ -18,12 +18,12 @@ export async function GET(request: Request) {
     const hasCitySearch = Boolean(cityFilter || searchFilter);
 
     const locationContext = hasGps
-      ? { type: "gps", label: "Live GPS Location" }
+      ? { type: "gps", label: "Live Location" }
       : hasCitySearch
       ? { type: "city", label: `City Center (${cityFilter || searchFilter})` }
-      : { type: "none", label: "No Location Selected" };
+      : { type: "none", label: "Default Region" };
 
-    // Default reference coords if user GPS or search is not available
+    // Default reference coords if user GPS or search is not available (Guntur / AP default)
     const refLat = hasGps ? userLat! : 16.3067;
     const refLng = hasGps ? userLng! : 80.4365;
 
@@ -31,8 +31,8 @@ export async function GET(request: Request) {
     const processedHospitals = hospitals.map((h) => {
       const dist = calculateDistanceKm(refLat, refLng, h.latitude, h.longitude);
       
-      // Calculate estimated ambulance/travel time in minutes (urban speed ~35 km/h)
-      const etaMinutes = Math.max(4, Math.round((dist / 35) * 60));
+      // Calculate estimated ambulance/travel time in minutes (urban speed ~32 km/h)
+      const etaMinutes = Math.max(3, Math.round((dist / 32) * 60));
 
       // Hard eligibility evaluation
       let isEligible = true;
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
       if (urgencyLevel === "emergency" && !h.isEmergency24x7) {
         isEligible = false;
       } else if (h.isEmergency24x7) {
-        matchReasons.push("24/7 Level-1 Emergency Department");
+        matchReasons.push("24/7 Emergency Department");
       }
 
       // Check Specialty capability match
@@ -71,9 +71,9 @@ export async function GET(request: Request) {
         }
       }
 
-      // Travel time match reason (only if location is active)
-      if (locationContext.type !== "none" && dist <= 15) {
-        matchReasons.push(`Shortest estimated travel time (${etaMinutes} min)`);
+      // Travel time match reason
+      if (dist <= 25) {
+        matchReasons.push(`Estimated drive time: ~${etaMinutes} mins`);
       }
 
       // Quality & Accreditation match reason
@@ -82,32 +82,42 @@ export async function GET(request: Request) {
       }
 
       return {
-        ...h,
-        distanceKm: locationContext.type !== "none" ? dist : null,
-        etaMinutes: locationContext.type !== "none" ? etaMinutes : null,
-        hasDistanceContext: locationContext.type !== "none",
+        id: h.id,
+        name: h.name,
+        specialty: h.specialty,
+        city: h.city,
+        state: h.state,
+        address: h.address,
+        phone: h.phone,
+        emergencyPhone: h.emergencyPhone,
+        latitude: h.latitude,
+        longitude: h.longitude,
+        isEmergency24x7: h.isEmergency24x7,
+        rating: h.rating,
+        accreditation: h.accreditation,
+        cancerSpecialistsAvailable: h.cancerSpecialistsAvailable,
+        distanceKm: dist,
+        etaMinutes: etaMinutes,
+        hasDistanceContext: true,
         distanceSource: locationContext.type,
         isEligible,
         matchReasons,
-        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${refLat},${refLng}&destination=${encodeURIComponent(
           `${h.name}, ${h.address}`
         )}`,
       };
     });
 
-    // STEP 2: SOFT RANKING (Eligible facilities first)
+    // STEP 2: RANKING (Sort by closest distance / drive time first)
     const eligibleFacilities = processedHospitals.filter((h) => h.isEligible);
     const nonEligibleFacilities = processedHospitals.filter((h) => !h.isEligible);
 
-    // Sort strictly by ETA in minutes / Distance if location context exists
-    if (locationContext.type !== "none") {
-      eligibleFacilities.sort((a, b) => (a.etaMinutes ?? 999) - (b.etaMinutes ?? 999));
-      nonEligibleFacilities.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
-    }
+    eligibleFacilities.sort((a, b) => a.distanceKm - b.distanceKm);
+    nonEligibleFacilities.sort((a, b) => a.distanceKm - b.distanceKm);
 
     const sortedHospitals = [...eligibleFacilities, ...nonEligibleFacilities].map((h, idx) => ({
       ...h,
-      matchLabel: idx === 0 && h.isEligible && locationContext.type !== "none" ? "BEST MATCH" : h.isEligible ? "RECOMMENDED CARE" : "FACILITY DIRECTORY",
+      matchLabel: idx === 0 && h.isEligible ? "CLOSEST ER" : h.isEligible ? "EMERGENCY CARE" : "FACILITY DIRECTORY",
     }));
 
     return NextResponse.json({
@@ -116,7 +126,7 @@ export async function GET(request: Request) {
       eligibleCount: eligibleFacilities.length,
       locationContext,
       userLocationDetected: hasGps,
-      userCoordinates: hasGps ? { lat: userLat, lng: userLng } : null,
+      userCoordinates: { lat: refLat, lng: refLng },
       hospitals: sortedHospitals,
     });
   } catch (error: any) {
@@ -126,4 +136,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
