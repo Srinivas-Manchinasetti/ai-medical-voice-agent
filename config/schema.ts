@@ -43,4 +43,55 @@ export const hospitalsTable = pgTable("hospitals", {
   lastVerifiedAt: timestamp("last_verified_at").defaultNow()
 });
 
+/**
+ * Doctor Profiles & AI Specialist Personas
+ */
+export const doctorProfilesTable = pgTable("doctor_profiles", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  specialty: varchar("specialty", { length: 128 }).notNull(),
+  title: varchar("title", { length: 128 }).notNull(),
+  experience: varchar("experience", { length: 64 }),
+  avatarUrl: text("avatar_url"),
+  voiceName: varchar("voice_name", { length: 64 }),
+  systemPrompt: text("system_prompt"),
+  badgeColor: varchar("badge_color", { length: 64 }),
+  createdAt: timestamp("created_at").defaultNow()
+});
+
+/**
+ * Patient Voice Consultation & SOAP Clinical Report Records
+ */
+export const consultationsTable = pgTable("consultations", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  userId: varchar("user_id", { length: 128 }), // Clerk user ID or anonymous session
+  patientName: varchar("patient_name", { length: 128 }).default("Anonymous Patient"),
+  patientAge: varchar("patient_age", { length: 32 }),
+  patientGender: varchar("patient_gender", { length: 32 }),
+  
+  doctorId: varchar("doctor_id", { length: 64 }).notNull(),
+  doctorName: varchar("doctor_name", { length: 128 }).notNull(),
+  specialty: varchar("specialty", { length: 128 }).notNull(),
+  
+  chiefComplaint: text("chief_complaint"),
+  transcript: jsonb("transcript").$type<Array<{ role: "patient" | "doctor" | "system"; text: string; timestamp: string }>>(),
+  
+  triageLevel: varchar("triage_level", { length: 64 }).default("routine"), // "emergency" | "priority" | "routine"
+  triageTitle: varchar("triage_title", { length: 255 }),
+  icd10Codes: jsonb("icd10_codes").$type<string[]>(),
+  detectedSymptoms: jsonb("detected_symptoms").$type<string[]>(),
+  
+  soapSubjective: text("soap_subjective"),
+  soapObjective: text("soap_objective"),
+  soapAssessment: text("soap_assessment"),
+  soapPlan: text("soap_plan"),
+  
+  recommendedSpecialists: jsonb("recommended_specialists").$type<string[]>(),
+  recommendedAction: text("recommended_action"),
+  
+  durationSeconds: integer("duration_seconds").default(0),
+  createdAt: timestamp("created_at").defaultNow()
+});
+
+
 
