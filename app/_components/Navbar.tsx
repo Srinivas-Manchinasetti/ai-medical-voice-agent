@@ -134,16 +134,6 @@ export function Navbar() {
             >
               Care Network
             </Link>
-            <Link
-              href="/demo"
-              className={`rounded-xl px-3.5 py-2 transition-all cursor-pointer ${
-                pathname === "/demo"
-                  ? "text-slate-950 bg-slate-200/70 font-extrabold"
-                  : "text-slate-600 hover:text-slate-950 hover:bg-slate-100"
-              }`}
-            >
-              Triage Playground
-            </Link>
           </nav>
 
           {/* Action Buttons & Burger */}
@@ -339,24 +329,6 @@ export function Navbar() {
                       </div>
                       <div className="text-[11px] text-slate-500 font-medium truncate">
                         View past consultation records & exportable charts
-                      </div>
-                    </div>
-                  </Link>
-
-                  <Link
-                    href="/demo"
-                    onClick={() => setDrawerOpen(false)}
-                    className="flex items-center gap-3.5 rounded-xl border border-slate-200/90 bg-white p-3.5 transition-all hover:border-sky-300 hover:shadow-md group cursor-pointer"
-                  >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600 border border-sky-100 group-hover:scale-105 transition-transform">
-                      <Radio className="h-4.5 w-4.5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-xs text-slate-900 group-hover:text-sky-900 transition-colors">
-                        Triage Scenario Playground
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-medium truncate">
-                        16kHz continuous acoustic intake & biomarker extractor
                       </div>
                     </div>
                   </Link>
