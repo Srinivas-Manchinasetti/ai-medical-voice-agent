@@ -94,7 +94,7 @@ export function Navbar() {
           <nav className="hidden md:flex items-center gap-1 text-xs font-bold">
             <Link
               href="/"
-              className={`rounded-xl px-4 py-2 transition-all cursor-pointer ${
+              className={`rounded-xl px-3.5 py-2 transition-all cursor-pointer ${
                 pathname === "/"
                   ? "text-slate-950 bg-slate-200/70 font-extrabold"
                   : "text-slate-600 hover:text-slate-950 hover:bg-slate-100"
@@ -103,18 +103,30 @@ export function Navbar() {
               Home
             </Link>
             <Link
-              href="/demo"
-              className={`rounded-xl px-4 py-2 transition-all cursor-pointer ${
-                pathname === "/demo"
+              href="/consult"
+              className={`rounded-xl px-3.5 py-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                pathname === "/consult"
+                  ? "text-cyan-900 bg-cyan-100 font-extrabold"
+                  : "text-slate-600 hover:text-cyan-900 hover:bg-cyan-50"
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5 text-cyan-600 animate-pulse" />
+              <span>Voice Consult</span>
+            </Link>
+            <Link
+              href="/dashboard"
+              className={`rounded-xl px-3.5 py-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                pathname === "/dashboard"
                   ? "text-slate-950 bg-slate-200/70 font-extrabold"
                   : "text-slate-600 hover:text-slate-950 hover:bg-slate-100"
               }`}
             >
-              MedVoice Live
+              <FileText className="w-3.5 h-3.5 text-slate-500" />
+              <span>SOAP Reports</span>
             </Link>
             <Link
               href="/care"
-              className={`rounded-xl px-4 py-2 transition-all cursor-pointer ${
+              className={`rounded-xl px-3.5 py-2 transition-all cursor-pointer ${
                 pathname === "/care"
                   ? "text-slate-950 bg-slate-200/70 font-extrabold"
                   : "text-slate-600 hover:text-slate-950 hover:bg-slate-100"
@@ -123,15 +135,14 @@ export function Navbar() {
               Care Network
             </Link>
             <Link
-              href="/privacy"
-              className={`rounded-xl px-4 py-2 transition-all cursor-pointer flex items-center gap-1.5 ${
-                pathname === "/privacy"
+              href="/demo"
+              className={`rounded-xl px-3.5 py-2 transition-all cursor-pointer ${
+                pathname === "/demo"
                   ? "text-slate-950 bg-slate-200/70 font-extrabold"
                   : "text-slate-600 hover:text-slate-950 hover:bg-slate-100"
               }`}
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-              <span>Privacy Policy</span>
+              Triage Playground
             </Link>
           </nav>
 
@@ -297,6 +308,42 @@ export function Navbar() {
                 </div>
                 <div className="space-y-2">
                   <Link
+                    href="/consult"
+                    onClick={() => setDrawerOpen(false)}
+                    className="flex items-center gap-3.5 rounded-xl border border-cyan-200/90 bg-cyan-50/40 p-3.5 transition-all hover:border-cyan-400 hover:shadow-md group cursor-pointer"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700 border border-cyan-200 group-hover:scale-105 transition-transform">
+                      <Radio className="h-4.5 w-4.5 animate-pulse" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-xs text-slate-900 group-hover:text-cyan-900 transition-colors">
+                        Live Doctor Voice Consultation
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium truncate">
+                        Real-time AI clinical interview & audio triage
+                      </div>
+                    </div>
+                  </Link>
+
+                  <Link
+                    href="/dashboard"
+                    onClick={() => setDrawerOpen(false)}
+                    className="flex items-center gap-3.5 rounded-xl border border-slate-200/90 bg-white p-3.5 transition-all hover:border-sky-300 hover:shadow-md group cursor-pointer"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 group-hover:scale-105 transition-transform">
+                      <FileText className="h-4.5 w-4.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-xs text-slate-900 group-hover:text-emerald-900 transition-colors">
+                        My SOAP Clinical Reports
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium truncate">
+                        View past consultation records & exportable charts
+                      </div>
+                    </div>
+                  </Link>
+
+                  <Link
                     href="/demo"
                     onClick={() => setDrawerOpen(false)}
                     className="flex items-center gap-3.5 rounded-xl border border-slate-200/90 bg-white p-3.5 transition-all hover:border-sky-300 hover:shadow-md group cursor-pointer"
@@ -306,7 +353,7 @@ export function Navbar() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="font-bold text-xs text-slate-900 group-hover:text-sky-900 transition-colors">
-                        MedVoice Live Triage
+                        Triage Scenario Playground
                       </div>
                       <div className="text-[11px] text-slate-500 font-medium truncate">
                         16kHz continuous acoustic intake & biomarker extractor
