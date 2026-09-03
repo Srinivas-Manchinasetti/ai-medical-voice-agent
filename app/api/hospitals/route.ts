@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
 import { INDIAN_HOSPITALS_DATASET, calculateDistanceKm, Hospital } from "@/lib/hospitals-india-data";
 
+export function calculateRealisticDriveTime(distanceKm: number): number {
+  if (distanceKm <= 4) {
+    // Dense city traffic: ~18 km/h + signal buffer
+    return Math.max(4, Math.round((distanceKm / 18) * 60));
+  } else if (distanceKm <= 12) {
+    // Mixed urban/arterial: ~25 km/h
+    return Math.max(6, Math.round((distanceKm / 25) * 60));
+  } else {
+    // First 4 km urban (13 min) + remaining distance on highway (~45 km/h)
+    return Math.max(10, Math.round(13 + ((distanceKm - 4) / 45) * 60));
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -30,9 +43,7 @@ export async function GET(request: Request) {
     // STEP 1: HARD CONSTRAINTS & ELIGIBILITY EVALUATION
     const processedHospitals = hospitals.map((h) => {
       const dist = calculateDistanceKm(refLat, refLng, h.latitude, h.longitude);
-      
-      // Calculate estimated ambulance/travel time in minutes (urban speed ~32 km/h)
-      const etaMinutes = Math.max(3, Math.round((dist / 32) * 60));
+      const etaMinutes = calculateRealisticDriveTime(dist);
 
       // Hard eligibility evaluation
       let isEligible = true;

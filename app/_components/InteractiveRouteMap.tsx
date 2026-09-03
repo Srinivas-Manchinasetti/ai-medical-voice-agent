@@ -19,6 +19,34 @@ export interface HospitalItem {
   matchLabel?: string;
   rating?: number;
   isEmergency24x7?: boolean;
+  etaMinutes?: number;
+}
+
+export function calculateCalibratedDriveTime(distanceKm: number, rawOsrmSeconds?: number): number {
+  if (rawOsrmSeconds && rawOsrmSeconds > 0) {
+    const rawMinutes = rawOsrmSeconds / 60;
+    // OSRM calculates theoretical free-flow speed limits without traffic signals or congestion.
+    // Apply realistic Indian traffic & congestion calibration factor:
+    if (distanceKm <= 4) {
+      // Dense city traffic: ~18-20 km/h + intersection delays
+      return Math.max(4, Math.round(rawMinutes * 1.5 + 2));
+    } else if (distanceKm <= 12) {
+      // Mixed urban/arterial: ~25-30 km/h
+      return Math.max(6, Math.round(rawMinutes * 1.45 + 3));
+    } else {
+      // Highway corridor + city exit: ~38-45 km/h (23.1 km -> ~37-39 mins)
+      return Math.max(10, Math.round(rawMinutes * 1.4 + 4));
+    }
+  }
+
+  // Fallback if OSRM is offline:
+  if (distanceKm <= 4) {
+    return Math.max(4, Math.round((distanceKm / 18) * 60));
+  } else if (distanceKm <= 12) {
+    return Math.max(6, Math.round((distanceKm / 25) * 60));
+  } else {
+    return Math.max(10, Math.round(13 + ((distanceKm - 4) / 45) * 60));
+  }
 }
 
 interface InteractiveRouteMapProps {
@@ -59,7 +87,7 @@ export function InteractiveRouteMap({
     roadGeometryAvailable: boolean;
   }>({
     distanceKm: selectedHospital?.distanceKm || 1.1,
-    etaMinutes: Math.max(3, Math.round(((selectedHospital?.distanceKm || 1.1) / 32) * 60)),
+    etaMinutes: calculateCalibratedDriveTime(selectedHospital?.distanceKm || 1.1),
     roadGeometryAvailable: false,
   });
   const [isRouting, setIsRouting] = useState<boolean>(false);
@@ -233,7 +261,7 @@ export function InteractiveRouteMap({
 
         let polylinePoints: [number, number][] = [];
         let dist = selectedHospital.distanceKm;
-        let dur = Math.max(3, Math.round((dist / 32) * 60));
+        let dur = calculateCalibratedDriveTime(dist);
         let roadSuccess = false;
 
         if (res.ok) {
@@ -242,7 +270,7 @@ export function InteractiveRouteMap({
             const geom = data.routes[0].geometry.coordinates;
             polylinePoints = geom.map((coord: [number, number]) => [coord[1], coord[0]]);
             dist = parseFloat((data.routes[0].distance / 1000).toFixed(1)) || dist;
-            dur = Math.max(3, Math.round(data.routes[0].duration / 60)) || dur;
+            dur = calculateCalibratedDriveTime(dist, data.routes[0].duration);
             roadSuccess = true;
           }
         }
@@ -418,14 +446,14 @@ export function InteractiveRouteMap({
           {/* Distance & Time Grid */}
           <div className="grid grid-cols-2 gap-2 pt-1">
             <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">DRIVE DISTANCE</div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">ROAD DISTANCE</div>
               <div className="text-xl font-extrabold text-slate-900 flex items-baseline gap-1">
                 <span>{routeInfo.distanceKm}</span>
                 <span className="text-xs font-bold text-slate-500">km</span>
               </div>
             </div>
             <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">ESTIMATED TIME</div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">EST. DRIVE (TRAFFIC)</div>
               <div className="text-xl font-extrabold text-emerald-600 flex items-baseline gap-1">
                 <span>~{routeInfo.etaMinutes}</span>
                 <span className="text-xs font-bold text-slate-500">min</span>
@@ -441,7 +469,7 @@ export function InteractiveRouteMap({
                 rel="noopener noreferrer"
                 className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white py-2.5 text-xs font-bold transition-all shadow-sm cursor-pointer"
               >
-                <span>Open Navigation in Google Maps</span>
+                <span>Open Live Navigation in Google Maps</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>

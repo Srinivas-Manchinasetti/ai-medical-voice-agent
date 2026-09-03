@@ -443,7 +443,7 @@ export function CareNetworkSection() {
                     24/7 Emergency Care
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs">
-                    {liveRoadStats ? liveRoadStats.roadDistanceKm : selectedHospital.distanceKm} km away • ~{liveRoadStats ? liveRoadStats.etaMinutes : Math.max(3, Math.round((selectedHospital.distanceKm / 32) * 60))} min drive
+                    {liveRoadStats ? liveRoadStats.roadDistanceKm : selectedHospital.distanceKm} km away • ~{liveRoadStats ? liveRoadStats.etaMinutes : selectedHospital.etaMinutes || 12} min drive (traffic)
                   </span>
                   {selectedHospital.rating && (
                     <span className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs">
