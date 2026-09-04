@@ -131,27 +131,28 @@ h1,h2,h3{ font-weight:400; margin:0; letter-spacing:-.005em; }
   content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
   background:rgba(5,7,10,.62);
   backdrop-filter:blur(14px) saturate(1.1); -webkit-backdrop-filter:blur(14px) saturate(1.1);
-  opacity:0; transition:opacity .5s linear;
+  opacity:0; transition:opacity .5s linear, background .35s ease, box-shadow .35s ease;
 }
 .nav.stuck::before{ opacity:1; }
 .nav::after{
   content:''; position:absolute; left:var(--pad); right:var(--pad); bottom:0; height:1px;
-  background:var(--line-soft); opacity:0; transition:opacity .5s;
+  background:var(--line-soft); opacity:0; transition:opacity .5s, background .35s ease;
 }
 .nav.stuck::after{ opacity:1; }
 .nav.hide{ transform:translate3d(0,-101%,0); }
 .brand{ display:flex; align-items:center; gap:11px; flex:0 0 auto; }
 .brand svg{ width:34px; height:34px; display:block; }
 .brand-tx{ display:flex; flex-direction:column; line-height:1; gap:3px; }
-.brand-tx b{ font-size:12px; font-weight:500; letter-spacing:.26em; }
-.brand-tx i{ font-style:normal; font-size:8px; letter-spacing:.34em; color:var(--muted); }
+.brand-tx b{ font-size:12px; font-weight:500; letter-spacing:.26em; color:var(--bone); transition:color .35s ease; }
+.brand-tx i{ font-style:normal; font-size:8px; letter-spacing:.34em; color:var(--muted); transition:color .35s ease; }
 .nav-links{ display:flex; gap:clamp(18px,2.6vw,46px); margin-left:auto; }
 .nav-link{
   position:relative; font-size:11px; font-weight:500; letter-spacing:.2em; text-transform:uppercase;
   color:var(--bone-dim); display:block; height:15px; line-height:15px; overflow:hidden;
+  transition:color .35s ease;
 }
-.nav-link span{ display:block; height:15px; line-height:15px; transition:transform .55s var(--ease-out), color .3s; }
-.nav-link .alt{ position:absolute; inset:0; transform:translate3d(0,100%,0); color:var(--bone); letter-spacing:.32em; }
+.nav-link span{ display:block; height:15px; line-height:15px; transition:transform .55s var(--ease-out), color .35s ease; }
+.nav-link .alt{ position:absolute; inset:0; transform:translate3d(0,100%,0); color:var(--bone); letter-spacing:.32em; transition:transform .55s var(--ease-out), color .35s ease; }
 .nav-link:hover span{ transform:translate3d(0,-100%,0); }
 .nav-link:hover .alt{ transform:none; }
 .nav-link.on{ color:var(--bone); }
@@ -162,7 +163,7 @@ h1,h2,h3{ font-weight:400; margin:0; letter-spacing:-.005em; }
   background:rgba(56,189,248,0.10); border:1px solid rgba(56,189,248,0.32);
   color:#f0fdff; padding:6px 15px; border-radius:999px; font-size:11px;
   font-weight:600; letter-spacing:0.08em; text-transform:uppercase;
-  transition:all 0.3s var(--ease); backdrop-filter:blur(8px);
+  transition:all 0.35s var(--ease); backdrop-filter:blur(8px);
 }
 .nav-signin-btn:hover{
   background:rgba(56,189,248,0.22); border-color:#38bdf8;
@@ -176,6 +177,68 @@ h1,h2,h3{ font-weight:400; margin:0; letter-spacing:-.005em; }
 .nav-burger:hover i:nth-child(1){ width:17px; }
 .nav-burger.active i:nth-child(1){ top:7px; width:24px; transform:rotate(45deg); }
 .nav-burger.active i:nth-child(2){ top:7px; width:24px; transform:rotate(-45deg); }
+
+/* ============================================================= dynamic nav light theme */
+.nav.nav-on-light::before{
+  background:rgba(255,255,255,0.85) !important;
+  backdrop-filter:blur(16px) saturate(1.2) !important;
+  -webkit-backdrop-filter:blur(16px) saturate(1.2) !important;
+  opacity:1 !important;
+  box-shadow:0 4px 24px -2px rgba(15,23,42,0.08);
+}
+.nav.nav-on-light::after{
+  background:rgba(15,23,42,0.12) !important;
+  opacity:1 !important;
+}
+.nav.nav-on-light .brand-tx b{
+  color:#0f172a !important;
+}
+.nav.nav-on-light .brand-tx i{
+  color:#0284c7 !important;
+  font-weight:600;
+}
+.nav.nav-on-light .nav-link{
+  color:#334155 !important;
+}
+.nav.nav-on-light .nav-link span{
+  color:#334155 !important;
+}
+.nav.nav-on-light .nav-link .alt{
+  color:#0284c7 !important;
+}
+.nav.nav-on-light .nav-link:hover span{
+  color:#0284c7 !important;
+}
+.nav.nav-on-light .nav-link.on{
+  color:#0284c7 !important;
+}
+.nav.nav-on-light .nav-link.on::after{
+  background:#0284c7 !important;
+}
+.nav.nav-on-light .nav-signin-btn{
+  background:rgba(2,132,199,0.08) !important;
+  border-color:rgba(2,132,199,0.32) !important;
+  color:#0f172a !important;
+  box-shadow:0 2px 10px rgba(15,23,42,0.06);
+}
+.nav.nav-on-light .nav-signin-btn span{
+  color:#0f172a !important;
+}
+.nav.nav-on-light .nav-signin-btn svg{
+  color:#0f172a !important;
+  stroke:#0f172a !important;
+}
+.nav.nav-on-light .nav-signin-btn:hover{
+  background:rgba(2,132,199,0.16) !important;
+  border-color:#0284c7 !important;
+  color:#0369a1 !important;
+}
+.nav.nav-on-light .nav-signin-btn:hover span{
+  color:#0369a1 !important;
+}
+.nav.nav-on-light .nav-burger i{
+  background:#0f172a !important;
+}
 
 /* Drawer & Backdrop - Light Clinical Theme */
 .drawer-overlay{
@@ -4484,12 +4547,29 @@ function wireNav() {
   });
 
   const linkSec = links.map(l => SECS.indexOf(document.querySelector(l.getAttribute('href'))));
+
+  const updateNavTheme = () => {
+    if (!nav) return;
+    const lightSections = document.querySelectorAll('.white-medical-container, [data-nav-theme="light"]');
+    let isOverLight = false;
+    const navH = nav.offsetHeight || 80;
+    for (let i = 0; i < lightSections.length; i++) {
+      const rect = lightSections[i].getBoundingClientRect();
+      if (rect.top <= (navH * 0.85) && rect.bottom >= (navH * 0.15)) {
+        isOverLight = true;
+        break;
+      }
+    }
+    nav.classList.toggle('nav-on-light', isOverLight);
+  };
+
   window.addEventListener('scroll', () => {
     const y = scrollY;
     nav.classList.toggle('stuck', y > 40);
     nav.classList.toggle('hide',
       !(drawer && drawer.classList.contains('open')) && y > last + 4 && y > vpH() * .8);
     last = y;
+    updateNavTheme();
     const a = Math.round(progressFor(y));
     if (a !== activeSec) {
       activeSec = a;
@@ -4497,6 +4577,9 @@ function wireNav() {
       links.forEach((l, i) => l.classList.toggle('on', linkSec[i] === a));
     }
   }, { passive: true });
+
+  window.addEventListener('resize', updateNavTheme, { passive: true });
+  updateNavTheme();
 
   $$('a[href^="#"]').forEach(a => a.addEventListener('click', e => {
     const href = a.getAttribute('href');
