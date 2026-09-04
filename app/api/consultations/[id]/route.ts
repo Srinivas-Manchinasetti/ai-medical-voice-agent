@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/config/db";
 import { consultationsTable } from "@/config/schema";
 import { eq } from "drizzle-orm";
+import { memoryConsultations } from "../route";
 
 export async function GET(
   request: Request,
@@ -25,6 +26,12 @@ export async function GET(
       } catch (err) {
         console.warn("DB lookup error:", err);
       }
+    }
+
+    // Fallback to memory store
+    const memRecord = memoryConsultations.find((c) => c.id === id);
+    if (memRecord) {
+      return NextResponse.json({ success: true, consultation: memRecord });
     }
 
     return NextResponse.json(

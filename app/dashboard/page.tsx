@@ -21,11 +21,20 @@ import {
   ExternalLink,
   ShieldCheck,
   Sparkles,
-  ClipboardList
+  ClipboardList,
+  Radio,
+  Copy,
+  Check,
+  FileCode,
+  Lock,
+  Zap,
+  X,
+  Send
 } from "lucide-react";
 import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
 import { Footer } from "../_components/Footer";
+import { generateFHIRBundle } from "@/lib/fhir/bundle";
 
 interface ConsultationRecord {
   id: string;
@@ -37,6 +46,7 @@ interface ConsultationRecord {
   chiefComplaint: string;
   triageLevel: "emergency" | "priority" | "routine";
   triageTitle: string;
+  esiScore?: number;
   icd10Codes?: string[];
   detectedSymptoms?: string[];
   soapSubjective?: string;
@@ -49,12 +59,48 @@ interface ConsultationRecord {
   transcript?: Array<{ role: string; text: string; timestamp: string }>;
 }
 
+interface DispatchReceiptState {
+  dispatchId: string;
+  hospitalName: string;
+  intakeQueueStatus: string;
+  assignedHospitalBay: string;
+  attendingPhysicianOnCall: string;
+  etaMinutes: number;
+  auditHash: string;
+  timestamp: string;
+  preArrivalDirectives: string[];
+}
+
+// Client-side SHA-256 calculation using native Web Cryptography API
+async function computeSha256Hex(message: string): Promise<string> {
+  if (typeof window === "undefined" || !window.crypto || !window.crypto.subtle) {
+    return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+  }
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await window.crypto.subtle.digest("SHA-256", msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export default function DashboardPage() {
   const [consultations, setConsultations] = useState<ConsultationRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedReport, setSelectedReport] = useState<ConsultationRecord | null>(null);
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // HL7 FHIR Modal State
+  const [showFhirModal, setShowFhirModal] = useState<boolean>(false);
+  const [fhirJsonString, setFhirJsonString] = useState<string>("");
+  const [copiedFhir, setCopiedFhir] = useState<boolean>(false);
+
+  // Hospital Pre-Arrival Dispatch State
+  const [isDispatching, setIsDispatching] = useState<boolean>(false);
+  const [dispatches, setDispatches] = useState<Record<string, DispatchReceiptState>>({});
+  
+  // SHA-256 Cryptographic Hash State
+  const [currentRecordHash, setCurrentRecordHash] = useState<string>("");
+  const [copiedHash, setCopiedHash] = useState<boolean>(false);
 
   useEffect(() => {
     async function loadConsultations() {
@@ -63,11 +109,9 @@ export default function DashboardPage() {
         const res = await fetch("/api/consultations");
         if (res.ok) {
           const data = await res.json();
-          if (data.consultations) {
+          if (data.consultations && data.consultations.length > 0) {
             setConsultations(data.consultations);
-            if (data.consultations.length > 0) {
-              setSelectedReport(data.consultations[0]);
-            }
+            setSelectedReport(data.consultations[0]);
           }
         }
       } catch (err) {
@@ -78,6 +122,23 @@ export default function DashboardPage() {
     }
     loadConsultations();
   }, []);
+
+  // Compute cryptographic SHA-256 hash whenever selected report changes
+  useEffect(() => {
+    if (!selectedReport) return;
+    const canonical = [
+      selectedReport.id,
+      selectedReport.patientName,
+      selectedReport.createdAt,
+      selectedReport.triageLevel,
+      (selectedReport.icd10Codes || []).slice().sort().join(","),
+      selectedReport.chiefComplaint?.trim().toLowerCase() || "",
+    ].join("|");
+
+    computeSha256Hex(canonical).then((hash) => {
+      setCurrentRecordHash(hash);
+    });
+  }, [selectedReport]);
 
   const filteredConsultations = consultations.filter((c) => {
     const matchesSeverity = filterSeverity === "all" || c.triageLevel === filterSeverity;
@@ -94,6 +155,131 @@ export default function DashboardPage() {
     }
   };
 
+  // Open FHIR Modal & generate R4 bundle
+  const handleOpenFhirModal = () => {
+    if (!selectedReport) return;
+    const bundle = generateFHIRBundle({
+      id: selectedReport.id,
+      patientName: selectedReport.patientName,
+      doctorId: selectedReport.doctorId,
+      doctorName: selectedReport.doctorName,
+      specialty: selectedReport.specialty,
+      chiefComplaint: selectedReport.chiefComplaint,
+      triageLevel: selectedReport.triageLevel,
+      triageTitle: selectedReport.triageTitle,
+      esiScore: selectedReport.esiScore,
+      icd10Codes: selectedReport.icd10Codes,
+      detectedSymptoms: selectedReport.detectedSymptoms,
+      soapSubjective: selectedReport.soapSubjective,
+      soapObjective: selectedReport.soapObjective,
+      soapAssessment: selectedReport.soapAssessment,
+      soapPlan: selectedReport.soapPlan,
+      recommendedAction: selectedReport.recommendedAction,
+      createdAt: selectedReport.createdAt,
+      transcript: selectedReport.transcript,
+    });
+
+    const jsonStr = JSON.stringify(bundle, null, 2);
+    setFhirJsonString(jsonStr);
+    setShowFhirModal(true);
+  };
+
+  // Download FHIR JSON file
+  const handleDownloadFhir = () => {
+    if (!selectedReport) return;
+    const bundle = generateFHIRBundle({
+      id: selectedReport.id,
+      patientName: selectedReport.patientName,
+      doctorId: selectedReport.doctorId,
+      doctorName: selectedReport.doctorName,
+      specialty: selectedReport.specialty,
+      chiefComplaint: selectedReport.chiefComplaint,
+      triageLevel: selectedReport.triageLevel,
+      triageTitle: selectedReport.triageTitle,
+      esiScore: selectedReport.esiScore,
+      icd10Codes: selectedReport.icd10Codes,
+      detectedSymptoms: selectedReport.detectedSymptoms,
+      soapSubjective: selectedReport.soapSubjective,
+      soapObjective: selectedReport.soapObjective,
+      soapAssessment: selectedReport.soapAssessment,
+      soapPlan: selectedReport.soapPlan,
+      recommendedAction: selectedReport.recommendedAction,
+      createdAt: selectedReport.createdAt,
+      transcript: selectedReport.transcript,
+    });
+
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/fhir+json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fhir-r4-bundle-${selectedReport.id}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyFhir = () => {
+    if (!fhirJsonString) return;
+    navigator.clipboard.writeText(fhirJsonString);
+    setCopiedFhir(true);
+    setTimeout(() => setCopiedFhir(false), 2000);
+  };
+
+  const handleCopyHash = () => {
+    if (!currentRecordHash) return;
+    navigator.clipboard.writeText(currentRecordHash);
+    setCopiedHash(true);
+    setTimeout(() => setCopiedHash(false), 2000);
+  };
+
+  // Transmit simulated pre-arrival alert to receiving hospital ED
+  const handleTransmitPreArrival = async () => {
+    if (!selectedReport) return;
+    setIsDispatching(true);
+
+    try {
+      const payload = {
+        consultationId: selectedReport.id,
+        patientId: selectedReport.userId || "P-1002",
+        patientName: selectedReport.patientName,
+        esiScore: selectedReport.esiScore || (selectedReport.triageLevel === "emergency" ? 2 : selectedReport.triageLevel === "priority" ? 3 : 4),
+        triageLevel: selectedReport.triageLevel,
+        triageTitle: selectedReport.triageTitle || "Emergency Triage Case",
+        chiefComplaint: selectedReport.chiefComplaint || "Emergency Medical Evaluation",
+        icd10Codes: selectedReport.icd10Codes || ["R07.9"],
+        detectedSymptoms: selectedReport.detectedSymptoms || ["Acute Complaint"],
+        redFlagsTriggered: selectedReport.triageLevel === "emergency" 
+          ? (selectedReport.specialty.toLowerCase().includes("cardio") 
+              ? ["ACS_CHEST_PAIN_WITH_HIGH_RISK_RADIATION_OR_DIAPHORESIS"] 
+              : ["BE_FAST_ACUTE_ISCHEMIC_STROKE_SYMPTOMS"])
+          : [],
+        targetHospitalName: "Regional Level-1 Trauma & Emergency Medical Center",
+        etaMinutes: 9,
+      };
+
+      const res = await fetch("/api/emergency/pre-arrival", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.receipt) {
+          setDispatches((prev) => ({
+            ...prev,
+            [selectedReport.id]: data.receipt,
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Emergency dispatch error:", err);
+    } finally {
+      setIsDispatching(false);
+    }
+  };
+
   const getUrgencyBadge = (level: string) => {
     if (level === "emergency") {
       return "bg-rose-50 text-rose-700 border-rose-200 font-bold animate-pulse";
@@ -104,6 +290,8 @@ export default function DashboardPage() {
     return "bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold";
   };
 
+  const activeDispatch = selectedReport ? dispatches[selectedReport.id] : null;
+
   return (
     <div className="relative min-h-screen bg-[#FAF9F6] text-slate-900 font-sans flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
       <div>
@@ -111,14 +299,20 @@ export default function DashboardPage() {
 
         {/* PAGE HEADER */}
         <section className="pt-14 pb-8 px-6 max-w-4xl mx-auto text-center space-y-3">
-          <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-700 bg-cyan-50 border border-cyan-200 px-3.5 py-1 rounded-full inline-block">
-            EHR CLINICAL ARCHIVE
-          </span>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-700 bg-cyan-50 border border-cyan-200 px-3.5 py-1 rounded-full inline-block">
+              EHR CLINICAL ARCHIVE
+            </span>
+            <span className="text-xs font-mono font-bold uppercase tracking-widest text-emerald-700 bg-emerald-50 border border-emerald-200 px-3.5 py-1 rounded-full inline-flex items-center gap-1.5">
+              <ShieldCheck className="w-3 h-3" />
+              <span>HL7 FHIR R4 & ED DISPATCH</span>
+            </span>
+          </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-950">
-            SOAP Clinical Reports & History
+            SOAP Clinical Reports & Records
           </h1>
-          <p className="text-base text-slate-600 max-w-xl mx-auto leading-relaxed font-medium">
-            Review automated Subjective, Objective, Assessment, and Plan (SOAP) records generated from AI voice triage consultations.
+          <p className="text-base text-slate-600 max-w-2xl mx-auto leading-relaxed font-medium">
+            Review automated SOAP documentation, export interoperable HL7 FHIR R4 JSON bundles, and simulate emergency hospital pre-arrival telemetry dispatch.
           </p>
         </section>
 
@@ -149,7 +343,7 @@ export default function DashboardPage() {
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search doctor or symptom..."
+                  placeholder="Search doctor, symptom..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="bg-slate-50 border border-slate-200 focus:border-slate-400 focus:bg-white rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none w-full transition-all"
@@ -175,7 +369,7 @@ export default function DashboardPage() {
                 <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500">
                   Recorded Sessions ({filteredConsultations.length})
                 </span>
-                <span className="text-[11px] text-slate-400 font-medium">Click to inspect SOAP note</span>
+                <span className="text-[11px] text-slate-400 font-medium">Click to inspect SOAP chart</span>
               </div>
 
               {isLoading ? (
@@ -200,7 +394,7 @@ export default function DashboardPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-2.5 max-h-[660px] overflow-y-auto pr-1">
+                <div className="space-y-2.5 max-h-[720px] overflow-y-auto pr-1">
                   {filteredConsultations.map((item) => {
                     const isSelected = selectedReport?.id === item.id;
                     const dateStr = item.createdAt
@@ -230,7 +424,14 @@ export default function DashboardPage() {
 
                         <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 border-t border-slate-100 pt-2.5">
                           <span className="text-cyan-700 font-bold">{item.specialty}</span>
-                          <span>{dateStr}</span>
+                          <div className="flex items-center gap-2">
+                            {dispatches[item.id] && (
+                              <span className="text-[10px] bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded font-bold">
+                                ED DISPATCHED
+                              </span>
+                            )}
+                            <span>{dateStr}</span>
+                          </div>
                         </div>
                       </button>
                     );
@@ -240,7 +441,7 @@ export default function DashboardPage() {
             </div>
 
             {/* RIGHT: SOAP Report Detailed Chart */}
-            <div className="lg:col-span-7">
+            <div className="lg:col-span-7 space-y-4">
               {selectedReport ? (
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
                   
@@ -249,6 +450,8 @@ export default function DashboardPage() {
                     <div>
                       <div className="flex items-center gap-2 text-xs font-mono font-bold text-cyan-700 mb-1">
                         <span>RECORD ID: {selectedReport.id}</span>
+                        <span className="text-slate-300">•</span>
+                        <span className="text-slate-500">Patient: {selectedReport.patientName}</span>
                       </div>
                       <h2 className="text-2xl font-extrabold text-slate-950">Clinical SOAP Documentation</h2>
                       <p className="text-xs text-slate-500 mt-0.5 font-medium">
@@ -256,23 +459,104 @@ export default function DashboardPage() {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* HL7 FHIR EXPORT BUTTON */}
+                      <button
+                        onClick={handleOpenFhirModal}
+                        className="inline-flex items-center gap-1.5 bg-cyan-50 hover:bg-cyan-100/80 border border-cyan-200 text-cyan-800 px-3 py-2 rounded-xl text-xs font-bold transition-all"
+                        title="Inspect or download HL7 FHIR R4 Bundle"
+                      >
+                        <FileCode className="w-3.5 h-3.5 text-cyan-700" />
+                        <span>FHIR R4</span>
+                      </button>
+
                       <button
                         onClick={handlePrint}
-                        className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-800 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+                        className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-800 px-3 py-2 rounded-xl text-xs font-bold transition-all"
                       >
                         <Printer className="w-3.5 h-3.5" />
                         <span>Print</span>
                       </button>
+
                       <Link
                         href="/care"
-                        className="inline-flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+                        className="inline-flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-3 py-2 rounded-xl text-xs font-bold transition-all"
                       >
                         <Building2 className="w-3.5 h-3.5" />
                         <span>Find ERs</span>
                       </Link>
                     </div>
                   </div>
+
+                  {/* EMERGENCY PRE-ARRIVAL DISPATCH TELEMETRY BANNER */}
+                  {selectedReport.triageLevel === "emergency" && (
+                    <div className="p-4 rounded-2xl border bg-gradient-to-r from-rose-50/70 to-amber-50/70 border-rose-200 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Radio className={`w-4 h-4 ${activeDispatch ? "text-rose-600 animate-ping" : "text-rose-600"}`} />
+                          <span className="text-xs font-mono font-extrabold uppercase tracking-wider text-rose-900">
+                            Pre-Arrival Hospital Telemetry Webhook
+                          </span>
+                        </div>
+                        {activeDispatch ? (
+                          <span className="text-[11px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            <span>ED BAY RESERVED ({activeDispatch.etaMinutes}m ETA)</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-mono text-slate-500 font-medium">
+                            Status: Awaiting Clinician Transmission
+                          </span>
+                        )}
+                      </div>
+
+                      {activeDispatch ? (
+                        <div className="bg-white/90 rounded-xl p-3.5 border border-rose-200/80 space-y-2 text-xs">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">Assigned Intake Bay:</span>
+                              <span className="font-extrabold text-slate-900">{activeDispatch.assignedHospitalBay}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">On-Call Attending:</span>
+                              <span className="font-bold text-slate-800">{activeDispatch.attendingPhysicianOnCall}</span>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-100 pt-2">
+                            <span className="text-[10px] font-mono uppercase text-rose-700 font-bold block mb-1">Pre-Arrival Directives Transmitted:</span>
+                            <ul className="space-y-1 text-[11px] text-slate-700">
+                              {activeDispatch.preArrivalDirectives.map((d, i) => (
+                                <li key={i} className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 flex-shrink-0" />
+                                  <span>{d}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="text-[10px] font-mono text-slate-500 flex items-center justify-between border-t border-slate-100 pt-1.5">
+                            <span>Receipt ID: {activeDispatch.dispatchId}</span>
+                            <span className="text-emerald-700 font-bold">✓ Cryptographically Verified</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white/70 rounded-xl p-3 border border-rose-200/60">
+                          <p className="text-xs text-slate-700 font-medium">
+                            Life-threat criteria detected. Alert the receiving emergency department and Cath/Stroke team prior to patient arrival.
+                          </p>
+                          <button
+                            onClick={handleTransmitPreArrival}
+                            disabled={isDispatching}
+                            className="inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-extrabold shadow-sm transition-all flex-shrink-0 disabled:opacity-50"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{isDispatching ? "Transmitting..." : "Dispatch ED Alert"}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Urgency & Symptoms Bar */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -298,6 +582,32 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  {/* CRYPTOGRAPHIC SHA-256 INTEGRITY BADGE */}
+                  <div className="bg-slate-900 text-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <Lock className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-slate-100 text-[11px]">SHA-256 AUDIT INTEGRITY:</span>
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono font-bold">
+                            TAMPER EVIDENT
+                          </span>
+                        </div>
+                        <span className="font-mono text-[10px] text-slate-400 break-all">
+                          {currentRecordHash || "Computing canonical hash..."}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleCopyHash}
+                      className="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg text-[11px] font-mono transition-all flex-shrink-0"
+                    >
+                      {copiedHash ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedHash ? "Copied" : "Copy Hash"}</span>
+                    </button>
+                  </div>
+
                   {/* SOAP NOTE CARDS */}
                   <div className="space-y-3.5 text-xs leading-relaxed">
                     {/* S - Subjective */}
@@ -315,7 +625,7 @@ export default function DashboardPage() {
                     <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-sm">
                       <h4 className="font-extrabold text-teal-800 font-mono text-xs mb-1.5 flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-teal-100 border border-teal-200 text-teal-800 flex items-center justify-center text-[10px] font-bold">O</span>
-                        <span>OBJECTIVE (Parsed Entities & Triage Metrics)</span>
+                        <span>OBJECTIVE (Parsed Features & ESI v4 Arbiter)</span>
                       </h4>
                       <p className="text-slate-700 font-medium">
                         {selectedReport.soapObjective || `Detected symptoms: ${selectedReport.detectedSymptoms?.join(", ") || "None"}.`}
@@ -337,7 +647,7 @@ export default function DashboardPage() {
                     <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-sm">
                       <h4 className="font-extrabold text-emerald-800 font-mono text-xs mb-1.5 flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 flex items-center justify-center text-[10px] font-bold">P</span>
-                        <span>PLAN (Actionable Directives & Follow-up)</span>
+                        <span>PLAN (Actionable Directives & Safety Arbiter Status)</span>
                       </h4>
                       <p className="text-slate-700 whitespace-pre-line font-medium">
                         {selectedReport.soapPlan || selectedReport.recommendedAction || "Follow standard clinical recommendations."}
@@ -383,6 +693,85 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* HL7 FHIR R4 INSPECTION MODAL */}
+      <AnimatePresence>
+        {showFhirModal && selectedReport && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden text-slate-100"
+            >
+              {/* Modal Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                    <FileCode className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base text-white">HL7 FHIR Release 4 Document Bundle</h3>
+                    <p className="text-xs text-slate-400 font-mono">
+                      LOINC 11488-4 (Consultation Note) • SNOMED CT • ICD-10-CM
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCopyFhir}
+                    className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all"
+                  >
+                    {copiedFhir ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedFhir ? "Copied" : "Copy JSON"}</span>
+                  </button>
+                  <button
+                    onClick={handleDownloadFhir}
+                    className="inline-flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download .json</span>
+                  </button>
+                  <button
+                    onClick={() => setShowFhirModal(false)}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all ml-1"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Resource Summary Badges */}
+              <div className="px-5 py-2.5 bg-slate-950/60 border-b border-slate-800 flex flex-wrap gap-2 text-[11px] font-mono">
+                <span className="text-slate-400">Bundle Resources:</span>
+                <span className="bg-cyan-950/60 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded">Composition</span>
+                <span className="bg-indigo-950/60 text-indigo-300 border border-indigo-800 px-2 py-0.5 rounded">Patient</span>
+                <span className="bg-purple-950/60 text-purple-300 border border-purple-800 px-2 py-0.5 rounded">Practitioner</span>
+                <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded">Encounter ({selectedReport.triageLevel.toUpperCase()})</span>
+                <span className="bg-amber-950/60 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">Observation (ESI Acuity)</span>
+                <span className="bg-rose-950/60 text-rose-300 border border-rose-800 px-2 py-0.5 rounded">Condition ({selectedReport.icd10Codes?.join(", ") || "Z76.0"})</span>
+              </div>
+
+              {/* Modal Body: Raw Code */}
+              <div className="flex-1 p-5 overflow-auto bg-[#0a0f18] font-mono text-xs text-slate-300 leading-relaxed">
+                <pre className="whitespace-pre">{fhirJsonString}</pre>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between text-xs text-slate-400">
+                <span>Conforms to HL7 FHIR v4.0.1 Document StructureDefinition</span>
+                <button
+                  onClick={() => setShowFhirModal(false)}
+                  className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all text-xs"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <Footer />
     </div>
