@@ -2932,7 +2932,7 @@ const HI = qs('q', COARSE ? 'low' : 'high');
 const LOW = HI === 'low';
 const WANT_POST    = qs('post', '1') !== '0';
 const WANT_SHADOW  = qs('shadow', LOW ? '0' : '1') !== '0';
-const DPR_CAP      = qn('dpr', LOW ? 1.4 : 1.8);
+const DPR_CAP      = qn('dpr', LOW ? 1.4 : 2.5);
 /* the renderer trades resolution for frame rate on its own — the scene is
    fill-bound (five big alpha-blended veils plus a bloom chain), so pixels
    are the only knob worth turning on unknown hardware */
@@ -3157,12 +3157,17 @@ function buildTemple() {
   const g = new THREE.Group();
   
   const texLoader = new THREE.TextureLoader();
-  const hospitalTex = texLoader.load('/images/medvoice-hospital-hero.jpg', () => {
-    if (typeof renderer !== 'undefined' && renderer) renderer.render(scene, camera);
+  const hospitalTex = texLoader.load('/images/medvoice-hospital-hero.jpg', (tex) => {
+    if (typeof renderer !== 'undefined' && renderer) {
+      if (renderer.capabilities) {
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      }
+      renderer.render(scene, camera);
+    }
   });
   hospitalTex.encoding = THREE.sRGBEncoding;
-  hospitalTex.generateMipmaps = false;
-  hospitalTex.minFilter = THREE.LinearFilter;
+  hospitalTex.generateMipmaps = true;
+  hospitalTex.minFilter = THREE.LinearMipmapLinearFilter;
   hospitalTex.magFilter = THREE.LinearFilter;
 
   // Perfect 16:9 aspect ratio matching camera frustum
@@ -3180,9 +3185,9 @@ function buildTemple() {
   hospitalPlane.position.set(0, 16.5, -58);
   g.add(hospitalPlane);
 
-  // Subtle Rooftop Cross Glow Enhancement
+  // Subtle Rooftop Cross Glow Enhancement (aligned with 4K building apex)
   const crossGlow = new THREE.Mesh(
-    new THREE.PlaneGeometry(16, 16),
+    new THREE.PlaneGeometry(14, 14),
     new THREE.MeshBasicMaterial({
       map: tx(texGlow('rgba(56,189,248,0.95)', 'rgba(2,132,199,0.25)')),
       transparent: true,
@@ -3190,10 +3195,10 @@ function buildTemple() {
       depthWrite: false,
       side: THREE.DoubleSide,
       fog: false,
-      opacity: 0.65
+      opacity: 0.7
     })
   );
-  crossGlow.position.set(0, 36.5, -57.5);
+  crossGlow.position.set(0, 30.5, -57.5);
   crossGlow.renderOrder = 3;
   g.add(crossGlow);
 
