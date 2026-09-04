@@ -680,21 +680,21 @@ body[data-layout-hero="b"] .hero-side .v{
   font-size:clamp(30px,3.2vw,54px); letter-spacing:.12em; color:rgba(223,231,224,.62);
 }
 
-/* — story B · spread: clean, unblurred open typography over 4K hospital background */
+/* — story B · spread: balanced dual-column layout with sleek dark container frames */
 body[data-layout-story="b"] .gate-grid{
   grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
   gap:clamp(32px,5vw,72px);
-  background:none;
-  border:none;
-  border-radius:0;
-  padding:0;
-  box-shadow:none;
+  background:rgba(4,9,16,0.78);
+  border:1px solid rgba(56,189,248,0.20);
+  border-radius:28px;
+  padding:clamp(28px,4vw,52px);
+  box-shadow:0 28px 70px -15px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.08);
 }
 body[data-layout-story="b"] .gate-grid h2{
   grid-column:1;
   max-width:14ch;
   color:#ffffff !important;
-  text-shadow:0 2px 28px rgba(0,0,0,0.95), 0 4px 50px rgba(0,0,0,0.9);
+  text-shadow:0 2px 24px rgba(0,0,0,0.95);
 }
 body[data-layout-story="b"] .gate-copy{
   grid-column:2;
@@ -703,22 +703,20 @@ body[data-layout-story="b"] .gate-stats{
   display:grid;
   grid-template-columns:repeat(4,1fr);
   gap:0;
-  background:none;
-  border:none;
-  border-top:1px solid rgba(56,189,248,0.22);
-  border-radius:0;
-  margin-top:clamp(36px,6vh,64px);
-  box-shadow:none;
-  overflow:visible;
+  background:rgba(4,9,16,0.72);
+  border:1px solid rgba(56,189,248,0.18);
+  border-radius:20px;
+  margin-top:clamp(28px,4.5vh,48px);
+  overflow:hidden;
+  box-shadow:0 16px 40px -10px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.06);
 }
 body[data-layout-story="b"] .gate-stats div{
-  min-height:90px;
+  min-height:100px;
   padding:20px 24px;
   border-left:1px solid rgba(56,189,248,0.14);
 }
 body[data-layout-story="b"] .gate-stats div:first-child{
   border-left:none;
-  padding-left:0;
 }
 body[data-layout-story="b"] .gate-stats div:last-child{
   border-right:none;
@@ -726,16 +724,15 @@ body[data-layout-story="b"] .gate-stats div:last-child{
 body[data-layout-story="b"] .gate-stats div b{
   color:#38bdf8 !important;
   font-weight:500;
-  font-size:clamp(26px,2.4vw,36px);
-  text-shadow:0 2px 20px rgba(0,0,0,0.9), 0 0 24px rgba(56,189,248,0.5);
+  font-size:clamp(24px,2.2vw,34px);
+  text-shadow:0 0 24px rgba(56,189,248,0.45);
 }
 body[data-layout-story="b"] .gate-stats div span{
-  color:#cbd5e1 !important;
+  color:#94a3b8 !important;
   font-weight:600;
   font-size:10px;
-  letter-spacing:.22em;
+  letter-spacing:.2em;
   text-transform:uppercase;
-  text-shadow:0 1px 12px rgba(0,0,0,0.9);
 }
 
 /* — gardens B · mosaic: one immersive live window beside two stacked ones.
