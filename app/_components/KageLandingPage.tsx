@@ -192,7 +192,7 @@ export function KageLandingPage() {
   return (
     <LandingPageFrame
       title="Kage — Where stillness reveals the unseen"
-      sourceUrl="/landing-pages/kage.html"
+      sourceUrl="/landing-pages/kage.html?v=1.2"
     />
   );
 }

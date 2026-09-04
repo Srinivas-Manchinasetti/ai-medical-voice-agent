@@ -4546,7 +4546,18 @@ function wireNav() {
     });
   });
 
-  const linkSec = links.map(l => SECS.indexOf(document.querySelector(l.getAttribute('href'))));
+  const linkSec = links.map(l => {
+    const href = l.getAttribute('href');
+    if (href && href.startsWith('#')) {
+      try {
+        const el = document.querySelector(href);
+        return el ? SECS.indexOf(el) : -1;
+      } catch (e) {
+        return -1;
+      }
+    }
+    return -1;
+  });
 
   const updateNavTheme = () => {
     if (!nav) return;
@@ -4555,7 +4566,7 @@ function wireNav() {
     const navH = nav.offsetHeight || 80;
     for (let i = 0; i < lightSections.length; i++) {
       const rect = lightSections[i].getBoundingClientRect();
-      if (rect.top <= (navH * 0.85) && rect.bottom >= (navH * 0.15)) {
+      if (rect.top <= (navH + 20) && rect.bottom >= 10) {
         isOverLight = true;
         break;
       }
