@@ -1002,45 +1002,10 @@ body[data-layout-footer="b"] .foot-base span:last-child{ text-align:right; }
   .mask-line > span,.word{ opacity:1 !important; transform:none !important; }
 }
 
-/* ======================== Chapter 01 Doctor & Medicine Cutouts ======================== */
-[data-fg="gate"] .fg-doctor {
-  left: 0;
-  bottom: 0;
-  width: clamp(220px, 23vw, 380px);
-  z-index: 60;
-  pointer-events: none;
-}
-[data-fg="gate"] .fg-doctor > img {
-  opacity: 1 !important;
-  mix-blend-mode: normal !important;
-  filter: drop-shadow(0 16px 36px rgba(0, 0, 0, 0.85)) contrast(1.05) brightness(1.02);
-}
-
+/* ======================== Chapter 01 Clean Unobstructed Layout ======================== */
+[data-fg="gate"] .fg-doctor,
 [data-fg="gate"] .fg-medicine {
-  right: 1vw;
-  bottom: 3vh;
-  width: clamp(180px, 19vw, 320px);
-  z-index: 60;
-  pointer-events: none;
-}
-[data-fg="gate"] .fg-medicine > img {
-  opacity: 1 !important;
-  mix-blend-mode: normal !important;
-  filter: drop-shadow(0 16px 36px rgba(2, 132, 199, 0.45)) drop-shadow(0 12px 28px rgba(0, 0, 0, 0.85)) contrast(1.05) brightness(1.05);
-  animation: floatLevitate 6s ease-in-out infinite alternate;
-}
-
-@keyframes floatLevitate {
-  0% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-16px) rotate(1.8deg); }
-  100% { transform: translateY(5px) rotate(-1.2deg); }
-}
-
-@media (max-width: 960px) {
-  [data-fg="gate"] .fg-doctor,
-  [data-fg="gate"] .fg-medicine {
-    display: none;
-  }
+  display: none !important;
 }
 
 
@@ -3170,8 +3135,8 @@ function buildTemple() {
   hospitalTex.minFilter = THREE.LinearMipmapLinearFilter;
   hospitalTex.magFilter = THREE.LinearFilter;
 
-  // Perfect 16:9 aspect ratio matching camera frustum
-  const planeW = 112, planeH = 63;
+  // Wide 16:9 aspect ratio covering wide-angle Chapter 01 camera frustum
+  const planeW = 144, planeH = 81;
   const hospitalPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(planeW, planeH),
     new THREE.MeshBasicMaterial({
@@ -3182,12 +3147,12 @@ function buildTemple() {
       fog: false
     })
   );
-  hospitalPlane.position.set(0, 16.5, -58);
+  hospitalPlane.position.set(0, 17.5, -60);
   g.add(hospitalPlane);
 
   // Subtle Rooftop Cross Glow Enhancement (aligned with 4K building apex)
   const crossGlow = new THREE.Mesh(
-    new THREE.PlaneGeometry(14, 14),
+    new THREE.PlaneGeometry(16, 16),
     new THREE.MeshBasicMaterial({
       map: tx(texGlow('rgba(56,189,248,0.95)', 'rgba(2,132,199,0.25)')),
       transparent: true,
@@ -3198,7 +3163,7 @@ function buildTemple() {
       opacity: 0.7
     })
   );
-  crossGlow.position.set(0, 30.5, -57.5);
+  crossGlow.position.set(0, 35.5, -59.5);
   crossGlow.renderOrder = 3;
   g.add(crossGlow);
 
