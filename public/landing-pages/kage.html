@@ -364,11 +364,6 @@ h1,h2,h3{ font-weight:400; margin:0; letter-spacing:-.005em; }
   -webkit-mask-image:linear-gradient(transparent, #000 44%);
           mask-image:linear-gradient(transparent, #000 44%);
 }
-#gate::before{
-  content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
-  background:radial-gradient(110% 85% at 50% 50%, rgba(4,8,14,0.85) 0%, rgba(4,8,14,0.72) 45%, rgba(4,8,14,0.45) 80%, rgba(4,8,14,0.15) 100%);
-  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
-}
 #pathways::before{ background:radial-gradient(108% 64% at 50% 50%, rgba(4,7,10,.70), rgba(4,7,10,.44) 50%, rgba(4,7,10,0)); }
 #eternity::before{ background:radial-gradient(82% 58% at 50% 46%, rgba(4,7,10,.26), rgba(4,7,10,.66) 56%, rgba(4,7,10,.90) 82%, rgba(4,7,10,0)); }
 .foot::before{
@@ -685,36 +680,63 @@ body[data-layout-hero="b"] .hero-side .v{
   font-size:clamp(30px,3.2vw,54px); letter-spacing:.12em; color:rgba(223,231,224,.62);
 }
 
-/* — story B · spread: balanced dual-column layout with high-legibility frosted glass scrim */
+/* — story B · spread: clean, unblurred open typography over 4K hospital background */
 body[data-layout-story="b"] .gate-grid{
   grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
   gap:clamp(32px,5vw,72px);
-  background:rgba(4,9,16,0.72);
-  border:1px solid rgba(56,189,248,0.18);
-  border-radius:28px;
-  padding:clamp(28px,4vw,52px);
-  backdrop-filter:blur(24px);
-  -webkit-backdrop-filter:blur(24px);
-  box-shadow:0 28px 70px -15px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.08);
+  background:none;
+  border:none;
+  border-radius:0;
+  padding:0;
+  box-shadow:none;
 }
-body[data-layout-story="b"] .gate-grid h2{ grid-column:1; max-width:14ch; color:#ffffff !important; text-shadow:0 2px 24px rgba(0,0,0,0.95); }
-body[data-layout-story="b"] .gate-copy{ grid-column:2; }
+body[data-layout-story="b"] .gate-grid h2{
+  grid-column:1;
+  max-width:14ch;
+  color:#ffffff !important;
+  text-shadow:0 2px 28px rgba(0,0,0,0.95), 0 4px 50px rgba(0,0,0,0.9);
+}
+body[data-layout-story="b"] .gate-copy{
+  grid-column:2;
+}
 body[data-layout-story="b"] .gate-stats{
-  display:grid; grid-template-columns:repeat(4,1fr); gap:0;
-  background:rgba(4,9,16,0.65);
-  border:1px solid rgba(56,189,248,0.14);
-  border-radius:20px;
-  backdrop-filter:blur(20px);
-  -webkit-backdrop-filter:blur(20px);
-  margin-top:clamp(28px,4.5vh,48px);
-  overflow:hidden;
-  box-shadow:0 16px 40px -10px rgba(0,0,0,0.7);
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:0;
+  background:none;
+  border:none;
+  border-top:1px solid rgba(56,189,248,0.22);
+  border-radius:0;
+  margin-top:clamp(36px,6vh,64px);
+  box-shadow:none;
+  overflow:visible;
 }
-body[data-layout-story="b"] .gate-stats div{ min-height:100px; padding:20px 24px; border-left:1px solid rgba(56,189,248,0.12); }
-body[data-layout-story="b"] .gate-stats div:first-child{ border-left:none; }
-body[data-layout-story="b"] .gate-stats div:last-child{ border-right:none; }
-body[data-layout-story="b"] .gate-stats div b{ color:#38bdf8 !important; font-weight:500; font-size:clamp(24px,2.2vw,34px); text-shadow:0 0 24px rgba(56,189,248,0.45); }
-body[data-layout-story="b"] .gate-stats div span{ color:#94a3b8 !important; font-weight:600; font-size:10px; letter-spacing:.2em; text-transform:uppercase; }
+body[data-layout-story="b"] .gate-stats div{
+  min-height:90px;
+  padding:20px 24px;
+  border-left:1px solid rgba(56,189,248,0.14);
+}
+body[data-layout-story="b"] .gate-stats div:first-child{
+  border-left:none;
+  padding-left:0;
+}
+body[data-layout-story="b"] .gate-stats div:last-child{
+  border-right:none;
+}
+body[data-layout-story="b"] .gate-stats div b{
+  color:#38bdf8 !important;
+  font-weight:500;
+  font-size:clamp(26px,2.4vw,36px);
+  text-shadow:0 2px 20px rgba(0,0,0,0.9), 0 0 24px rgba(56,189,248,0.5);
+}
+body[data-layout-story="b"] .gate-stats div span{
+  color:#cbd5e1 !important;
+  font-weight:600;
+  font-size:10px;
+  letter-spacing:.22em;
+  text-transform:uppercase;
+  text-shadow:0 1px 12px rgba(0,0,0,0.9);
+}
 
 /* — gardens B · mosaic: one immersive live window beside two stacked ones.
      The cards stretch to their rows and the frames flex, so the two small
