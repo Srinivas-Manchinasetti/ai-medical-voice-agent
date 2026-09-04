@@ -364,6 +364,11 @@ h1,h2,h3{ font-weight:400; margin:0; letter-spacing:-.005em; }
   -webkit-mask-image:linear-gradient(transparent, #000 44%);
           mask-image:linear-gradient(transparent, #000 44%);
 }
+#gate::before{
+  content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background:radial-gradient(110% 85% at 50% 50%, rgba(4,8,14,0.85) 0%, rgba(4,8,14,0.72) 45%, rgba(4,8,14,0.45) 80%, rgba(4,8,14,0.15) 100%);
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+}
 #pathways::before{ background:radial-gradient(108% 64% at 50% 50%, rgba(4,7,10,.70), rgba(4,7,10,.44) 50%, rgba(4,7,10,0)); }
 #eternity::before{ background:radial-gradient(82% 58% at 50% 46%, rgba(4,7,10,.26), rgba(4,7,10,.66) 56%, rgba(4,7,10,.90) 82%, rgba(4,7,10,0)); }
 .foot::before{
@@ -371,27 +376,29 @@ h1,h2,h3{ font-weight:400; margin:0; letter-spacing:-.005em; }
   background:linear-gradient(rgba(4,7,10,.55), rgba(4,7,10,.94) 40%, rgba(4,7,10,.98));
 }
 .sec-head{ display:flex; align-items:baseline; gap:16px; margin-bottom:clamp(30px,5vh,66px); }
-.sec-head .k{ font-size:10px; font-weight:500; letter-spacing:.24em; text-transform:uppercase; color:var(--muted); }
-.sec-head .k b{ color:var(--vermilion); font-weight:500; }
-.rule{ flex:1 1 auto; height:1px; background:var(--line-soft); }
+.sec-head .k{ font-size:10px; font-weight:600; letter-spacing:.24em; text-transform:uppercase; color:#7dd3fc; text-shadow:0 0 16px rgba(56,189,248,0.35); }
+.sec-head .k b{ color:#38bdf8; font-weight:600; }
+.rule{ flex:1 1 auto; height:1px; background:rgba(56,189,248,0.25); }
 
 /* — chapter I: the gate */
 .gate-grid{ display:grid; grid-template-columns:minmax(0,1.02fr) minmax(0,1fr); gap:clamp(28px,5vw,90px); align-items:start; }
-.gate-grid h2{ max-width:11ch; }
-.gate-copy{ padding-top:6px; }
-.gate-copy .lead{ font-size:clamp(15px,1.16vw,19px); line-height:1.66; color:#c2cdc5; text-shadow:0 1px 20px rgba(3,6,8,.9); }
-.gate-copy .lead + p{ margin-top:20px; }
-.arrowlink{ display:inline-flex; align-items:center; gap:12px; margin-top:34px;
-  font-size:11px; font-weight:500; letter-spacing:.2em; text-transform:uppercase; color:var(--bone); }
-.arrowlink .ar{ width:34px; height:34px; border:1px solid var(--line); border-radius:50%;
+.gate-grid h2{ max-width:11ch; color:#ffffff !important; text-shadow:0 2px 24px rgba(0,0,0,0.95); }
+.gate-copy{ padding-top:4px; }
+.gate-copy .lead{ font-size:clamp(15px,1.16vw,19px); line-height:1.68; color:#f1f5f9; text-shadow:0 1px 16px rgba(0,0,0,0.9); }
+.gate-copy .lead + p{ margin-top:16px; color:#cbd5e1; font-size:14px; line-height:1.72; text-shadow:0 1px 12px rgba(0,0,0,0.85); }
+.arrowlink{ display:inline-flex; align-items:center; gap:12px; margin-top:28px;
+  font-size:11px; font-weight:600; letter-spacing:.2em; text-transform:uppercase; color:#38bdf8;
+  background:rgba(14,165,233,0.12); border:1px solid rgba(56,189,248,0.32); border-radius:12px;
+  padding:10px 18px; box-shadow:0 0 24px -4px rgba(2,132,199,0.35); transition:all .35s ease; }
+.arrowlink .ar{ width:28px; height:28px; border:1px solid rgba(56,189,248,0.4); border-radius:50%;
   display:grid; place-items:center; transition:background .45s var(--ease), border-color .45s, transform .5s var(--ease-out); }
-.arrowlink .ar svg{ width:13px; height:13px; transition:transform .5s var(--ease-out); }
-.arrowlink:hover .ar{ background:var(--bone); border-color:var(--bone); }
-.arrowlink:hover .ar svg{ transform:translate3d(2px,-2px,0); }
+.arrowlink .ar svg{ width:12px; height:12px; transition:transform .5s var(--ease-out); }
+.arrowlink:hover{ background:rgba(14,165,233,0.25); border-color:#38bdf8; box-shadow:0 0 32px 0 rgba(56,189,248,0.5); color:#ffffff; }
+.arrowlink:hover .ar{ background:#38bdf8; border-color:#38bdf8; }
 .arrowlink:hover .ar svg path{ stroke:#05070a; }
 .gate-stats{ display:flex; gap:clamp(24px,4vw,62px); margin-top:clamp(46px,8vh,96px); border-top:1px solid var(--line-soft); padding-top:24px; }
-.gate-stats div b{ display:block; font-size:clamp(22px,2.1vw,32px); font-weight:300; letter-spacing:-.02em; }
-.gate-stats div span{ font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
+.gate-stats div b{ display:block; font-size:clamp(22px,2.1vw,32px); font-weight:300; letter-spacing:-.02em; color:#38bdf8; }
+.gate-stats div span{ font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:#94a3b8; }
 
 /* — chapter II: pathways cards */
 .cards{ display:grid; grid-template-columns:repeat(3,1fr); gap:clamp(10px,1.4vw,22px); align-items:start; }
@@ -678,17 +685,36 @@ body[data-layout-hero="b"] .hero-side .v{
   font-size:clamp(30px,3.2vw,54px); letter-spacing:.12em; color:rgba(223,231,224,.62);
 }
 
-/* — story B · spread: the title crosses two columns, the reading column is
-     held to the right, and the figures become a ruled band. */
+/* — story B · spread: balanced dual-column layout with high-legibility frosted glass scrim */
 body[data-layout-story="b"] .gate-grid{
-  grid-template-columns:minmax(120px,.38fr) minmax(0,1.08fr) minmax(280px,.88fr);
-  gap:clamp(20px,3vw,54px);
+  grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
+  gap:clamp(32px,5vw,72px);
+  background:rgba(4,9,16,0.72);
+  border:1px solid rgba(56,189,248,0.18);
+  border-radius:28px;
+  padding:clamp(28px,4vw,52px);
+  backdrop-filter:blur(24px);
+  -webkit-backdrop-filter:blur(24px);
+  box-shadow:0 28px 70px -15px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.08);
 }
-body[data-layout-story="b"] .gate-grid h2{ grid-column:1 / 3; max-width:13ch; }
-body[data-layout-story="b"] .gate-copy{ grid-column:3; }
-body[data-layout-story="b"] .gate-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:0; }
-body[data-layout-story="b"] .gate-stats div{ min-height:108px; padding:18px; border-left:1px solid var(--line-soft); }
-body[data-layout-story="b"] .gate-stats div:last-child{ border-right:1px solid var(--line-soft); }
+body[data-layout-story="b"] .gate-grid h2{ grid-column:1; max-width:14ch; color:#ffffff !important; text-shadow:0 2px 24px rgba(0,0,0,0.95); }
+body[data-layout-story="b"] .gate-copy{ grid-column:2; }
+body[data-layout-story="b"] .gate-stats{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:0;
+  background:rgba(4,9,16,0.65);
+  border:1px solid rgba(56,189,248,0.14);
+  border-radius:20px;
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  margin-top:clamp(28px,4.5vh,48px);
+  overflow:hidden;
+  box-shadow:0 16px 40px -10px rgba(0,0,0,0.7);
+}
+body[data-layout-story="b"] .gate-stats div{ min-height:100px; padding:20px 24px; border-left:1px solid rgba(56,189,248,0.12); }
+body[data-layout-story="b"] .gate-stats div:first-child{ border-left:none; }
+body[data-layout-story="b"] .gate-stats div:last-child{ border-right:none; }
+body[data-layout-story="b"] .gate-stats div b{ color:#38bdf8 !important; font-weight:500; font-size:clamp(24px,2.2vw,34px); text-shadow:0 0 24px rgba(56,189,248,0.45); }
+body[data-layout-story="b"] .gate-stats div span{ color:#94a3b8 !important; font-weight:600; font-size:10px; letter-spacing:.2em; text-transform:uppercase; }
 
 /* — gardens B · mosaic: one immersive live window beside two stacked ones.
      The cards stretch to their rows and the frames flex, so the two small
@@ -4808,7 +4834,7 @@ function updateWorld(dt) {
 
   /* the type rises from behind the grass, then dissolves as you close on it */
   if (WORD.group) {
-    const near = smooth(0.02, 0.92, RIG.smooth);
+    const near = smooth(0.01, 0.40, RIG.smooth);
     WORD.glyphs.forEach((g, i) => {
       const st = clamp((WORD.reveal - i * .075) / .62, 0, 1);
       const e = easeOut(st);
