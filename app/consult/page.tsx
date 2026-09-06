@@ -21,7 +21,10 @@ import {
   Send,
   Building2,
   ArrowLeft,
-  Radio
+  Radio,
+  Users,
+  Zap,
+  Award
 } from "lucide-react";
 import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
@@ -49,6 +52,43 @@ interface LiveTriageData {
   };
 }
 
+interface BoardData {
+  orchestrator_summary: string;
+  active_specialists: string[];
+  specialists_summoned: string[];
+  opinions: Array<{
+    doctor_name: string;
+    specialty: string;
+    concerns: string[];
+    risk_level: string;
+  }>;
+  differential: Array<{
+    condition: string;
+    probability: string;
+    supporting_specialists: string[];
+  }>;
+  conflicts: Array<{
+    description: string;
+    resolution: string;
+  }>;
+  trace: {
+    pre_arbiter_latency_us: number;
+    post_arbiter_latency_us: number;
+    total_board_latency_ms: number;
+    audit_sha256?: string;
+  };
+}
+
+interface SpeechData {
+  speech_pause_ratio: number;
+  speech_rate_wpm: number;
+  observations: string[];
+  clinical_relevance: {
+    respiratory_distress_signal: string;
+    cognitive_load_signal: string;
+  };
+}
+
 export default function ConsultPage() {
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorProfile>(DOCTOR_PROFILES[0]);
   const [callActive, setCallActive] = useState<boolean>(false);
@@ -62,6 +102,8 @@ export default function ConsultPage() {
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [triageData, setTriageData] = useState<LiveTriageData | null>(null);
+  const [boardData, setBoardData] = useState<BoardData | null>(null);
+  const [speechData, setSpeechData] = useState<SpeechData | null>(null);
   
   const [savedReportId, setSavedReportId] = useState<string | null>(null);
   const [isSavingReport, setIsSavingReport] = useState<boolean>(false);
@@ -250,6 +292,12 @@ export default function ConsultPage() {
         if (data.triage) {
           setTriageData(data.triage);
         }
+        if (data.board) {
+          setBoardData(data.board);
+        }
+        if (data.speech_features) {
+          setSpeechData(data.speech_features);
+        }
         speakDoctorResponse(doctorReplyText);
       }
     } catch (err) {
@@ -433,6 +481,123 @@ export default function ConsultPage() {
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
                     <span className="font-bold text-slate-900 block mb-1">Clinical Action:</span>
                     {triageData.recommendedAction}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Multi-Agent Clinical Board & Telemetry Panel */}
+              {boardData && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white border border-cyan-200/80 rounded-2xl p-5 shadow-sm space-y-4"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2 text-cyan-900 font-extrabold text-xs">
+                      <Users className="w-4 h-4 text-cyan-600" />
+                      <span>Clinical Board Synthesis</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                      Dual-Arbiter Protected
+                    </span>
+                  </div>
+
+                  {/* Active Board Specialists */}
+                  <div>
+                    <div className="text-[11px] font-mono font-bold text-slate-500 mb-1.5 uppercase tracking-wider flex items-center justify-between">
+                      <span>Board Specialists</span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {boardData.specialists_summoned.length ? `${boardData.specialists_summoned.length + 1} consulted` : "Solo Primary Care"}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {boardData.active_specialists.map((doc, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-50 border border-slate-200 text-slate-800 px-2.5 py-1 rounded-lg"
+                        >
+                          <Stethoscope className="w-3 h-3 text-cyan-600" />
+                          {doc.replace(/, MD.*$/, "")}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Speech / Paralinguistic Signals */}
+                  {speechData && (
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-600">
+                        <span className="flex items-center gap-1.5">
+                          <Radio className="w-3 h-3 text-cyan-600" />
+                          Acoustic Biomarkers
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {speechData.speech_rate_wpm} WPM • {Math.round(speechData.speech_pause_ratio * 100)}% pause
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {speechData.observations.map((obs, idx) => (
+                          <span
+                            key={idx}
+                            className="text-[10px] bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md"
+                          >
+                            {obs}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Differential Diagnosis Table */}
+                  {boardData.differential.length > 0 && (
+                    <div>
+                      <div className="text-[11px] font-mono font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
+                        Ranked Differential
+                      </div>
+                      <div className="space-y-1.5">
+                        {boardData.differential.slice(0, 3).map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs"
+                          >
+                            <span className="font-semibold text-slate-800 truncate max-w-[170px]">
+                              {item.condition}
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                                item.probability === "high"
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : item.probability === "moderate"
+                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {item.probability}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Multi-Specialty Conflicts Resolved */}
+                  {boardData.conflicts.length > 0 && (
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+                      <span className="font-bold flex items-center gap-1.5 text-amber-800">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                        Clinical Conflict Resolved:
+                      </span>
+                      <p className="text-[11px] leading-relaxed text-amber-950">
+                        {boardData.conflicts[0].description}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Empirical Pipeline Latency */}
+                  <div className="text-[10px] font-mono text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
+                    <span>Board Runtime: {boardData.trace.total_board_latency_ms}ms</span>
+                    <span>Pre: {boardData.trace.pre_arbiter_latency_us}µs | Post: {boardData.trace.post_arbiter_latency_us}µs</span>
                   </div>
                 </motion.div>
               )}
