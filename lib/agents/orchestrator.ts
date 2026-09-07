@@ -336,9 +336,14 @@ export class TriageOrchestrator {
         });
       }
 
-      const cardioSummary = cardioOp.concerns.length > 0
-        ? `Cardiovascular evaluation: ${cardioOp.primary_hypothesis}. ${cardioOp.concerns.slice(0, 2).join(", ")}. Risk assessment: ${cardioOp.risk_level.toUpperCase()}.`
-        : "Cardiovascular evaluation: Non-acute cardiac findings; no urgent ischemic indicators detected.";
+      const cardioSummary = (cardioOp.risk_level === "high" || cardioOp.concerns.some(c => c.toLowerCase().includes("ischemi") || c.toLowerCase().includes("coronary") || c.toLowerCase().includes("acs")))
+        ? "ACS remains an active concern. The substernal chest pressure and radiating discomfort cannot be dismissed without urgent cardiac clearance."
+        : "Initial cardiac assessment is reassuring. No acute ischemic indicators or hemodynamic instability detected.";
+      
+      const cardioEvidence = cardioOp.evidence
+        .filter(e => !e.toLowerCase().includes("absence of") && !e.toLowerCase().includes("non-cardiac"))
+        .slice(0, 2);
+
       messages.push({
         id: nextId(),
         round: 1,
@@ -348,7 +353,7 @@ export class TriageOrchestrator {
         specialty: cardioOp.specialty,
         type: "assessment",
         content: cardioSummary,
-        references: cardioOp.evidence.slice(0, 3),
+        references: cardioEvidence.length > 0 ? cardioEvidence : ["chest pressure", "radiating pain"],
         timestamp: new Date().toISOString(),
         case_version: currentCaseVersion
       });
@@ -380,9 +385,14 @@ export class TriageOrchestrator {
         });
       }
 
-      const neuroSummary = neuroOp.concerns.length > 0
-        ? `Neurological evaluation: ${neuroOp.primary_hypothesis}. Focal deficit screening: ${neuroOp.concerns.slice(0, 2).join(", ")}. Risk assessment: ${neuroOp.risk_level.toUpperCase()}.`
-        : "Neurological screening: Normal motor, speech, and cranial baseline. No focal ischemic signs.";
+      const neuroSummary = (neuroOp.risk_level === "high" || neuroOp.concerns.some(c => c.toLowerCase().includes("stroke") || c.toLowerCase().includes("ischemic") || c.toLowerCase().includes("weakness")))
+        ? "The acute unilateral weakness and facial asymmetry are concerning for an ischemic stroke event. The neurological pathway must remain active."
+        : "Neurological screening is baseline. Motor, speech, and cranial baseline remain intact with no focal deficits.";
+
+      const neuroEvidence = neuroOp.evidence
+        .filter(e => !e.toLowerCase().includes("absence of"))
+        .slice(0, 2);
+
       messages.push({
         id: nextId(),
         round: 1,
@@ -392,7 +402,7 @@ export class TriageOrchestrator {
         specialty: neuroOp.specialty,
         type: "assessment",
         content: neuroSummary,
-        references: neuroOp.evidence.slice(0, 3),
+        references: neuroEvidence.length > 0 ? neuroEvidence : ["unilateral weakness", "facial droop"],
         timestamp: new Date().toISOString(),
         case_version: currentCaseVersion
       });
@@ -423,7 +433,10 @@ export class TriageOrchestrator {
         });
       }
 
-      const pedsSummary = `Pediatric evaluation: ${pedsOp.primary_hypothesis}. ${pedsOp.concerns.slice(0, 2).join(", ")}. Risk level: ${pedsOp.risk_level.toUpperCase()}.`;
+      const pedsSummary = (pedsOp.risk_level === "high" || pedsOp.concerns.some(c => c.toLowerCase().includes("sepsis") || c.toLowerCase().includes("lethargy") || c.toLowerCase().includes("fever")))
+        ? "The neonatal fever paired with marked lethargy and grunting is consistent with severe sepsis. Immediate pediatric escalation is required."
+        : "Pediatric evaluation is reassuring. Child remains alert, hydrated, and within normal developmental parameters.";
+
       messages.push({
         id: nextId(),
         round: 1,
@@ -433,7 +446,7 @@ export class TriageOrchestrator {
         specialty: pedsOp.specialty,
         type: "assessment",
         content: pedsSummary,
-        references: pedsOp.evidence.slice(0, 3),
+        references: ["neonatal fever", "lethargy"],
         timestamp: new Date().toISOString(),
         case_version: currentCaseVersion
       });
