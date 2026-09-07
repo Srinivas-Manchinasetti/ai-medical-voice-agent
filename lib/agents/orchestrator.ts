@@ -263,6 +263,7 @@ export class TriageOrchestrator {
     const messages: BoardMessage[] = [];
     let msgIdx = 0;
     const nextId = () => `bmsg-${Date.now()}-${++msgIdx}`;
+    const currentCaseVersion = caseVersion || patientCase.case_version || 1;
 
     // Round 1: Lead Triage Assessment
     if (patientCase.is_interruption) {
@@ -330,7 +331,8 @@ export class TriageOrchestrator {
             latency_ms: ct.latency_ms,
             details: ct.output
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          case_version: currentCaseVersion
         });
       }
 
@@ -347,7 +349,8 @@ export class TriageOrchestrator {
         type: "assessment",
         content: cardioSummary,
         references: cardioOp.evidence.slice(0, 3),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        case_version: currentCaseVersion
       });
     }
 
@@ -372,7 +375,8 @@ export class TriageOrchestrator {
             latency_ms: nt.latency_ms,
             details: nt.output
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          case_version: currentCaseVersion
         });
       }
 
@@ -389,7 +393,8 @@ export class TriageOrchestrator {
         type: "assessment",
         content: neuroSummary,
         references: neuroOp.evidence.slice(0, 3),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        case_version: currentCaseVersion
       });
     }
 
@@ -413,7 +418,8 @@ export class TriageOrchestrator {
             latency_ms: pt.latency_ms,
             details: pt.output
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          case_version: currentCaseVersion
         });
       }
 
@@ -428,7 +434,8 @@ export class TriageOrchestrator {
         type: "assessment",
         content: pedsSummary,
         references: pedsOp.evidence.slice(0, 3),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        case_version: currentCaseVersion
       });
     }
 

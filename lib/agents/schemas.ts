@@ -102,7 +102,7 @@ export const PatientCaseSchema = z.object({
   provenance_evidence: z.array(EvidenceItemSchema).default([]),
   is_interruption: z.boolean().optional(),
   interrupted_agent: z.string().optional(),
-  case_version: z.number().default(1)
+  case_version: z.number().default(1).optional()
 });
 export type PatientCase = z.infer<typeof PatientCaseSchema>;
 
@@ -243,7 +243,7 @@ export const BoardMessageSchema = z.object({
     latency_ms: z.number().optional(),
     details: z.record(z.string(), z.any()).optional()
   }).optional(),
-  case_version: z.number().default(1),
+  case_version: z.number().default(1).optional(),
   timestamp: z.string().default(() => new Date().toISOString())
 });
 export type BoardMessage = z.infer<typeof BoardMessageSchema>;
