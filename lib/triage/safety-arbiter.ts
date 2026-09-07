@@ -107,7 +107,7 @@ export function extractClinicalFeatures(text: string, patientAge?: number): Clin
   const features: ClinicalFeatures = {
     // Cardiovascular
     chestPain: hasChestPainOrPressure,
-    pressureLikePain: matchesPattern(/crush|elephant|heavy weight|squeezing|tight band|intense pressure/i),
+    pressureLikePain: matchesPattern(/crush|elephant|heavy weight|squeezing|tight band|intense pressure|(severe|heavy|crushing)\s+(tight\s+)?(chest\s+)?pressure|(severe|intense)\s+(chest\s+)?tight/i),
     radiationToArm: matchesPattern(/(radiat|spread|travel).*?(arm|arms|shoulder)|(left|both).*?arm.*?(pain|numb|heav|ach)|(pain|heav).*?(down|in).*?(left|both).*?arm/i),
     radiationToJaw: matchesPattern(/(radiat|spread|travel).*?(jaw|neck|teeth)|(jaw|neck).*?(pain|ache|tight)/i),
     diaphoresis: matchesPattern(/sweat|diaphoresis|clammy|cold sweat/i),
@@ -182,6 +182,11 @@ export function evaluateSafetyArbiter(input: {
   const icd10: Set<string> = new Set();
   const symptoms: Set<string> = new Set();
 
+  const rawTextLower = (input.rawText || '').toLowerCase();
+  const hasNitratePde5Contraindication =
+    (/sildenafil|viagra|tadalafil|cialis/i.test(rawTextLower)) &&
+    (/nitroglycerin|nitrate|nitrostat/i.test(rawTextLower));
+
   let esiScore: 1 | 2 | 3 | 4 | 5 = 4; // Default baseline: Less Urgent
   let triageLevel: 'emergency' | 'priority' | 'routine' = 'routine';
   let esiTitle = 'ESI LEVEL 4: LESS URGENT CLINICAL EVALUATION';
@@ -206,22 +211,32 @@ export function evaluateSafetyArbiter(input: {
   }
 
   // =========================================================================
-  // RULE 2: ESI TIER 2 - ACUTE CORONARY SYNDROME / STEMI RISK
+  // RULE 2: ESI TIER 2 - ACUTE CORONARY SYNDROME / STEMI RISK & LETHAL CONTRAINDICATIONS
   // =========================================================================
   else if (
-    (features.chestPain || features.pressureLikePain) &&
-    (features.radiationToArm || features.radiationToJaw || features.diaphoresis || features.pressureLikePain)
+    ((features.chestPain || features.pressureLikePain) &&
+    (features.radiationToArm || features.radiationToJaw || features.diaphoresis || features.pressureLikePain)) ||
+    (features.chestPain && hasNitratePde5Contraindication)
   ) {
     esiScore = 2;
     triageLevel = 'emergency';
     esiTitle = 'ESI LEVEL 2: EMERGENT — SUSPECTED ACUTE CORONARY SYNDROME (ACS)';
-    redFlags.push('ACS_CHEST_PAIN_WITH_HIGH_RISK_RADIATION_OR_DIAPHORESIS');
-    rules.push('ESI-2.1: High-risk ischemic cardiac features (Angina / STEMI equivalent)');
-    protocol = 'Urgent 12-lead ECG within 10 minutes of ED arrival. Serial cardiac troponins. Administer 325mg chewable aspirin if no contraindication. Maintain SpO2 > 90%.';
-    action = 'Proceed immediately to the nearest Emergency Department equipped with 24/7 Cardiac Cath Lab / PCI.';
+    if (hasNitratePde5Contraindication) {
+      redFlags.push('LETHAL_DRUG_CONTRAINDICATION_NITRATE_PDE5');
+      rules.push('ESI-2.1b: Lethal pharmacotherapy contraindication (Nitrates + PDE-5 inhibitors in acute chest pain)');
+      protocol = 'CRITICAL CONTRAINDICATION: DO NOT ADMINISTER NITROGLYCERIN. High risk of refractory hypotension/cardiovascular collapse. Urgent 12-lead ECG, fluid resuscitation, telemetry.';
+      action = 'Proceed immediately to the Emergency Department. Do NOT take nitroglycerin.';
+      icd10.add('T46.3X5A');
+      symptoms.add('Chest pressure with lethal nitrate/PDE5 drug contraindication');
+    } else {
+      redFlags.push('ACS_CHEST_PAIN_WITH_HIGH_RISK_RADIATION_OR_DIAPHORESIS');
+      rules.push('ESI-2.1: High-risk ischemic cardiac features (Angina / STEMI equivalent)');
+      protocol = 'Urgent 12-lead ECG within 10 minutes of ED arrival. Serial cardiac troponins. Administer 325mg chewable aspirin if no contraindication. Maintain SpO2 > 90%.';
+      action = 'Proceed immediately to the nearest Emergency Department equipped with 24/7 Cardiac Cath Lab / PCI.';
+      symptoms.add('Crushing substernal chest pressure');
+    }
     icd10.add('I20.9'); // Angina pectoris
     icd10.add('I21.9'); // Acute myocardial infarction
-    symptoms.add('Crushing substernal chest pressure');
     if (features.radiationToArm) symptoms.add('Pain radiating to left arm');
     if (features.diaphoresis) symptoms.add('Diaphoresis / cold sweats');
   }

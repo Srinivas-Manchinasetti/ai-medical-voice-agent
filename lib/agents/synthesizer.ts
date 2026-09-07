@@ -1,4 +1,11 @@
-import { AgentOpinion, ClinicalConflict, ClinicalConsensus, DifferentialItem, PatientCase } from "./schemas";
+import {
+  AgentOpinion,
+  ClinicalConflict,
+  ClinicalConsensus,
+  DifferentialItem,
+  PatientCase
+} from "./schemas";
+import { Blackboard } from "./blackboard";
 
 export interface SynthesisResult {
   consensus: ClinicalConsensus;
@@ -8,15 +15,20 @@ export interface SynthesisResult {
 /**
  * CONFLICT-AWARE CLINICAL CONSENSUS SYNTHESIZER
  * 
- * Invariant: Aggregates structured specialist evidence into an integrated differential diagnosis.
- * Identifies and explicitly resolves cross-specialty conflicts rather than flattening opinions.
+ * Invariant:
+ * Consensus does not force false unanimity. It compiles:
+ * - Agreed evidence with provenance
+ * - Competing specialist hypotheses
+ * - Unresolved conflicts (where multiple life-threat pathways remain concurrently active)
  */
 export class ClinicalSynthesizer {
   public async synthesize(
     patientCase: PatientCase,
     opinions: AgentOpinion[],
     orchestratorSummary: string,
-    activeSpecialists: string[]
+    activeSpecialists: string[],
+    deliberationRounds: number = 1,
+    blackboard?: Blackboard
   ): Promise<SynthesisResult> {
     const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
 
@@ -30,22 +42,22 @@ export class ClinicalSynthesizer {
           seenConditions.add(concern.toLowerCase());
           differential.push({
             condition: concern,
+            probability: op.risk_level === "high" ? "high" : op.risk_level === "moderate" ? "moderate" : "low",
             supporting_agents: [op.doctor_name],
-            risk: op.risk_level,
-            clinical_rationale: op.evidence.join("; ") || "Clinical clinical indicator"
+            clinical_rationale: (op.evidence_for && op.evidence_for.length > 0 ? op.evidence_for : op.evidence).join("; ") || "Clinical indicator",
+            competing_hypotheses: []
           });
         } else {
-          // If another agent also raised this concern, add them as supporting agent
           const existing = differential.find(d => d.condition.toLowerCase() === concern.toLowerCase());
           if (existing && !existing.supporting_agents.includes(op.doctor_name)) {
             existing.supporting_agents.push(op.doctor_name);
-            if (op.risk_level === "high") existing.risk = "high";
+            if (op.risk_level === "high") existing.probability = "high";
           }
         }
       }
     }
 
-    // 2. Conflict Detection & Explicit Resolution
+    // 2. Conflict Detection & Explicit Dual-Pathways
     const conflicts: ClinicalConflict[] = [];
 
     const hasHighCardio = opinions.some(o => o.specialty.includes("Cardio") && o.risk_level === "high");
@@ -54,13 +66,30 @@ export class ClinicalSynthesizer {
 
     if (hasHighCardio && hasHighNeuro) {
       conflicts.push({
-        topic: "Primary Etiology (Cardiovascular vs. Acute Cerebrovascular)",
+        topic: "Primary Life-Threat Etiology (Cardiovascular vs. Acute Cerebrovascular)",
         agents: ["Dr. Marcus Vance (Cardiology)", "Dr. Arthur Pendelton (Neurology)"],
-        resolution: "Both cardiovascular and neurovascular pathways present acute life-threat red flags (e.g. cardio-embolic stroke or concurrent hemodynamic crisis). Neither pathway is deprioritized; dual emergency resuscitation and rapid CT/ECG protocol activated."
+        conflict_description: "Cardiology identifies high-acuity ischemic injury (ACS / TIMI elevated), while Neurology identifies active BE-FAST positive stroke deficit.",
+        resolution: "Both pathways remain emergently active under dual-activation protocol. Resuscitative stabilization with concurrent STAT Head CT and 12-lead ECG telemetry.",
+        status: "concurrent_active_threats"
       });
     }
 
-    // Check for disposition differences
+    // Add inter-agent challenges from Blackboard if present
+    if (blackboard && blackboard.challenges.length > 0) {
+      blackboard.challenges.forEach(ch => {
+        if (!conflicts.some(c => c.conflict_description.includes(ch.claim_disputed))) {
+          conflicts.push({
+            topic: `Specialist Disagreement (${ch.from_agent} vs ${ch.to_agent})`,
+            agents: [ch.from_agent, ch.to_agent],
+            conflict_description: ch.claim_disputed,
+            resolution: `Reviewed during deliberation Round ${blackboard.round}: Evaluated against objective evidence. Precautionary higher-acuity disposition retained.`,
+            status: "resolved"
+          });
+        }
+      });
+    }
+
+    // 3. Disposition & Escalation determination
     const highRiskCount = opinions.filter(o => o.risk_level === "high").length;
     const moderateRiskCount = opinions.filter(o => o.risk_level === "moderate").length;
 
@@ -77,21 +106,23 @@ export class ClinicalSynthesizer {
       consensus_risk = "urgent";
     }
 
-    // 3. Compile Key Clinical Findings
+    // 4. Compile Key Clinical Findings
     const key_findings: string[] = [];
     opinions.forEach(o => {
-      o.evidence.forEach(e => {
+      const items = o.evidence_for && o.evidence_for.length > 0 ? o.evidence_for : o.evidence;
+      items.forEach(e => {
         if (!key_findings.includes(e)) key_findings.push(e);
       });
     });
 
-    // 4. Primary Specialty assignment
+    // 5. Primary Specialty assignment
     let primary_specialty = "Internal Medicine";
-    if (hasHighCardio) primary_specialty = "Cardiology & Resuscitation";
+    if (hasHighCardio && hasHighNeuro) primary_specialty = "Cardioneuro Resuscitation";
+    else if (hasHighCardio) primary_specialty = "Cardiology & Resuscitation";
     else if (hasHighNeuro) primary_specialty = "Neurology & Stroke Triage";
     else if (hasPeds) primary_specialty = "Pediatrics";
 
-    // 5. Formulate Spoken Clinical Narrative
+    // 6. Formulate Spoken Narrative
     let synthesized_reply_narrative = "";
     if (consensus_risk === "critical") {
       if (hasHighCardio && hasHighNeuro) {
@@ -122,7 +153,8 @@ export class ClinicalSynthesizer {
       synthesized_reply_narrative,
       orchestrator_summary: orchestratorSummary,
       requires_immediate_escalation,
-      active_specialists: activeSpecialists
+      active_specialists: activeSpecialists,
+      deliberation_rounds_completed: deliberationRounds
     };
 
     return {

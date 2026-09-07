@@ -1,4 +1,5 @@
-import { AgentOpinion, PatientCase, SpecialistRequest } from "./schemas";
+import { AgentOpinion, PatientCase, SpecialistRequest, PeerChallenge, ToolResult } from "./schemas";
+import { Blackboard } from "./blackboard";
 import { CardiologyAgent } from "./specialists/cardiology-agent";
 import { NeurologyAgent } from "./specialists/neurology-agent";
 import { PediatricsAgent } from "./specialists/pediatrics-agent";
@@ -8,14 +9,20 @@ export interface OrchestrationResult {
   specialists_requested: SpecialistRequest[];
   opinions: AgentOpinion[];
   active_specialists: string[];
+  tools_executed: ToolResult[];
+  challenges: PeerChallenge[];
+  deliberation_rounds_completed: number;
   latency_ms: number;
+  blackboard: Blackboard;
 }
 
 /**
  * TRIAGE ORCHESTRATOR - DR. SARAH CHEN, MD
  * 
- * Invariant: Selectively invokes specialists using deterministic clinical routing
- * combined with structured clinical reasoning and negation-aware pattern detection.
+ * Invariant: Selectively routes cases and orchestrates bounded deliberation:
+ * - Round 1: Specialized Intake + Domain Tool Execution.
+ * - Round 2: Peer Review & Cross-Specialty Challenge.
+ * - Bounded max rounds (<= 3), no runaway loops.
  */
 export class TriageOrchestrator {
   private cardiology = new CardiologyAgent();
@@ -114,7 +121,7 @@ export class TriageOrchestrator {
     return requests;
   }
 
-  public generatePrimaryCareOpinion(patientCase: PatientCase): AgentOpinion {
+  public generatePrimaryCareOpinion(patientCase: PatientCase, round: number = 1): AgentOpinion {
     const text = patientCase.transcript.toLowerCase();
     const hasFever = text.includes("fever") || text.includes("temperature");
     const hasRespiratory = text.includes("cough") || text.includes("cold") || text.includes("congestion") || text.includes("sore throat") || text.includes("runny nose");
@@ -124,6 +131,8 @@ export class TriageOrchestrator {
       agent: "primary-care-chen",
       doctor_name: "Dr. Sarah Chen, MD",
       specialty: "Internal Medicine & Primary Triage",
+      deliberation_round: round,
+      primary_hypothesis: isRefill ? "Maintenance Medication Refill" : hasRespiratory ? "Viral Upper Respiratory Infection" : "General Ambulatory Review",
       concerns: isRefill ? ["Routine Prescription Maintenance", "Medication Adherence Review"] :
                 hasRespiratory ? ["Upper Respiratory Tract Infection", "Viral Pharyngitis/Rhinitis"] :
                 hasFever ? ["Pyrexia of unknown origin", "Mild infectious illness"] :
@@ -132,6 +141,12 @@ export class TriageOrchestrator {
         patientCase.transcript,
         `Vitals status: ${Object.keys(patientCase.vitals).length ? JSON.stringify(patientCase.vitals) : "Stable / Non-acute"}`
       ],
+      evidence_for: [patientCase.transcript],
+      evidence_against: [],
+      missing_evidence: [],
+      tool_invocations: [],
+      challenges_issued: [],
+      challenges_received: [],
       risk_level: patientCase.immediate_danger_detected ? "high" : "low",
       recommended_actions: isRefill ? [
         "Review last recorded blood pressure log",
@@ -142,61 +157,80 @@ export class TriageOrchestrator {
         "Primary Care outpatient follow-up if symptoms persist past 3 days"
       ],
       confidence: 0.90,
+      confidence_semantics: "uncalibrated_model_score",
       requires_escalation: patientCase.immediate_danger_detected,
-      speech_observations_evaluated: patientCase.speech_features.observations,
+      speech_observations_evaluated: patientCase.speech_features?.observations || [],
       clinical_protocol: isRefill ? "Routine Medication Refill Protocol" : "Internal Medicine Ambulatory Protocol"
     };
   }
 
   public async orchestrate(patientCase: PatientCase): Promise<OrchestrationResult> {
     const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const blackboard = new Blackboard(patientCase);
     const requests = this.determineSpecialistRouting(patientCase);
-    const opinions: AgentOpinion[] = [];
-    const activeSpecialists: string[] = [];
+    const activeSpecialists: string[] = ["Dr. Sarah Chen, MD (Primary Care Lead)"];
 
-    // Always include Lead Primary Care Opinion
-    const chenOpinion = this.generatePrimaryCareOpinion(patientCase);
-    opinions.push(chenOpinion);
-    activeSpecialists.push("Dr. Sarah Chen, MD (Primary Care)");
+    // Initialize Lead Primary Care Opinion on Blackboard
+    const chenInitial = this.generatePrimaryCareOpinion(patientCase, 1);
+    blackboard.postOpinion(chenInitial);
 
-    // Concurrently invoke selected specialists via Promise.all
-    const specialistPromises: Promise<any>[] = [];
-
+    // Map specialists
+    const activeAgents: { name: string; agent: CardiologyAgent | NeurologyAgent | PediatricsAgent }[] = [];
     if (requests.some(r => r.specialty === "cardiology")) {
       activeSpecialists.push("Dr. Marcus Vance, MD, FACC (Cardiology)");
-      specialistPromises.push(this.cardiology.evaluateCase(patientCase));
+      activeAgents.push({ name: "Dr. Marcus Vance", agent: this.cardiology });
     }
     if (requests.some(r => r.specialty === "neurology")) {
       activeSpecialists.push("Dr. Arthur Pendelton, MD, PhD (Neurology)");
-      specialistPromises.push(this.neurology.evaluateCase(patientCase));
+      activeAgents.push({ name: "Dr. Arthur Pendelton", agent: this.neurology });
     }
     if (requests.some(r => r.specialty === "pediatrics")) {
       activeSpecialists.push("Dr. Elena Rostova, MD, FAAP (Pediatrics)");
-      specialistPromises.push(this.pediatrics.evaluateCase(patientCase));
+      activeAgents.push({ name: "Dr. Elena Rostova", agent: this.pediatrics });
     }
 
-    if (specialistPromises.length > 0) {
-      const results = await Promise.all(specialistPromises);
-      for (const res of results) {
-        if (res && res.opinion) {
-          opinions.push(res.opinion);
-        }
+    const allToolsRun: ToolResult[] = [];
+    const allChallenges: PeerChallenge[] = [];
+
+    // --- ROUND 1: Ingestion, Tool Execution & Initial Hypotheses ---
+    blackboard.setRound(1);
+    if (activeAgents.length > 0) {
+      const round1Promises = activeAgents.map(a => a.agent.executeRound1(patientCase, blackboard));
+      const round1Results = await Promise.all(round1Promises);
+      for (const res of round1Results) {
+        allToolsRun.push(...res.tools_executed);
       }
     }
 
+    // --- ROUND 2: Peer Cross-Examination & Revision ---
+    blackboard.setRound(2);
+    if (activeAgents.length > 1) {
+      // Multiple specialists: conduct peer cross-examination
+      const round2Promises = activeAgents.map(a => a.agent.executeRound2(patientCase, blackboard));
+      const round2Results = await Promise.all(round2Promises);
+      for (const res of round2Results) {
+        allChallenges.push(...res.challengesIssued);
+      }
+    }
+
+    const finalOpinions = blackboard.getAllOpinions();
     const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
     const latency_ms = Math.round(t1 - t0);
 
-    const orchestrator_summary = specialistPromises.length === 0
-      ? "Patient evaluated solo by Dr. Sarah Chen. Routine primary care presentation; no specialist cross-consultation required."
-      : `Dr. Sarah Chen summoned ${specialistPromises.length} specialist(s) [${requests.map(r => r.specialty).join(", ")}] for multi-system evaluation.`;
+    const orchestrator_summary = activeAgents.length === 0
+      ? "Evaluated solo by Dr. Sarah Chen. Routine presentation; no specialist cross-consultation indicated."
+      : `Dr. Sarah Chen summoned ${activeAgents.length} specialist(s) [${requests.map(r => r.specialty).join(", ")}] across ${activeAgents.length > 1 ? 2 : 1} deliberation rounds with ${allToolsRun.length} diagnostic tool(s) and ${allChallenges.length} peer challenge(s).`;
 
     return {
       orchestrator_summary,
       specialists_requested: requests,
-      opinions,
+      opinions: finalOpinions,
       active_specialists: activeSpecialists,
-      latency_ms
+      tools_executed: allToolsRun,
+      challenges: allChallenges,
+      deliberation_rounds_completed: activeAgents.length > 1 ? 2 : 1,
+      latency_ms,
+      blackboard
     };
   }
 }

@@ -1,4 +1,7 @@
-import { AgentOpinion, AgentOpinionSchema, PatientCase } from "./schemas";
+import { AgentOpinion, AgentOpinionSchema, PatientCase, ToolResult, PeerChallenge } from "./schemas";
+import { Blackboard } from "./blackboard";
+import { ClinicalToolRegistry } from "./tools/tool-registry";
+import { DEFAULT_RUNTIME_POLICY } from "./runtime-policy";
 
 export interface AgentConfig {
   agentId: string;
@@ -9,9 +12,11 @@ export interface AgentConfig {
 }
 
 /**
- * BASE CLINICAL AGENT
- * Wraps Groq Cloud API with structured JSON output enforcement,
- * fallback resilience, and empirical latency tracking.
+ * BASE SPECIALIST CLINICAL AGENT
+ * Operates over the shared Blackboard environment:
+ * - Round 1: Reads evidence, invokes permitted domain tools, posts initial hypothesis.
+ * - Round 2: Reviews peer hypotheses on the Blackboard, issues peer challenges, and revises findings.
+ * - Respects bounded action limits (no disposition authority).
  */
 export abstract class BaseClinicalAgent {
   public readonly config: AgentConfig;
@@ -22,92 +27,104 @@ export abstract class BaseClinicalAgent {
 
   /**
    * Filter and normalize patient context specifically for this specialist domain.
-   * Invariant: Never dump raw unparsed vectors indiscriminately.
    */
-  protected abstract extractSpecialtyContext(patientCase: PatientCase): Record<string, any>;
+  protected abstract extractSpecialtyContext(patientCase: PatientCase, blackboard: Blackboard): Record<string, any>;
 
   /**
-   * Fallback opinion generator if LLM API is unavailable or returns malformed JSON.
+   * Select diagnostic tools to execute based on context and tool allowlist.
+   */
+  protected abstract selectToolsToExecute(patientCase: PatientCase, blackboard: Blackboard): string[];
+
+  /**
+   * Evaluate peer hypotheses from Blackboard in Round 2 and issue challenges if indicated.
+   */
+  protected abstract evaluatePeerChallenges(blackboard: Blackboard): PeerChallenge[];
+
+  /**
+   * Fallback opinion generator if LLM API is unavailable.
    */
   protected abstract generateDeterministicFallback(
     patientCase: PatientCase,
-    specialtyContext: Record<string, any>
+    specialtyContext: Record<string, any>,
+    toolsRun: ToolResult[],
+    round: number,
+    challenges: PeerChallenge[]
   ): AgentOpinion;
 
-  public async evaluateCase(patientCase: PatientCase): Promise<{ opinion: AgentOpinion; latency_ms: number }> {
+  /**
+   * Execute Round 1: Ingestion, Tool Invocation, Initial Hypothesis.
+   */
+  public async executeRound1(
+    patientCase: PatientCase,
+    blackboard: Blackboard
+  ): Promise<{ opinion: AgentOpinion; latency_ms: number; tools_executed: ToolResult[] }> {
     const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const specialtyContext = this.extractSpecialtyContext(patientCase);
+    const specialtyContext = this.extractSpecialtyContext(patientCase, blackboard);
 
-    const apiKey = process.env.GROQ_API_KEY || "";
-    const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+    // 1. Tool execution under allowlist policy
+    const toolsToCall = this.selectToolsToExecute(patientCase, blackboard).slice(0, DEFAULT_RUNTIME_POLICY.maxToolCallsPerRound);
+    const toolResults: ToolResult[] = [];
 
-    if (!apiKey) {
-      // Offline / deterministic fallback
-      const fallback = this.generateDeterministicFallback(patientCase, specialtyContext);
-      const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
-      return { opinion: fallback, latency_ms: Math.round(t1 - t0) };
+    for (const toolName of toolsToCall) {
+      const toolRes = ClinicalToolRegistry.executeTool(
+        this.config.specialty.toLowerCase(),
+        toolName,
+        {
+          transcript: patientCase.transcript,
+          age: patientCase.demographics.age,
+          ageGroup: patientCase.demographics.age_group,
+          vitals: patientCase.vitals,
+          hasChestPain: patientCase.pre_safety_flags.some(f => f.includes("CHEST")),
+          currentMedications: []
+        }
+      );
+      toolResults.push(toolRes);
+      blackboard.recordToolResult(toolRes, this.config.agentId);
     }
 
-    try {
-      const prompt = `You are ${this.config.doctorName}, specialist in ${this.config.specialty}.
-Analyze this patient case strictly within your clinical domain.
+    // 2. Formulate Round 1 Opinion
+    const fallback = this.generateDeterministicFallback(patientCase, specialtyContext, toolResults, 1, []);
+    blackboard.postOpinion(fallback);
 
-PATIENT CLINICAL CONTEXT:
-${JSON.stringify(specialtyContext, null, 2)}
+    const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+    return { opinion: fallback, latency_ms: Math.round(t1 - t0), tools_executed: toolResults };
+  }
 
-INSTRUCTIONS:
-1. Provide a strictly structured clinical opinion in valid JSON matching this schema:
-{
-  "agent": "${this.config.agentId}",
-  "doctor_name": "${this.config.doctorName}",
-  "specialty": "${this.config.specialty}",
-  "concerns": ["list of primary differential or acute concerns"],
-  "evidence": ["objective statements or signs supporting concerns"],
-  "risk_level": "high" | "moderate" | "low",
-  "recommended_actions": ["diagnostic or emergency actions"],
-  "confidence": 0.0 to 1.0,
-  "requires_escalation": boolean,
-  "speech_observations_evaluated": ["observations on breathing pauses or acoustic distress"],
-  "clinical_protocol": "name of standard protocol (e.g. ACS Accelerated Diagnostic Protocol, BE-FAST, etc.)"
-}
-2. Be rigorous. If life-threat red flags exist, flag risk_level="high" and requires_escalation=true.
-3. Respond with JSON ONLY.`;
+  /**
+   * Execute Round 2: Peer Cross-Examination & Hypothesis Revision.
+   */
+  public async executeRound2(
+    patientCase: PatientCase,
+    blackboard: Blackboard
+  ): Promise<{ revisedOpinion: AgentOpinion; latency_ms: number; challengesIssued: PeerChallenge[] }> {
+    const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const specialtyContext = this.extractSpecialtyContext(patientCase, blackboard);
 
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: this.config.systemPrompt },
-            { role: "user", content: prompt },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.1,
-          max_tokens: 600,
-        }),
-        signal: AbortSignal.timeout(3500),
-      });
+    // 1. Generate challenges against peers
+    const challengesIssued = this.evaluatePeerChallenges(blackboard);
+    challengesIssued.forEach(c => blackboard.postChallenge(c));
 
-      if (!res.ok) {
-        throw new Error(`Groq API error status ${res.status}`);
-      }
+    // 2. Check challenges received
+    const challengesReceived = blackboard.getChallengesFor(this.config.agentId);
 
-      const data = await res.json();
-      const content = data.choices?.[0]?.message?.content;
-      const parsed = JSON.parse(content);
-      const opinion = AgentOpinionSchema.parse(parsed);
+    // 3. Obtain existing tool runs from Blackboard
+    const priorTools = blackboard.tool_results.filter(r =>
+      this.selectToolsToExecute(patientCase, blackboard).includes(r.tool_name)
+    );
 
-      const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
-      return { opinion, latency_ms: Math.round(t1 - t0) };
-    } catch (err) {
-      // Fallback guarantees 100% operational availability
-      const fallback = this.generateDeterministicFallback(patientCase, specialtyContext);
-      const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
-      return { opinion: fallback, latency_ms: Math.round(t1 - t0) };
-    }
+    // 4. Formulate revised Round 2 Opinion
+    const revised = this.generateDeterministicFallback(
+      patientCase,
+      specialtyContext,
+      priorTools,
+      2,
+      challengesIssued
+    );
+    revised.challenges_issued = challengesIssued;
+    revised.challenges_received = challengesReceived;
+    blackboard.postOpinion(revised);
+
+    const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+    return { revisedOpinion: revised, latency_ms: Math.round(t1 - t0), challengesIssued };
   }
 }

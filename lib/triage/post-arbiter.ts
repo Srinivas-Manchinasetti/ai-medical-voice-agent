@@ -1,6 +1,6 @@
-import { ClinicalConsensus, PatientCase } from "../agents/schemas";
+import { ClinicalConsensus, PatientCase, HashChainBlock } from "../agents/schemas";
 import { ArbiterResult, evaluateSafetyArbiter } from "./safety-arbiter";
-import { computeClinicalAuditHash } from "../emergency/dispatch";
+import crypto from "crypto";
 
 export interface PostArbiterResult {
   final_esi_level: number;
@@ -14,21 +14,32 @@ export interface PostArbiterResult {
   icd10_codes: string[];
   safe_spoken_narrative: string;
   audit_sha256: string;
+  audit_hash_chain: HashChainBlock[];
   latency_us: number;
 }
 
 /**
- * DETERMINISTIC POST-ARBITER SAFETY ENFORCEMENT
+ * Helper to compute sequential tamper-evident SHA-256 block hash.
+ * H_k = SHA256(Record_k || H_{k-1})
+ */
+function computeChainedHash(payload: string, previousHash: string): string {
+  return crypto.createHash("sha256").update(payload + previousHash).digest("hex");
+}
+
+/**
+ * DETERMINISTIC POST-ARBITER SAFETY ENFORCEMENT & AUDIT HASH CHAINING
  * 
  * Invariant: The Multi-Agent Consensus is a clinical recommendation;
  * the Deterministic Safety Arbiter is the SOLE clinical authority.
  * 
- * If any agent or synthesis downplays a life-threat, this arbiter forces
- * an unbypasable hard override to ESI 1 or 2.
+ * Enforces:
+ * 1. Hard overrides if multi-agent deliberation downplays emergency life threats.
+ * 2. Sequential cryptographic hash chaining for tamper-evident event ordering.
  */
 export function evaluatePostArbiter(
   patientCase: PatientCase,
-  consensus: ClinicalConsensus
+  consensus: ClinicalConsensus,
+  previousRootHash: string = "GENESIS_ROOT_BLOCK_00000000000000000000000000000000"
 ): PostArbiterResult {
   const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
 
@@ -63,15 +74,45 @@ export function evaluatePostArbiter(
     }
   }
 
-  // Generate cryptographic audit hash
-  const audit_sha256 = computeClinicalAuditHash({
-    consultationId: `BOARD-${patientCase.patient_id}`,
-    patientId: patientCase.patient_id,
-    timestamp: new Date().toISOString(),
-    esiScore: final_esi_level,
-    triageLevel: final_triage_level,
-    icd10Codes: arbiterResult.icd10Codes,
-    chiefComplaint: patientCase.transcript
+  // --- CONSTRUCT TAMPER-EVIDENT CRYPTOGRAPHIC AUDIT HASH CHAIN ---
+  // Chain: Block 0 (Pre-Arbiter) -> Block 1 (Deliberation Consensus) -> Block 2 (Post-Arbiter Override & Disposition)
+  const audit_hash_chain: HashChainBlock[] = [];
+  const now = new Date().toISOString();
+
+  // Block 0: Pre-Screening Event
+  const b0_payload = `PRE_ARBITER|PT:${patientCase.patient_id}|FLAGS:${patientCase.pre_safety_flags.join(",")}`;
+  const h0 = computeChainedHash(b0_payload, previousRootHash);
+  audit_hash_chain.push({
+    block_index: 0,
+    timestamp: now,
+    event_type: "pre_arbiter",
+    payload_summary: b0_payload,
+    previous_hash: previousRootHash,
+    current_hash: h0
+  });
+
+  // Block 1: Consensus Synthesis Event
+  const b1_payload = `CONSENSUS|ROUNDS:${consensus.deliberation_rounds_completed}|DISP:${consensus.recommended_disposition}|DIFF:${consensus.differential.map(d => d.condition).join(",")}`;
+  const h1 = computeChainedHash(b1_payload, h0);
+  audit_hash_chain.push({
+    block_index: 1,
+    timestamp: now,
+    event_type: "consensus_synthesis",
+    payload_summary: b1_payload,
+    previous_hash: h0,
+    current_hash: h1
+  });
+
+  // Block 2: Post-Arbiter Final Authority Event
+  const b2_payload = `POST_ARBITER|FINAL_ESI:${final_esi_level}|OVERRIDE:${arbiter_override_applied}|ICD:${arbiterResult.icd10Codes.join(",")}`;
+  const h2 = computeChainedHash(b2_payload, h1);
+  audit_hash_chain.push({
+    block_index: 2,
+    timestamp: now,
+    event_type: "post_arbiter_override",
+    payload_summary: b2_payload,
+    previous_hash: h1,
+    current_hash: h2
   });
 
   const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -88,7 +129,8 @@ export function evaluatePostArbiter(
     matched_rules: arbiterResult.matchedRules,
     icd10_codes: arbiterResult.icd10Codes,
     safe_spoken_narrative,
-    audit_sha256,
+    audit_sha256: h2,
+    audit_hash_chain,
     latency_us
   };
 }

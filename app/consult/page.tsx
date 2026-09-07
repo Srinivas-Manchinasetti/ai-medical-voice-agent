@@ -24,7 +24,11 @@ import {
   Radio,
   Users,
   Zap,
-  Award
+  Award,
+  Wrench,
+  GitCompare,
+  Lock,
+  Cpu
 } from "lucide-react";
 import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
@@ -56,11 +60,30 @@ interface BoardData {
   orchestrator_summary: string;
   active_specialists: string[];
   specialists_summoned: string[];
+  deliberation_rounds?: number;
+  tools_executed?: string[];
+  tools_executed_details?: Array<{
+    tool_name: string;
+    clinical_summary: string;
+    latency_ms: number;
+    status: string;
+  }>;
+  peer_challenges_count?: number;
+  peer_challenges?: Array<{
+    from_agent: string;
+    to_agent: string;
+    claim_disputed: string;
+    counter_evidence: string[];
+    challenge_rationale: string;
+    resolved?: boolean;
+  }>;
   opinions: Array<{
     doctor_name: string;
     specialty: string;
     concerns: string[];
     risk_level: string;
+    confidence?: number;
+    confidence_semantics?: string;
   }>;
   differential: Array<{
     condition: string;
@@ -76,6 +99,13 @@ interface BoardData {
     post_arbiter_latency_us: number;
     total_board_latency_ms: number;
     audit_sha256?: string;
+    audit_hash_chain?: Array<{
+      block_index: number;
+      event_type: string;
+      current_hash: string;
+      previous_hash: string;
+      payload_summary: string;
+    }>;
   };
 }
 
@@ -591,6 +621,114 @@ export default function ConsultPage() {
                       <p className="text-[11px] leading-relaxed text-amber-950">
                         {boardData.conflicts[0].description}
                       </p>
+                    </div>
+                  )}
+
+                  {/* Bounded Diagnostic Tools Executed */}
+                  {boardData.tools_executed && boardData.tools_executed.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5">
+                          <Wrench className="w-3 h-3 text-cyan-600" />
+                          Diagnostic Tools
+                        </span>
+                        <span className="text-[10px] text-cyan-700 font-mono bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
+                          {boardData.tools_executed.length} executed
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {boardData.tools_executed_details && boardData.tools_executed_details.length > 0 ? (
+                          boardData.tools_executed_details.map((tool, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-slate-50 border border-slate-200/90 rounded-lg p-2 text-xs space-y-0.5"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono font-bold text-[10px] text-slate-800 flex items-center gap-1">
+                                  <Cpu className="w-3 h-3 text-cyan-600" />
+                                  {tool.tool_name.replace(/_/g, " ").toUpperCase()}
+                                </span>
+                                <span className="text-[9px] font-mono text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                                  {tool.latency_ms}ms
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-600 leading-tight">
+                                {tool.clinical_summary}
+                              </p>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {boardData.tools_executed.map((tool, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 text-[10px] font-mono font-medium bg-slate-50 border border-slate-200 text-slate-700 px-2 py-0.5 rounded"
+                              >
+                                <Cpu className="w-2.5 h-2.5 text-cyan-600" />
+                                {tool}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Multi-Round Peer Review Challenges */}
+                  {boardData.peer_challenges && boardData.peer_challenges.length > 0 && (
+                    <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-2.5 text-xs text-indigo-950 space-y-1.5">
+                      <div className="flex items-center justify-between text-indigo-900 font-bold">
+                        <span className="flex items-center gap-1.5 text-[11px]">
+                          <GitCompare className="w-3.5 h-3.5 text-indigo-600" />
+                          Round 2 Peer Challenges
+                        </span>
+                        <span className="text-[9px] font-mono bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded border border-indigo-300">
+                          {boardData.peer_challenges.length} issued
+                        </span>
+                      </div>
+                      {boardData.peer_challenges.map((ch, idx) => (
+                        <div key={idx} className="bg-white/90 border border-indigo-200/80 rounded-lg p-2 space-y-1">
+                          <div className="text-[10px] font-mono font-bold text-indigo-700 flex items-center justify-between">
+                            <span>{ch.from_agent.replace(/-.*$/, "")} ➔ {ch.to_agent.replace(/-.*$/, "")}</span>
+                            <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                              Resolved
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-700 leading-snug">
+                            <strong className="text-slate-900">Dispute:</strong> {ch.claim_disputed}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tamper-Evident Audit Hash Chain Explorer */}
+                  {boardData.trace.audit_hash_chain && boardData.trace.audit_hash_chain.length > 0 && (
+                    <div className="border border-slate-200 bg-slate-50/80 rounded-xl p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] font-mono font-bold text-slate-600">
+                        <span className="flex items-center gap-1 text-slate-700">
+                          <Lock className="w-3 h-3 text-emerald-600" />
+                          Audit Hash Chain
+                        </span>
+                        <span className="text-[9px] text-emerald-700 font-mono bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                          SHA-256 Chained
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {boardData.trace.audit_hash_chain.map((block, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between text-[9px] font-mono bg-white border border-slate-200/90 px-2 py-1 rounded"
+                          >
+                            <span className="font-semibold text-slate-700 truncate max-w-[130px]">
+                              B{block.block_index}: {block.event_type.replace(/_/g, " ")}
+                            </span>
+                            <span className="text-slate-500 font-mono" title={block.current_hash}>
+                              {block.current_hash.slice(0, 8)}...
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

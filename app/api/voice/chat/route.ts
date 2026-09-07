@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       speech_features: speechFeatures,
       pre_safety_flags: [],
       immediate_danger_detected: false,
+      provenance_evidence: [],
     };
 
     // 3. Execute Multi-Agent Clinical Board (Pre-Arbiter -> Orchestrator -> Specialists -> Synthesizer -> Post-Arbiter)
@@ -82,13 +83,19 @@ export async function POST(request: Request) {
         conflicts: boardOutput.consensus.conflicts,
         key_findings: boardOutput.consensus.key_findings,
         consensus_risk: boardOutput.consensus.consensus_risk,
+        deliberation_rounds: boardOutput.trace.deliberation_rounds,
+        tools_executed: boardOutput.trace.tools_executed,
+        tools_executed_details: boardOutput.trace.tools_executed_details,
+        peer_challenges_count: boardOutput.trace.peer_challenges_count,
+        peer_challenges: boardOutput.trace.peer_challenges,
         trace: {
           pre_arbiter_latency_us: boardOutput.trace.pre_arbiter_latency_us,
           orchestrator_latency_ms: boardOutput.trace.orchestrator_latency_ms,
           synthesis_latency_ms: boardOutput.trace.synthesis_latency_ms,
           post_arbiter_latency_us: boardOutput.trace.post_arbiter_latency_us,
           total_board_latency_ms: boardOutput.trace.total_board_latency_ms,
-          audit_sha256: boardOutput.trace.audit_sha256,
+          audit_sha256: boardOutput.trace.root_audit_hash,
+          audit_hash_chain: boardOutput.trace.audit_hash_chain,
         },
       },
       speech_features: speechFeatures,

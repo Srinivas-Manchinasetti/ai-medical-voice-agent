@@ -34,6 +34,39 @@ export const SpeechFeaturesSchema = z.object({
 export type SpeechFeatures = z.infer<typeof SpeechFeaturesSchema>;
 
 /**
+ * EVIDENCE PROVENANCE & SEMANTICS
+ * Distinguishes patient-reported vs device-measured vs tool-derived vs agent-inferred vs deterministic.
+ */
+export const EvidenceProvenanceSourceSchema = z.enum([
+  "patient_reported",
+  "device_measured",
+  "tool_derived",
+  "agent_inferred",
+  "deterministic_pre_arbiter"
+]);
+export type EvidenceProvenanceSource = z.infer<typeof EvidenceProvenanceSourceSchema>;
+
+export const ConfidenceSemanticsSchema = z.enum([
+  "deterministic_flag",
+  "tool_calibrated",
+  "uncalibrated_model_score",
+  "patient_statement"
+]);
+export type ConfidenceSemantics = z.infer<typeof ConfidenceSemanticsSchema>;
+
+export const EvidenceItemSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  description: z.string(),
+  source: EvidenceProvenanceSourceSchema,
+  confidence: z.number().nullable().default(null),
+  confidence_semantics: ConfidenceSemanticsSchema.default("patient_statement"),
+  timestamp: z.string(),
+  raw_payload: z.record(z.string(), z.any()).optional()
+});
+export type EvidenceItem = z.infer<typeof EvidenceItemSchema>;
+
+/**
  * NORMALIZED PATIENT CASE SCHEMA
  * The canonical clinical payload passed from intake into the multi-agent board.
  */
@@ -66,12 +99,12 @@ export const PatientCaseSchema = z.object({
   }),
   pre_safety_flags: z.array(z.string()).default([]),
   immediate_danger_detected: z.boolean().default(false),
+  provenance_evidence: z.array(EvidenceItemSchema).default([])
 });
 export type PatientCase = z.infer<typeof PatientCaseSchema>;
 
 /**
  * SPECIALIST INVOCATION REQUEST SCHEMA
- * Produced by deterministic routing rules and contextualized by the Orchestrator.
  */
 export const SpecialistRequestSchema = z.object({
   specialty: z.enum(["cardiology", "neurology", "pediatrics"]),
@@ -82,18 +115,59 @@ export const SpecialistRequestSchema = z.object({
 export type SpecialistRequest = z.infer<typeof SpecialistRequestSchema>;
 
 /**
+ * CLINICAL TOOL REQUEST & RESULT SCHEMAS
+ */
+export const ToolRequestSchema = z.object({
+  tool_name: z.string(),
+  rationale: z.string(),
+  parameters: z.record(z.string(), z.any()).default({})
+});
+export type ToolRequest = z.infer<typeof ToolRequestSchema>;
+
+export const ToolResultSchema = z.object({
+  tool_name: z.string(),
+  status: z.enum(["success", "error", "skipped"]),
+  output: z.record(z.string(), z.any()),
+  clinical_summary: z.string(),
+  latency_ms: z.number().default(0)
+});
+export type ToolResult = z.infer<typeof ToolResultSchema>;
+
+/**
+ * PEER CHALLENGE SCHEMA
+ */
+export const PeerChallengeSchema = z.object({
+  from_agent: z.string(),
+  to_agent: z.string(),
+  claim_disputed: z.string(),
+  counter_evidence: z.array(z.string()),
+  challenge_rationale: z.string(),
+  resolved: z.boolean().default(false),
+  response_rationale: z.string().optional()
+});
+export type PeerChallenge = z.infer<typeof PeerChallengeSchema>;
+
+/**
  * SPECIALIST STRUCTURED CLINICAL OPINION SCHEMA
- * Every agent must return this schema, ensuring strictly structured evidence.
  */
 export const AgentOpinionSchema = z.object({
   agent: z.string(),
   doctor_name: z.string(),
   specialty: z.string(),
+  deliberation_round: z.number().default(1),
+  primary_hypothesis: z.string().default("General evaluation"),
   concerns: z.array(z.string()),
-  evidence: z.array(z.string()),
+  evidence: z.array(z.string()).default([]),
+  evidence_for: z.array(z.string()).default([]),
+  evidence_against: z.array(z.string()).default([]),
+  missing_evidence: z.array(z.string()).default([]),
+  tool_invocations: z.array(ToolResultSchema).default([]),
+  challenges_issued: z.array(PeerChallengeSchema).default([]),
+  challenges_received: z.array(PeerChallengeSchema).default([]),
   risk_level: z.enum(["high", "moderate", "low"]),
   recommended_actions: z.array(z.string()),
   confidence: z.number().min(0).max(1),
+  confidence_semantics: ConfidenceSemanticsSchema.default("uncalibrated_model_score"),
   requires_escalation: z.boolean(),
   speech_observations_evaluated: z.array(z.string()).default([]),
   clinical_protocol: z.string().default("Standard evaluation"),
@@ -105,26 +179,27 @@ export type AgentOpinion = z.infer<typeof AgentOpinionSchema>;
  */
 export const DifferentialItemSchema = z.object({
   condition: z.string(),
+  probability: z.enum(["high", "moderate", "low"]),
   supporting_agents: z.array(z.string()),
-  risk: z.enum(["high", "moderate", "low"]),
   clinical_rationale: z.string(),
+  competing_hypotheses: z.array(z.string()).default([])
 });
 export type DifferentialItem = z.infer<typeof DifferentialItemSchema>;
 
 /**
  * CLINICAL CONFLICT SCHEMA
- * Documents disagreement or overlapping etiologies between specialists.
  */
 export const ClinicalConflictSchema = z.object({
   topic: z.string(),
   agents: z.array(z.string()),
+  conflict_description: z.string().default(""),
   resolution: z.string(),
+  status: z.enum(["resolved", "concurrent_active_threats"]).default("resolved")
 });
 export type ClinicalConflict = z.infer<typeof ClinicalConflictSchema>;
 
 /**
  * CLINICAL CONSENSUS SCHEMA
- * Produced by the Consensus Synthesizer before deterministic safety arbitration.
  */
 export const ClinicalConsensusSchema = z.object({
   differential: z.array(DifferentialItemSchema),
@@ -141,23 +216,41 @@ export const ClinicalConsensusSchema = z.object({
   orchestrator_summary: z.string(),
   requires_immediate_escalation: z.boolean().default(false),
   active_specialists: z.array(z.string()),
+  deliberation_rounds_completed: z.number().default(1)
 });
 export type ClinicalConsensus = z.infer<typeof ClinicalConsensusSchema>;
 
 /**
+ * AUDIT HASH CHAIN BLOCK SCHEMA
+ */
+export interface HashChainBlock {
+  block_index: number;
+  timestamp: string;
+  event_type: "pre_arbiter" | "round_1_hypotheses" | "round_2_challenges" | "consensus_synthesis" | "post_arbiter_override";
+  payload_summary: string;
+  previous_hash: string;
+  current_hash: string;
+}
+
+/**
  * FULL BOARD EXECUTION TRACE
- * Full audit log recording exact timing and intermediate artifacts.
  */
 export interface BoardExecutionTrace {
   timestamp: string;
   patient_id: string;
-  pre_arbiter_latency_us: number; // in microseconds
+  deliberation_rounds: number;
+  pre_arbiter_latency_us: number;
   orchestrator_latency_ms: number;
   specialist_latencies_ms: Record<string, number>;
+  tool_latencies_ms: Record<string, number>;
   synthesis_latency_ms: number;
   post_arbiter_latency_us: number;
   total_board_latency_ms: number;
   specialists_summoned: string[];
+  tools_executed: string[];
+  tools_executed_details?: ToolResult[];
+  peer_challenges_count: number;
+  peer_challenges?: PeerChallenge[];
   pre_safety_flags: string[];
   immediate_danger: boolean;
   opinions: AgentOpinion[];
@@ -165,5 +258,6 @@ export interface BoardExecutionTrace {
   post_arbiter_override: boolean;
   final_esi_level: number;
   final_disposition: string;
-  audit_sha256: string;
+  audit_hash_chain: HashChainBlock[];
+  root_audit_hash: string;
 }
