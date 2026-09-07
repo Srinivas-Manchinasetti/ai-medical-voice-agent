@@ -128,22 +128,29 @@ export class ClinicalSynthesizer {
     let synthesized_reply_narrative = "";
     if (consensus_risk === "critical") {
       if (hasHighCardio && hasHighNeuro) {
-        synthesized_reply_narrative = "Our medical board has evaluated your symptoms as a multi-system emergency requiring immediate medical intervention. Please sit down, remain completely still, and dial emergency services right now.";
+        synthesized_reply_narrative = "I need you to stay seated and keep someone nearby with you right now. Your combination of symptoms is concerning for both an acute cardiac and neurological event that requires immediate emergency care. Let's get emergency medical services dispatched right away.";
       } else if (hasHighCardio) {
-        synthesized_reply_narrative = "I am detecting significant cardiovascular distress indicators. For your safety, please sit upright, avoid any physical exertion, and have someone dial emergency medical services immediately.";
+        synthesized_reply_narrative = "I'm very concerned about the discomfort and pressure you're feeling in your chest. Please sit down comfortably right now, stay completely still, and have someone dial 911 immediately. If you're by yourself, let's call emergency services right away on speakerphone—please do not exert yourself or walk around.";
       } else if (hasHighNeuro) {
-        synthesized_reply_narrative = "These indicators represent an acute neurological emergency. Immediate hospital emergency evaluation is critical. Please remain stationary while emergency care is arranged.";
+        synthesized_reply_narrative = "The sudden facial drooping and arm weakness you described are critical warning signs of a stroke. Every minute matters, so please stay right where you are and do not try to stand up or walk. We are initiating emergency stroke protocols right now—let's get an ambulance to you immediately.";
       } else {
-        synthesized_reply_narrative = "Your clinical symptoms require immediate emergency attention. Please proceed to the nearest emergency department or call emergency dispatch right away.";
+        synthesized_reply_narrative = "Your clinical symptoms require urgent emergency care. Please sit down comfortably, remain calm, and call 911 or emergency services right away.";
       }
     } else if (consensus_risk === "urgent") {
-      synthesized_reply_narrative = "Thank you for explaining what you're feeling. Our clinical team has reviewed your symptoms and recommends an urgent medical evaluation today. Please monitor your temperature and vitals closely.";
+      synthesized_reply_narrative = "Thank you for explaining what you're feeling. Based on your symptoms, our clinical team recommends an urgent in-person medical evaluation today. Please keep a close eye on your temperature and vitals.";
     } else {
-      const topFinding = key_findings.length > 0 ? key_findings[0] : "";
-      if (topFinding) {
-        synthesized_reply_narrative = `I have reviewed your presentation regarding ${topFinding.toLowerCase()}. Based on standard clinical guidelines, this appears consistent with a routine, low-acuity presentation. Please rest, stay hydrated, and follow up with your primary care doctor if symptoms persist or worsen.`;
+      const isLegNerveMuscle = differential.some(d => /sciati|radiculo|muscle cramp|spasm|peripheral sensory/i.test(d.condition)) ||
+                              key_findings.some(f => /leg|calf|thigh|hamstring|needle|digged|sciatica/i.test(f));
+
+      if (isLegNerveMuscle) {
+        synthesized_reply_narrative = "Based on the sharp, needle-like pain you described in your leg muscles, this is most characteristic of sensory nerve irritation—such as sciatica or lumbar radiculopathy—where an irritated nerve root sends lancinating, needle-like signals down the leg. An acute focal muscle spasm is another common possibility. To manage this at home: rest in a comfortable position with your knees supported, avoid heavy lifting or prolonged sitting, and stay well hydrated. If you experience weakness lifting your foot, numbness around your groin, or changes in bowel or bladder control, please seek emergency medical evaluation immediately.";
       } else {
-        synthesized_reply_narrative = "I've reviewed your symptoms. They appear consistent with a routine, low-acuity presentation. Stay hydrated, rest, and follow up with your primary physician if symptoms persist beyond three days.";
+        const topFinding = key_findings.length > 0 ? key_findings[0] : "";
+        if (topFinding) {
+          synthesized_reply_narrative = `Thank you for sharing that with me regarding ${topFinding.toLowerCase()}. Based on standard clinical guidelines, this appears consistent with a routine, low-acuity issue. Please rest, stay hydrated, and follow up with your doctor if symptoms persist or worsen.`;
+        } else {
+          synthesized_reply_narrative = "Thank you for sharing that with me. Your symptoms appear consistent with a routine, low-acuity presentation. Please stay hydrated, rest, and follow up with your primary physician if symptoms persist beyond a few days.";
+        }
       }
     }
 

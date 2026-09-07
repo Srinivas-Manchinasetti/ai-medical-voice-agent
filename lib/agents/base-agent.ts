@@ -1,4 +1,4 @@
-import { AgentOpinion, AgentOpinionSchema, PatientCase, ToolResult, PeerChallenge } from "./schemas";
+import { AgentOpinion, AgentOpinionSchema, PatientCase, ToolResult, PeerChallenge, AgentRequest } from "./schemas";
 import { Blackboard } from "./blackboard";
 import { ClinicalToolRegistry } from "./tools/tool-registry";
 import { DEFAULT_RUNTIME_POLICY } from "./runtime-policy";
@@ -39,6 +39,12 @@ export abstract class BaseClinicalAgent {
    * Evaluate peer hypotheses from Blackboard in Round 2 and issue challenges if indicated.
    */
   protected abstract evaluatePeerChallenges(blackboard: Blackboard): PeerChallenge[];
+
+  /**
+   * Specialist examines current case & blackboard evidence and generates structured AgentRequests
+   * for critical missing information (e.g. onset, radiation, exertional, stroke signs).
+   */
+  public abstract assessEvidenceNeeds(patientCase: PatientCase, blackboard?: Blackboard): AgentRequest[];
 
   /**
    * Fallback opinion generator if LLM API is unavailable.

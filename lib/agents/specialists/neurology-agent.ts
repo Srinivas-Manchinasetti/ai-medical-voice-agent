@@ -1,6 +1,7 @@
 import { BaseClinicalAgent } from "../base-agent";
-import { AgentOpinion, PatientCase, ToolResult, PeerChallenge } from "../schemas";
+import { AgentOpinion, PatientCase, ToolResult, PeerChallenge, AgentRequest } from "../schemas";
 import { Blackboard } from "../blackboard";
+import { clinicalKnowledgeRetriever } from "../../clinical-knowledge/retriever";
 
 export class NeurologyAgent extends BaseClinicalAgent {
   constructor() {
@@ -93,6 +94,8 @@ export class NeurologyAgent extends BaseClinicalAgent {
     challenges: PeerChallenge[]
   ): AgentOpinion {
     const text = patientCase.transcript.toLowerCase();
+    const knowledgeContext = clinicalKnowledgeRetriever.retrieveKnowledge(text, "neurology", { topK: 3 });
+    const retrievedCitations = knowledgeContext.passages.map(p => p.id);
     const befastResult = toolsRun.find(t => t.tool_name === "compute_befast");
     const nihssResult = toolsRun.find(t => t.tool_name === "compute_nihss");
 
@@ -138,7 +141,8 @@ export class NeurologyAgent extends BaseClinicalAgent {
         confidence_semantics: "uncalibrated_model_score",
         requires_escalation: true,
         speech_observations_evaluated: ctx.relevant_speech_features?.observations || [],
-        clinical_protocol: "AHA/ASA Acute Ischemic Stroke Early Management Guidelines"
+        clinical_protocol: "AHA/ASA Acute Ischemic Stroke Early Management Guidelines",
+        retrieved_citations: retrievedCitations
       };
     }
 
@@ -167,7 +171,8 @@ export class NeurologyAgent extends BaseClinicalAgent {
         confidence_semantics: "uncalibrated_model_score",
         requires_escalation: false,
         speech_observations_evaluated: ctx.relevant_speech_features?.observations || [],
-        clinical_protocol: "AAN Clinical Guideline for Unexplained Syncope and Dizziness"
+        clinical_protocol: "AAN Clinical Guideline for Unexplained Syncope and Dizziness",
+        retrieved_citations: retrievedCitations
       };
     }
 
@@ -191,7 +196,55 @@ export class NeurologyAgent extends BaseClinicalAgent {
       confidence_semantics: "uncalibrated_model_score",
       requires_escalation: false,
       speech_observations_evaluated: [],
-      clinical_protocol: "Outpatient Primary Headache Management Pathway"
+      clinical_protocol: "Outpatient Primary Headache Management Pathway",
+      retrieved_citations: retrievedCitations
     };
   }
+
+  public assessEvidenceNeeds(patientCase: PatientCase, blackboard?: Blackboard): AgentRequest[] {
+    const text = patientCase.transcript.toLowerCase();
+    const requests: AgentRequest[] = [];
+    const caseVer = patientCase.case_version || 1;
+
+    // Check if neuro domain is active (headache, dizziness, weakness, numbness, droop, speech, vision)
+    const hasNeuroSignal = /\b(headache|head|dizz|droop|weak|numb|speech|slurr|talk|stroke|vision|faint|black\s*out|syncope)\b/i.test(text);
+    if (!hasNeuroSignal) return [];
+
+    // 1. BE-FAST Focal Signs (Facial droop, arm weakness, speech difficulty)
+    const hasFocalSigns = /\b(droop|face.*droop|facial.*asymmetry|arm.*weak|leg.*weak|cannot.*lift|speech|slurr|words|aphasia)\b/i.test(text);
+    if (!hasFocalSigns) {
+      requests.push({
+        id: `req-neuro-befast-v${caseVer}`,
+        fromAgent: "neurology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "neurological_signs",
+        urgency: "critical",
+        reason: "Screen for acute BE-FAST focal stroke indicators (facial droop, unilateral arm weakness, slurred speech)",
+        suggestedQuestion: "Have you noticed any facial drooping, weakness when lifting either arm, or difficulty speaking clearly?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 2. Onset / Last Known Well (LKW)
+    const hasOnset = /\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|sudden(?:ly)?|thunderclap|just\s+started|this\s+morning|twenty\s+minutes|thirty\s+minutes)\b/i.test(text);
+    if (!hasOnset) {
+      requests.push({
+        id: `req-neuro-onset-v${caseVer}`,
+        fromAgent: "neurology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "onset",
+        urgency: "critical",
+        reason: "Establish exact time of onset / last known well to determine eligibility for acute reperfusion therapy",
+        suggestedQuestion: "Exactly what time did these neurological symptoms begin, and did they come on abruptly like a thunderclap?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    return requests;
+  }
 }
+

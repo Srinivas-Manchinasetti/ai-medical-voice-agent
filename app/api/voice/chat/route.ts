@@ -4,6 +4,9 @@ import { clinicalBoard } from "@/lib/agents/clinical-board";
 import { extractSpeechFeatures } from "@/lib/acoustic/speech-features";
 import { PatientCase } from "@/lib/agents/schemas";
 
+import { conversationManager } from "@/lib/triage/conversation-manager";
+import { clinicalKnowledgeRetriever } from "@/lib/clinical-knowledge/retriever";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -53,6 +56,7 @@ export async function POST(request: Request) {
           avatarUrl: doctor.avatarUrl,
           voiceGender: doctor.voiceGender,
         },
+        phase: "greeting",
         board: null,
         speech_features: null,
         triage: null
@@ -69,6 +73,7 @@ export async function POST(request: Request) {
           avatarUrl: doctor.avatarUrl,
           voiceGender: doctor.voiceGender,
         },
+        phase: "closing",
         board: null,
         speech_features: null,
         triage: null
@@ -97,36 +102,145 @@ export async function POST(request: Request) {
       pitchVariance: audioMetrics?.pitchVariance,
     });
 
-    // 2. Assemble Normalized Patient Case
-    const ageNum = patientAge !== undefined ? Number(patientAge) : undefined;
-    const ageGroup = ageNum !== undefined
-      ? (ageNum < 1 ? "infant" : ageNum < 16 ? "pediatric" : ageNum > 65 ? "older_adult" : "adult")
-      : "adult";
+    const ageNum = patientAge ? parseInt(patientAge, 10) : 45;
+    const ageGroup = ageNum < 18 ? "pediatric" : ageNum > 65 ? "geriatric" : "adult";
 
+    // 2. Stateful Clinical Conversation Manager Turn Execution
+    const turnResult = await conversationManager.processTurn(cleanMsg, body.interviewState, {
+      age: ageNum,
+      age_group: ageGroup
+    });
+
+    // If conversation manager determined patient follow-up or clarification is needed
+    if (turnResult.action === "ASK_PATIENT" || turnResult.action === "CLARIFY") {
+      return NextResponse.json({
+        doctorReply: turnResult.doctorReply,
+        doctor: {
+          id: "dr-sarah-chen",
+          name: turnResult.doctorName,
+          specialty: turnResult.specialty,
+          avatarUrl: "/avatars/sarah.png",
+          voiceGender: "female",
+        },
+        phase: turnResult.state.phase,
+        interviewState: turnResult.state,
+        board: {
+          phase: turnResult.state.phase,
+          information_state: turnResult.state.informationState,
+          status_summary: turnResult.state.informationState === "sufficient_for_specialist"
+            ? "Specialist Review Active · Inquiring"
+            : "Clinical History Gathering",
+          active_specialists: turnResult.state.agentRequests.some(r => r.fromAgent === "cardiology" && r.status === "pending")
+            ? ["Dr. Marcus Vance, MD, FACC (Cardiology)"]
+            : turnResult.state.agentRequests.some(r => r.fromAgent === "neurology" && r.status === "pending")
+            ? ["Dr. Arthur Pendelton, MD, PhD (Neurology)"]
+            : ["Dr. Sarah Chen, MD (Lead)"],
+          active_requests: turnResult.state.agentRequests.filter(r => r.status === "pending"),
+          pending_question: turnResult.state.pendingQuestion,
+          known_facts: turnResult.state.slots.known_facts,
+          slots: turnResult.state.slots,
+          differential: [],
+          conflicts: [],
+          key_findings: turnResult.state.slots.known_facts,
+          deliberation_messages: [],
+          trace: null,
+        },
+        speech_features: speechFeatures,
+        triage: {
+          triageLevel: "gathering_history",
+          triageTitle: "Clinical History Gathering",
+          esiScore: null,
+          isEmergency: false,
+          arbiterOverride: false,
+          overrideRationale: null,
+          redFlagsTriggered: turnResult.preArbiterResult.pre_safety_flags,
+          detectedSymptoms: turnResult.state.slots.known_facts,
+          icdCodes: [],
+          recommendedAction: "Clinical history in progress. Triage disposition will lock once evidence is sufficient.",
+          soap: null,
+        },
+      });
+    }
+
+    // 3. Assemble Normalized Patient Case for Full Board Deliberation (Convene Board or Emergency Preemption)
     const patientCase: PatientCase = {
       patient_id: `PT-${Date.now().toString().slice(-4)}`,
       patient_name: patientName,
-      transcript: cumulativeTranscript,
+      transcript: turnResult.state.cumulativeTranscript,
       conversation_history: conversationHistory,
       demographics: {
         age: ageNum,
         age_group: ageGroup as any,
       },
-      detected_symptoms: [],
+      detected_symptoms: turnResult.state.slots.known_facts,
       vitals: {},
       speech_features: speechFeatures,
-      pre_safety_flags: [],
-      immediate_danger_detected: false,
+      pre_safety_flags: turnResult.preArbiterResult.pre_safety_flags,
+      immediate_danger_detected: turnResult.preArbiterResult.immediate_danger,
       provenance_evidence: [],
       is_interruption: Boolean(isInterruption),
       interrupted_agent: interruptedAgent || undefined,
+      case_version: turnResult.state.caseVersion,
     };
 
-    // 3. Execute Multi-Agent Clinical Board (Pre-Arbiter -> Orchestrator -> Specialists -> Synthesizer -> Post-Arbiter)
+    // 4. Execute Multi-Agent Clinical Board (Pre-Arbiter -> Orchestrator -> Specialists -> Synthesizer -> Post-Arbiter)
     const boardOutput = await clinicalBoard.evaluate(patientCase);
 
+    const knownFactsCount = turnResult.state.slots.known_facts.length;
+    const missingDims = [
+      !turnResult.state.slots.onset && "Onset/Timeline",
+      !turnResult.state.slots.character && "Character/Quality",
+      !turnResult.state.slots.radiation && "Radiation/Spread",
+      !turnResult.state.slots.exertional && "Exertional relation",
+    ].filter(Boolean) as string[];
+
+    const sufficiency = {
+      is_sufficient: true,
+      completeness_score: Math.min(100, Math.round((knownFactsCount / (knownFactsCount + missingDims.length || 1)) * 100)),
+      dimensions: {
+        known_facts: turnResult.state.slots.known_facts,
+        missing_dimensions: missingDims,
+      },
+    };
+
+    const resolvedCitations: Record<string, any> = {};
+    const allCitationIds = new Set<string>();
+
+    boardOutput.trace.opinions?.forEach((o: any) => {
+      o.retrieved_citations?.forEach((c: string) => allCitationIds.add(c));
+    });
+    boardOutput.trace.deliberation_messages?.forEach((m: any) => {
+      m.references?.forEach((r: string) => {
+        if (typeof r === "string" && (r.startsWith("GUIDELINE-") || r.startsWith("MPLUS-") || r.startsWith("RXNORM-") || r.startsWith("DAILYMED-") || r.startsWith("OPENFDA-"))) {
+          allCitationIds.add(r);
+        }
+      });
+    });
+
+    for (const id of allCitationIds) {
+      const p = clinicalKnowledgeRetriever.resolveCitation(id);
+      if (p) {
+        resolvedCitations[id] = {
+          id: p.id,
+          title: p.title,
+          authority: p.authority,
+          source: p.source,
+          section: p.section,
+          content: p.content,
+          releaseDate: p.releaseDate,
+          organization: p.source,
+          criteria: p.keyTerms || [],
+        };
+      }
+    }
+
+    const finalDoctorReply =
+      turnResult.action === "EMERGENCY_CONVENE_BOARD" && turnResult.doctorReply
+        ? turnResult.doctorReply
+        : boardOutput.doctor_reply;
+
     return NextResponse.json({
-      doctorReply: boardOutput.doctor_reply,
+      doctorReply: finalDoctorReply,
       doctor: {
         id: doctor.id,
         name: doctor.name,
@@ -134,7 +248,19 @@ export async function POST(request: Request) {
         avatarUrl: doctor.avatarUrl,
         voiceGender: doctor.voiceGender,
       },
+      phase: "board_decision",
+      interviewState: {
+        ...turnResult.state,
+        phase: "decided",
+        informationState: "sufficient_for_decision",
+      },
+      sufficiency,
       board: {
+        phase: "board_decision",
+        status_summary: "Clinical Context Complete · Deliberation Active",
+        completeness_score: sufficiency.completeness_score,
+        known_facts: sufficiency.dimensions.known_facts,
+        missing_dimensions: sufficiency.dimensions.missing_dimensions,
         orchestrator_summary: boardOutput.consensus.orchestrator_summary,
         active_specialists: boardOutput.consensus.active_specialists,
         specialists_summoned: boardOutput.trace.specialists_summoned,
@@ -149,6 +275,7 @@ export async function POST(request: Request) {
         peer_challenges_count: boardOutput.trace.peer_challenges_count,
         peer_challenges: boardOutput.trace.peer_challenges,
         deliberation_messages: boardOutput.trace.deliberation_messages || [],
+        citations: resolvedCitations,
         trace: {
           pre_arbiter_latency_us: boardOutput.trace.pre_arbiter_latency_us,
           orchestrator_latency_ms: boardOutput.trace.orchestrator_latency_ms,

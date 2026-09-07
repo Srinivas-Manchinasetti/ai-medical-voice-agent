@@ -1,0 +1,22 @@
+{
+  "corpus": "MedlinePlus Clinical Knowledge",
+  "publisher": "U.S. National Library of Medicine (NLM) / NIH",
+  "releaseDate": "2026-09-05",
+  "rawFile": {
+    "path": "C:\\dev\\Capstone\\data\\medlineplus\\raw\\mplus_topics_2026-09-05.xml",
+    "byteSize": 30089919,
+    "sha256": "82e0f15d51f0872c5fb0624dca52f5c9977106391230642a4cfe6d35f790e055"
+  },
+  "ingestedAt": "2026-09-07T16:35:03.548Z",
+  "topicsCount": 1017,
+  "passagesCount": 2112,
+  "sectionDistribution": {
+    "overview": 1007,
+    "symptoms": 218,
+    "emergency_guidance": 31,
+    "diagnosis": 235,
+    "treatment": 245,
+    "risk_factors": 239,
+    "prevention": 137
+  }
+}

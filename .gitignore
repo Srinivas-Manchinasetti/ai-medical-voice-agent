@@ -50,3 +50,9 @@ __pycache__/
 
 
 .clerk/
+
+# scratch files
+scratch/
+
+# large raw clinical XML data
+data/medlineplus/raw/*.xml

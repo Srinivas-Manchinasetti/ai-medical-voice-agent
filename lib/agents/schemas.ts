@@ -174,6 +174,7 @@ export const AgentOpinionSchema = z.object({
   requires_escalation: z.boolean(),
   speech_observations_evaluated: z.array(z.string()).default([]),
   clinical_protocol: z.string().default("Standard evaluation"),
+  retrieved_citations: z.array(z.string()).default([]),
 });
 export type AgentOpinion = z.infer<typeof AgentOpinionSchema>;
 
@@ -314,4 +315,40 @@ export interface BoardExecutionTrace {
   audit_hash_chain: HashChainBlock[];
   root_audit_hash: string;
   deliberation_messages: BoardMessage[];
+}
+
+/**
+ * AGENT EVIDENCE & ACTION REQUEST
+ * Specialist agents emit structured requests to the Blackboard / Conversation Manager.
+ */
+export interface AgentRequest {
+  id: string;
+  fromAgent: "cardiology" | "neurology" | "pediatrics" | "internal_medicine";
+  doctorName: string;
+  type: "patient_question" | "tool_execution" | "specialist_review";
+  targetSlot: string;
+  urgency: "critical" | "high" | "normal";
+  reason: string;
+  suggestedQuestion?: string;
+  status: "pending" | "resolved" | "superseded";
+  caseVersion: number;
+}
+
+/**
+ * PENDING QUESTION SCHEMA
+ * The active question posed to the patient by Lead Clinician Dr. Sarah Chen.
+ */
+export interface PendingQuestion {
+  id: string;
+  targetSlot: string;
+  askedBy: "sarah" | "marcus" | "arthur" | "elena";
+  doctorName: string;
+  patientFacingSpeaker: "sarah";
+  question: string;
+  purpose: string;
+  required: boolean;
+  priority: "critical" | "high" | "normal";
+  status: "pending" | "resolved" | "ambiguous" | "superseded";
+  createdAt: string;
+  caseVersion: number;
 }

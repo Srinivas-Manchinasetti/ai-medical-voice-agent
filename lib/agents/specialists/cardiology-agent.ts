@@ -1,6 +1,7 @@
 import { BaseClinicalAgent } from "../base-agent";
-import { AgentOpinion, PatientCase, ToolResult, PeerChallenge } from "../schemas";
+import { AgentOpinion, PatientCase, ToolResult, PeerChallenge, AgentRequest } from "../schemas";
 import { Blackboard } from "../blackboard";
+import { clinicalKnowledgeRetriever } from "../../clinical-knowledge/retriever";
 
 export class CardiologyAgent extends BaseClinicalAgent {
   constructor() {
@@ -102,6 +103,8 @@ export class CardiologyAgent extends BaseClinicalAgent {
     challenges: PeerChallenge[]
   ): AgentOpinion {
     const text = patientCase.transcript.toLowerCase();
+    const knowledgeContext = clinicalKnowledgeRetriever.retrieveKnowledge(text, "cardiology", { topK: 3 });
+    const retrievedCitations = knowledgeContext.passages.map(p => p.id);
     const ecgResult = toolsRun.find(t => t.tool_name === "analyze_ecg");
     const timiResult = toolsRun.find(t => t.tool_name === "calculate_timi");
     const drugTool = toolsRun.find(t => t.tool_name === "check_drug_interactions");
@@ -144,7 +147,8 @@ export class CardiologyAgent extends BaseClinicalAgent {
         confidence_semantics: "tool_calibrated",
         requires_escalation: true,
         speech_observations_evaluated: ctx.relevant_speech_features?.observations || [],
-        clinical_protocol: "AHA/ACC Absolute Nitrate Contraindication Guideline"
+        clinical_protocol: "AHA/ACC Absolute Nitrate Contraindication Guideline",
+        retrieved_citations: ["MED-DAILYMED-CONTRA-001", ...retrievedCitations]
       };
     }
 
@@ -182,7 +186,8 @@ export class CardiologyAgent extends BaseClinicalAgent {
         confidence_semantics: "uncalibrated_model_score",
         requires_escalation: true,
         speech_observations_evaluated: ctx.relevant_speech_features?.observations || [],
-        clinical_protocol: "ACC/AHA Acute Coronary Syndrome Fast-Track Protocol"
+        clinical_protocol: "ACC/AHA Acute Coronary Syndrome Fast-Track Protocol",
+        retrieved_citations: retrievedCitations
       };
     }
 
@@ -211,7 +216,8 @@ export class CardiologyAgent extends BaseClinicalAgent {
         confidence_semantics: "uncalibrated_model_score",
         requires_escalation: false,
         speech_observations_evaluated: ctx.relevant_speech_features?.observations || [],
-        clinical_protocol: "HRS Clinical Practice Guideline for Arrhythmias"
+        clinical_protocol: "HRS Clinical Practice Guideline for Arrhythmias",
+        retrieved_citations: retrievedCitations
       };
     }
 
@@ -235,7 +241,108 @@ export class CardiologyAgent extends BaseClinicalAgent {
       confidence_semantics: "uncalibrated_model_score",
       requires_escalation: false,
       speech_observations_evaluated: [],
-      clinical_protocol: "Ambulatory Chest Discomfort Pathway"
+      clinical_protocol: "Ambulatory Chest Discomfort Pathway",
+      retrieved_citations: retrievedCitations
     };
   }
+
+  public assessEvidenceNeeds(patientCase: PatientCase, blackboard?: Blackboard): AgentRequest[] {
+    const text = patientCase.transcript.toLowerCase();
+    const requests: AgentRequest[] = [];
+    const caseVer = patientCase.case_version || 1;
+
+    // Check if cardiac domain is active (chest discomfort, palpitations, breathlessness, angina)
+    const hasCardiacSignal = /\b(chest|heart|sternum|angina|palpitation|pressure|tightness|squeezing)\b/i.test(text);
+    if (!hasCardiacSignal) return [];
+
+    // 1. Onset & Duration
+    const hasOnset = /\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|sudden(?:ly)?|just\s+started|thirty\s+minutes|an?\s+hour|twenty\s+minutes|this\s+morning)\b/i.test(text);
+    if (!hasOnset) {
+      requests.push({
+        id: `req-cardio-onset-v${caseVer}`,
+        fromAgent: "cardiology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "onset",
+        urgency: "high",
+        reason: "Establish exact timeline and suddenness of chest discomfort for ischemic risk stratification",
+        suggestedQuestion: "When did this chest discomfort begin, and did it start suddenly or build up gradually?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 2. Character / Quality
+    const hasCharacter = /\b(crushing|pressure|squeezing|tightness|heavy|sharp|stabbing|burning|throbbing|ache|dull|elephant)\b/i.test(text);
+    if (!hasCharacter) {
+      requests.push({
+        id: `req-cardio-char-v${caseVer}`,
+        fromAgent: "cardiology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "character",
+        urgency: "normal",
+        reason: "Differentiate visceral pressure/squeezing from pleuritic or musculoskeletal quality",
+        suggestedQuestion: "Could you describe what the discomfort feels like — is it a tight pressure, squeezing, or a sharp pain?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 3. Exertional Relationship
+    const hasExertion = /\b(exert|exercise|walk|stair|rest|sitting|activity|physical|climb)\b/i.test(text);
+    if (!hasExertion) {
+      requests.push({
+        id: `req-cardio-exert-v${caseVer}`,
+        fromAgent: "cardiology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "exertional",
+        urgency: "high",
+        reason: "Determine if symptoms correlate with myocardial oxygen demand (exertion vs rest)",
+        suggestedQuestion: "Does this discomfort happen when you're physically active, such as climbing stairs, or does it occur at rest?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 4. Radiation Pathway
+    const hasRadiation = /\b(radiat.*|spread.*|travel.*|into\s+(?:my\s+)?(?:left\s+)?arm|jaw|neck|shoulder|back|head|throat)\b/i.test(text) ||
+      /\b(no\s+radiation|stays?\s+(?:right\s+)?there|doesn't\s+travel|nowhere)\b/i.test(text);
+    if (!hasRadiation) {
+      requests.push({
+        id: `req-cardio-rad-v${caseVer}`,
+        fromAgent: "cardiology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "radiation",
+        urgency: "high",
+        reason: "Characterize ischemic dermatome radiation (arm, jaw, shoulder, neck, back)",
+        suggestedQuestion: "Does the discomfort travel or spread anywhere, such as into your left arm, jaw, neck, or back?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 5. Associated Systemic Signs
+    const hasAssociated = /\b(sweat|cold\s+sweats|clammy|diaphoresis|shortness\s+of\s+breath|difficulty\s+breathing|dyspnea|nausea|vomit|dizz|faint|syncope)\b/i.test(text) ||
+      /\b(no\s+(?:sweat|shortness|nausea|dizziness)|denies\s+(?:sweat|dyspnea))\b/i.test(text);
+    if (!hasAssociated) {
+      requests.push({
+        id: `req-cardio-assoc-v${caseVer}`,
+        fromAgent: "cardiology",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "associated_symptoms",
+        urgency: "high",
+        reason: "Check for autonomic signs: diaphoresis, dyspnea, nausea, and presyncope",
+        suggestedQuestion: "Are you noticing any shortness of breath, cold sweating, nausea, or dizziness alongside this?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    return requests;
+  }
 }
+

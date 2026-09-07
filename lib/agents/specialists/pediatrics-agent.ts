@@ -1,6 +1,7 @@
 import { BaseClinicalAgent } from "../base-agent";
-import { AgentOpinion, PatientCase, ToolResult, PeerChallenge } from "../schemas";
+import { AgentOpinion, PatientCase, ToolResult, PeerChallenge, AgentRequest } from "../schemas";
 import { Blackboard } from "../blackboard";
+import { clinicalKnowledgeRetriever } from "../../clinical-knowledge/retriever";
 
 export class PediatricsAgent extends BaseClinicalAgent {
   constructor() {
@@ -90,6 +91,8 @@ export class PediatricsAgent extends BaseClinicalAgent {
     challenges: PeerChallenge[]
   ): AgentOpinion {
     const text = patientCase.transcript.toLowerCase();
+    const knowledgeContext = clinicalKnowledgeRetriever.retrieveKnowledge(text, "pediatrics", { topK: 3 });
+    const retrievedCitations = knowledgeContext.passages.map(p => p.id);
     const pewsResult = toolsRun.find(t => t.tool_name === "calculate_pews");
 
     const isInfant = patientCase.demographics.age_group === "infant" || (patientCase.demographics.age !== undefined && patientCase.demographics.age <= 1);
@@ -135,7 +138,8 @@ export class PediatricsAgent extends BaseClinicalAgent {
         confidence_semantics: "uncalibrated_model_score",
         requires_escalation: true,
         speech_observations_evaluated: ctx.relevant_speech_features?.observations || [],
-        clinical_protocol: "AAP Clinical Practice Guideline for the Evaluation of Well-Appearing Febrile Infants 8-60 Days"
+        clinical_protocol: "AAP Clinical Practice Guideline for the Evaluation of Well-Appearing Febrile Infants 8-60 Days",
+        retrieved_citations: retrievedCitations
       };
     }
 
@@ -159,7 +163,76 @@ export class PediatricsAgent extends BaseClinicalAgent {
       confidence_semantics: "uncalibrated_model_score",
       requires_escalation: false,
       speech_observations_evaluated: [],
-      clinical_protocol: "Ambulatory Pediatric Triage Protocol"
+      clinical_protocol: "Ambulatory Pediatric Triage Protocol",
+      retrieved_citations: retrievedCitations
     };
   }
+
+  public assessEvidenceNeeds(patientCase: PatientCase, blackboard?: Blackboard): AgentRequest[] {
+    const text = patientCase.transcript.toLowerCase();
+    const requests: AgentRequest[] = [];
+    const caseVer = patientCase.case_version || 1;
+
+    const hasPedsSignal = patientCase.demographics.age_group === "infant" ||
+      patientCase.demographics.age_group === "pediatric" ||
+      (patientCase.demographics.age !== undefined && patientCase.demographics.age < 16) ||
+      /\b(baby|infant|newborn|child|toddler|weeks?\s+old|months?\s+old)\b/i.test(text);
+
+    if (!hasPedsSignal) return [];
+
+    // 1. Age / Exact Month or Week
+    const hasAge = patientCase.demographics.age !== undefined ||
+      /\b(\d+\s*(?:weeks?|months?|days?|years?)\s+old)\b/i.test(text);
+    if (!hasAge) {
+      requests.push({
+        id: `req-peds-age-v${caseVer}`,
+        fromAgent: "pediatrics",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "pediatric_signs",
+        urgency: "high",
+        reason: "Determine exact age in weeks or months for neonatal fever threshold (under 60 days)",
+        suggestedQuestion: "How old is your child or baby, in exact weeks or months?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 2. Temperature / Fever
+    const hasTemp = /\b(temp|fever|101|102|103|104|degree|febrile)\b/i.test(text);
+    if (!hasTemp) {
+      requests.push({
+        id: `req-peds-temp-v${caseVer}`,
+        fromAgent: "pediatrics",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "pediatric_signs",
+        urgency: "high",
+        reason: "Assess exact measured temperature for pediatric fever protocol",
+        suggestedQuestion: "Have you checked their temperature, and what was the highest reading?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    // 3. Responsiveness / Feeding
+    const hasActivity = /\b(feed|drink|wet\s*diaper|alert|cry|sleepy|floppy|grunt|letharg)\b/i.test(text);
+    if (!hasActivity) {
+      requests.push({
+        id: `req-peds-activity-v${caseVer}`,
+        fromAgent: "pediatrics",
+        doctorName: this.config.doctorName,
+        type: "patient_question",
+        targetSlot: "pediatric_signs",
+        urgency: "high",
+        reason: "Evaluate alertness, feeding vigor, and hydration (wet diapers)",
+        suggestedQuestion: "Are they waking up to feed normally, making wet diapers, and responding to your voice?",
+        status: "pending",
+        caseVersion: caseVer,
+      });
+    }
+
+    return requests;
+  }
 }
+

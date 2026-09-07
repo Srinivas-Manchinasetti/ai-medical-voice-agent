@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useUser } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mic,
@@ -23,7 +24,11 @@ import {
   Brain,
   Baby,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ClipboardCheck,
+  HelpCircle,
+  Clock,
+  ArrowRight
 } from "lucide-react";
 import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
@@ -72,9 +77,9 @@ interface BoardMessage {
 }
 
 interface LiveTriageData {
-  triageLevel: "emergency" | "priority" | "routine";
+  triageLevel: "emergency" | "priority" | "routine" | "gathering_history";
   triageTitle: string;
-  esiScore?: number;
+  esiScore?: number | null;
   isEmergency?: boolean;
   arbiterOverride?: boolean;
   overrideRationale?: string;
@@ -90,9 +95,43 @@ interface LiveTriageData {
 }
 
 interface BoardData {
-  orchestrator_summary: string;
+  phase?: "dormant" | "active_inquiring" | "deliberating" | "decided" | "gathering_history" | "specialist_deliberation" | "board_decision";
+  information_state?: string;
+  status_summary?: string;
+  completeness_score?: number;
+  known_facts?: string[];
+  missing_dimensions?: string[];
+  active_requests?: Array<{
+    id: string;
+    fromAgent: string;
+    doctorName: string;
+    type: string;
+    targetSlot: string;
+    urgency: string;
+    reason: string;
+    suggestedQuestion: string;
+    status: string;
+  }>;
+  pending_question?: {
+    id: string;
+    targetSlot: string;
+    askedBy: string;
+    doctorName: string;
+    question: string;
+    purpose: string;
+  } | null;
+  slots?: any;
+  inquiry?: {
+    doctor_id?: string;
+    doctor_name: string;
+    specialty: string;
+    avatarUrl?: string;
+    target_dimension?: string;
+    question: string;
+  };
+  orchestrator_summary?: string;
   active_specialists: string[];
-  specialists_summoned: string[];
+  specialists_summoned?: string[];
   deliberation_rounds?: number;
   tools_executed?: string[];
   tools_executed_details?: Array<{
@@ -110,7 +149,7 @@ interface BoardData {
     challenge_rationale: string;
     resolved?: boolean;
   }>;
-  opinions: Array<{
+  opinions?: Array<{
     doctor_name: string;
     specialty: string;
     concerns: string[];
@@ -120,19 +159,30 @@ interface BoardData {
     primary_hypothesis?: string;
     recommended_actions?: string[];
   }>;
-  differential: Array<{
+  differential?: Array<{
     condition: string;
     probability: string;
     supporting_agents?: string[];
   }>;
-  conflicts: Array<{
+  conflicts?: Array<{
     topic: string;
     agents: string[];
     conflict_description: string;
     resolution: string;
   }>;
   deliberation_messages?: BoardMessage[];
-  trace: {
+  citations?: Record<string, {
+    id: string;
+    title: string;
+    authority: string;
+    source: string;
+    section: string;
+    content: string;
+    releaseDate: string;
+    organization: string;
+    criteria?: string[];
+  }>;
+  trace?: {
     pre_arbiter_latency_us: number;
     post_arbiter_latency_us: number;
     total_board_latency_ms: number;
@@ -146,10 +196,13 @@ interface BoardData {
       previous_hash: string;
       payload_summary: string;
     }>;
-  };
+  } | null;
 }
 
 export default function ConsultPage() {
+  const { user } = useUser();
+  const patientDisplayName = user?.fullName || user?.firstName || "Patient";
+
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorProfile>(DOCTOR_PROFILES[0]);
   const [callActive, setCallActive] = useState<boolean>(false);
   const [audioState, setAudioState] = useState<AudioState>("IDLE");
@@ -162,16 +215,20 @@ export default function ConsultPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [triageData, setTriageData] = useState<LiveTriageData | null>(null);
   const [boardData, setBoardData] = useState<BoardData | null>(null);
+  const [interviewState, setInterviewState] = useState<any>(null);
   
-  const [activeRightTab, setActiveRightTab] = useState<"board" | "safety">("board");
+  const [activeRightTab, setActiveRightTab] = useState<"board" | "context" | "safety">("board");
   const [showTechnicalTrace, setShowTechnicalTrace] = useState<boolean>(false);
+  const [selectedCitationId, setSelectedCitationId] = useState<string | null>(null);
 
-  // Audio refs
+  // Audio refs & Audio Guard
   const recognitionRef = useRef<any>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioStateRef = useRef<AudioState>("IDLE");
   const callActiveRef = useRef<boolean>(false);
+  const lastDoctorSpeechRef = useRef<string>("");
+  const lastDoctorSpeechTimeRef = useRef<number>(0);
 
   useEffect(() => {
     audioStateRef.current = audioState;
@@ -247,6 +304,8 @@ export default function ConsultPage() {
     const cleanText = text.replace(/[*_#`\[\]()]/g, "").trim();
     if (!cleanText) return;
 
+    lastDoctorSpeechRef.current = cleanText.toLowerCase();
+    lastDoctorSpeechTimeRef.current = Date.now();
     setAudioState("DOCTOR_SPEAKING");
 
     if (recognitionRef.current) {
@@ -282,11 +341,17 @@ export default function ConsultPage() {
     const handleSpeechEnd = () => {
       if (audioStateRef.current === "DOCTOR_SPEAKING") {
         setAudioState("IDLE");
+        // Audio Guard: 400ms buffer and verify TTS is truly silent before re-arming mic
         setTimeout(() => {
-          if (callActiveRef.current && audioStateRef.current === "IDLE") {
+          if (
+            callActiveRef.current &&
+            audioStateRef.current === "IDLE" &&
+            typeof window !== "undefined" &&
+            !("speechSynthesis" in window && window.speechSynthesis.speaking)
+          ) {
             startSpeechRecognitionListening();
           }
-        }, 300);
+        }, 400);
       }
     };
 
@@ -342,8 +407,30 @@ export default function ConsultPage() {
         }
 
         if (finalChunk.trim()) {
+          const spoken = finalChunk.trim();
+
+          // Audio Guard: Acoustic Self-Echo Rejection (drop if Jaccard similarity > 0.50 within 4s of doctor speech)
+          const timeSinceDoctorSpeech = Date.now() - lastDoctorSpeechTimeRef.current;
+          if (lastDoctorSpeechRef.current && timeSinceDoctorSpeech < 4000) {
+            const userWords = new Set(spoken.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
+            const doctorWords = new Set(lastDoctorSpeechRef.current.split(/\s+/).filter((w) => w.length > 2));
+            if (userWords.size > 0 && doctorWords.size > 0) {
+              let overlap = 0;
+              for (const w of userWords) {
+                if (doctorWords.has(w)) overlap++;
+              }
+              const union = new Set([...userWords, ...doctorWords]).size;
+              const jaccard = union > 0 ? overlap / union : 0;
+              if (jaccard > 0.50) {
+                console.warn("🛡️ Audio Guard: Dropped doctor acoustic self-echo (Jaccard: " + jaccard.toFixed(2) + "):", spoken);
+                setTranscriptText("");
+                return;
+              }
+            }
+          }
+
           setTranscriptText("");
-          handleUserUtterance(finalChunk.trim());
+          handleUserUtterance(spoken);
         }
       };
 
@@ -398,11 +485,13 @@ export default function ConsultPage() {
   };
 
   // End consultation session
+  // End consultation session
   const endConsultation = () => {
     setCallActive(false);
     callActiveRef.current = false;
     setAudioState("IDLE");
     setTranscriptText("");
+    setInterviewState(null);
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -447,9 +536,11 @@ export default function ConsultPage() {
           doctorId: selectedDoctor.id,
           message: userText,
           conversationHistory: [...messages, userMessage],
-          patientName: "Patient",
+          patientName: patientDisplayName,
+          userId: user?.id,
           isInterruption: isBargeIn,
-          interruptedAgent: selectedDoctor.name
+          interruptedAgent: selectedDoctor.name,
+          interviewState: interviewState,
         }),
       });
 
@@ -457,23 +548,34 @@ export default function ConsultPage() {
         const data = await res.json();
         const doctorReplyText = data.doctorReply || "I have received your symptoms and documented them.";
 
+        const respondingDoctorName = data.doctor?.name || selectedDoctor.name;
+        const respondingDoctorSpecialty = data.doctor?.specialty || selectedDoctor.department;
+
         const newDoctorMessage: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           role: "doctor",
           text: doctorReplyText,
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          doctorName: selectedDoctor.name,
-          doctorSpecialty: selectedDoctor.department
+          doctorName: respondingDoctorName,
+          doctorSpecialty: respondingDoctorSpecialty
         };
 
         setMessages((prev) => [...prev, newDoctorMessage]);
+
+        if (data.interviewState) {
+          setInterviewState(data.interviewState);
+        }
 
         if (data.triage) {
           setTriageData(data.triage);
         }
         if (data.board) {
           setBoardData(data.board);
-          setActiveRightTab("board");
+          if (data.board.phase === "dormant" || data.board.phase === "gathering_history") {
+            setActiveRightTab("context");
+          } else {
+            setActiveRightTab("board");
+          }
         }
 
         speakDoctorResponse(doctorReplyText);
@@ -484,22 +586,42 @@ export default function ConsultPage() {
     }
   };
 
-  // Quick Test Scenarios
+  // Quick Test Scenarios (Including Multi-Turn Clinical Intake Flow & Verification)
   const CLINICAL_SCENARIOS = [
     {
-      label: "🫀 Cardio Emergency",
+      label: "💬 1. Intake: Chest Tightness",
+      text: "I've been feeling an uncomfortable tightness in my chest.",
+      isBargeIn: false
+    },
+    {
+      label: "💬 2. Intake: 20m + At Rest",
+      text: "It started about twenty minutes ago while I was sitting down.",
+      isBargeIn: false
+    },
+    {
+      label: "💬 3. Intake: 'Well to my head actually'",
+      text: "Well to my head actually.",
+      isBargeIn: false
+    },
+    {
+      label: "💬 4. Intake: 'I said head?' (No Loop)",
+      text: "I said head?",
+      isBargeIn: false
+    },
+    {
+      label: "✋ Emergency Stroke Interruption",
+      text: "Wait doctor! My face just started drooping and I can't lift my left arm!",
+      isBargeIn: true
+    },
+    {
+      label: "🫀 Immediate Cardio Shock (ACS)",
       text: "I've had crushing pressure in the center of my chest for thirty minutes radiating into my left arm with cold sweats.",
       isBargeIn: false
     },
     {
-      label: "🧠 Stroke Deficit",
+      label: "🧠 Acute Stroke Deficit",
       text: "My wife noticed my right face is drooping, my right arm is weak and I have trouble getting my words out.",
       isBargeIn: false
-    },
-    {
-      label: "✋ Stroke Interruption",
-      text: "Wait doctor! My face just started drooping and I can't lift my left arm!",
-      isBargeIn: true
     },
     {
       label: "⚡ Dual-Threat Cardioneuro",
@@ -525,6 +647,13 @@ export default function ConsultPage() {
     }
     if (doc.id === "dr-sarah-chen") {
       return { label: "Lead", color: "text-cyan-800 bg-cyan-50", dot: "bg-cyan-500" };
+    }
+    // Check if specialist has an active request
+    const isSpecialistInquiring = boardData?.active_requests?.some((r: any) =>
+      r.status === "pending" && doc.name.toLowerCase().includes(r.doctorName?.toLowerCase().split(" ")[1] || "")
+    );
+    if (isSpecialistInquiring) {
+      return { label: "Inquiring", color: "text-amber-800 bg-amber-50", dot: "bg-amber-500 animate-pulse" };
     }
     if (boardData?.active_specialists?.some(s => s.toLowerCase().includes(doc.name.toLowerCase().split(" ")[1] || ""))) {
       return { label: "In Board", color: "text-blue-800 bg-blue-50", dot: "bg-blue-500" };
@@ -902,34 +1031,76 @@ export default function ConsultPage() {
 
             <div className="relative z-10 flex flex-col gap-4">
               
-              {/* Header: Clean Tabs & Status */}
+              {/* Header: Dynamic Tabs (Board, Clinical Context, Safety) */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => setActiveRightTab("board")}
-                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
                       activeRightTab === "board"
-                        ? "bg-slate-100 text-slate-900"
-                        : "text-slate-500 hover:text-slate-900"
+                        ? "bg-slate-900 text-white"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                     }`}
                   >
-                    Clinical Board
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Clinical Board</span>
                   </button>
+
+                  <button
+                    onClick={() => setActiveRightTab("context")}
+                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                      activeRightTab === "context"
+                        ? "bg-slate-900 text-white"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                    }`}
+                  >
+                    <ClipboardCheck className="w-3.5 h-3.5" />
+                    <span>Clinical Context</span>
+                    {boardData?.phase === "gathering_history" && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+                    )}
+                  </button>
+
                   <button
                     onClick={() => setActiveRightTab("safety")}
-                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    className={`text-xs font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
                       activeRightTab === "safety"
-                        ? "bg-slate-100 text-slate-900"
-                        : "text-slate-500 hover:text-slate-900"
+                        ? "bg-slate-900 text-white"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                     }`}
                   >
-                    Patient Safety
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Patient Safety</span>
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>ROUND {currentRound} · LIVE</span>
+                <div className={`flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-0.5 rounded-full border ${
+                  boardData?.phase === "dormant" || boardData?.phase === "gathering_history"
+                    ? "text-slate-700 bg-slate-100 border-slate-200"
+                    : boardData?.phase === "active_inquiring"
+                    ? "text-amber-800 bg-amber-50 border-amber-200"
+                    : boardData?.phase === "deliberating"
+                    ? "text-cyan-800 bg-cyan-50 border-cyan-200"
+                    : "text-emerald-700 bg-emerald-50 border-emerald-200"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                    boardData?.phase === "dormant" || boardData?.phase === "gathering_history"
+                      ? "bg-slate-400"
+                      : boardData?.phase === "active_inquiring"
+                      ? "bg-amber-500"
+                      : boardData?.phase === "deliberating"
+                      ? "bg-cyan-500"
+                      : "bg-emerald-500"
+                  }`} />
+                  <span>
+                    {boardData?.phase === "dormant" || boardData?.phase === "gathering_history"
+                      ? "PRIMARY INTAKE · STANDBY"
+                      : boardData?.phase === "active_inquiring"
+                      ? "SPECIALIST INQUIRY · ACTIVE"
+                      : boardData?.phase === "deliberating"
+                      ? `ROUND ${currentRound} · DELIBERATING`
+                      : "BOARD CONSENSUS · DECIDED"}
+                  </span>
                 </div>
               </div>
 
@@ -939,15 +1110,80 @@ export default function ConsultPage() {
                   
                   {/* Deliberation Stream Feed */}
                   <div className="flex flex-col max-h-[380px] overflow-y-auto pr-1">
-                    {!boardData?.deliberation_messages || boardData.deliberation_messages.length === 0 ? (
-                      <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center">
-                        <Users className="w-6 h-6 mb-2 text-slate-300" />
-                        <p className="text-xs font-semibold text-slate-700">Clinical Board Standing By</p>
-                        <p className="text-[11px] text-slate-500 mt-1 max-w-xs">
-                          When you describe symptoms or test scenarios, the multidisciplinary board will deliberate in real-time here.
+
+                    {/* ACTIVE INQUIRING SPECIALIST CARD */}
+                    {boardData?.phase === "active_inquiring" && boardData.active_requests && boardData.active_requests.length > 0 && (
+                      <div className="mb-3 p-3.5 rounded-xl bg-amber-50/70 border border-amber-200/80 flex flex-col gap-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-amber-200 text-amber-900 font-bold text-xs flex items-center justify-center">
+                              {boardData.active_requests[0].fromAgent === "cardiology" ? "MV" : boardData.active_requests[0].fromAgent === "neurology" ? "AP" : "SC"}
+                            </div>
+                            <div>
+                              <span className="text-xs font-bold text-slate-900">{boardData.active_requests[0].doctorName}</span>
+                              <span className="text-[10px] text-slate-500 ml-1.5">· Specialist Advisory Inquiry</span>
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
+                            {boardData.active_requests[0].targetSlot.toUpperCase()} REQUESTED
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-800 leading-relaxed italic bg-white/80 p-2.5 rounded-lg border border-amber-100">
+                          "{boardData.active_requests[0].suggestedQuestion}"
+                        </p>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+                          <span>Clinical rationale: {boardData.active_requests[0].reason}</span>
+                          <span className="text-cyan-700 font-medium">Spoken by Dr. Sarah Chen</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ACTIVE INQUIRING EVIDENCE SUMMARY (Before full deliberation starts) */}
+                    {boardData?.phase === "active_inquiring" && (!boardData.deliberation_messages || boardData.deliberation_messages.length === 0) && (
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            Current Case Evidence ({boardData.known_facts?.length || 0} Established)
+                          </span>
+                          <span className="text-[10px] font-mono text-cyan-700 font-semibold">Specialist Review Active</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {boardData.known_facts && boardData.known_facts.length > 0 ? (
+                            boardData.known_facts.map((fact, idx) => (
+                              <span key={idx} className="text-[11px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-700">
+                                ✓ {fact}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">Gathering history...</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          Full multidisciplinary cross-examination convenes once specialist inquiry is resolved.
                         </p>
                       </div>
-                    ) : (
+                    )}
+
+                    {/* DORMANT / STANDBY DISPLAY */}
+                    {(!boardData || boardData.phase === "dormant" || boardData.phase === "gathering_history") && (!boardData?.deliberation_messages || boardData.deliberation_messages.length === 0) && (
+                      <div className="py-10 text-center text-slate-400 flex flex-col items-center justify-center">
+                        <Users className="w-6 h-6 mb-2 text-slate-300" />
+                        <p className="text-xs font-semibold text-slate-700">
+                          Primary Intake · History Gathering
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-1 max-w-xs">
+                          Dr. Sarah Chen is conducting primary clinical history intake. Specialist agents monitor and issue targeted inquiries as symptoms are uncovered.
+                        </p>
+                        <button
+                          onClick={() => setActiveRightTab("context")}
+                          className="mt-3 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>View Clinical Context Checklist</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                    {boardData?.deliberation_messages &&
                       boardData.deliberation_messages.map((msg, idx) => {
                         const isLead = msg.speakerRole === "lead";
                         const isTool = msg.speakerRole === "tool";
@@ -1008,17 +1244,69 @@ export default function ConsultPage() {
                               "{msg.content}"
                             </p>
 
-                            {/* Evidence Citation */}
+                            {/* Evidence Citation with Interactive RAG Drawer */}
                             {msg.references && msg.references.length > 0 && (
-                              <div className="pl-5 flex items-center gap-1.5 text-[10px] text-slate-400">
+                              <div className="pl-5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
                                 <span className="font-medium text-slate-500">Evidence:</span>
-                                <span className="truncate">{msg.references.join(" · ")}</span>
+                                {msg.references.map((ref, rIdx) => {
+                                  const citation = boardData?.citations?.[ref];
+                                  const isSelected = selectedCitationId === ref;
+                                  return (
+                                    <button
+                                      key={rIdx}
+                                      type="button"
+                                      onClick={() => setSelectedCitationId(isSelected ? null : ref)}
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-colors cursor-pointer border ${
+                                        isSelected
+                                          ? "bg-indigo-100 text-indigo-900 border-indigo-300 font-bold"
+                                          : citation
+                                          ? "bg-slate-100 text-indigo-700 border-slate-200 hover:bg-indigo-50 font-semibold"
+                                          : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                      title={citation ? `${citation.title} (${citation.organization})` : ref}
+                                    >
+                                      {ref}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Selected Citation Detail Card */}
+                            {selectedCitationId && msg.references?.includes(selectedCitationId) && boardData?.citations?.[selectedCitationId] && (
+                              <div className="ml-5 my-1.5 p-2.5 rounded-lg bg-indigo-50/90 border border-indigo-200 text-slate-800 text-[11px] flex flex-col gap-1.5 animate-in fade-in duration-200">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-indigo-200/90 text-indigo-950 font-bold">
+                                      {boardData.citations[selectedCitationId].authority?.replace("_", " ")}
+                                    </span>
+                                    <span className="text-[10px] text-indigo-900 font-semibold">
+                                      {boardData.citations[selectedCitationId].organization}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedCitationId(null)}
+                                    className="text-slate-400 hover:text-slate-600 text-[10px] font-mono px-1"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                                <div className="font-bold text-slate-900 text-xs">
+                                  {boardData.citations[selectedCitationId].title}
+                                </div>
+                                <div className="text-[10px] text-slate-700 bg-white/90 p-2 rounded border border-indigo-100 leading-relaxed font-sans">
+                                  {boardData.citations[selectedCitationId].content}
+                                </div>
+                                <div className="flex items-center justify-between text-[9px] text-indigo-900/70 pt-0.5">
+                                  <span>Section: <strong className="font-medium text-indigo-950">{boardData.citations[selectedCitationId].section}</strong></span>
+                                  <span>Effective: <strong className="font-medium text-indigo-950">{boardData.citations[selectedCitationId].releaseDate}</strong></span>
+                                </div>
                               </div>
                             )}
                           </div>
                         );
-                      })
-                    )}
+                      })}
                   </div>
 
                   {/* BOARD DECISION & SAFETY VERIFIED (Dominant bottom conclusion) */}
@@ -1032,7 +1320,7 @@ export default function ConsultPage() {
                       <p className="text-xs font-bold text-slate-900 leading-snug">
                         {boardData.conflicts && boardData.conflicts.length > 0
                           ? "Two acute pathways remain simultaneously active under dual-activation emergency protocol."
-                          : boardData.opinions?.some(o => o.risk_level === "high")
+                          : (boardData.opinions?.some(o => o.risk_level === "high") || triageData?.triageLevel === "emergency" || (triageData?.esiScore && triageData.esiScore <= 2))
                           ? "Specialist emergency consensus reached. Immediate hospital evaluation indicated."
                           : "Specialists agree presentation is non-emergent. Outpatient clinical monitoring recommended."}
                       </p>
@@ -1062,7 +1350,7 @@ export default function ConsultPage() {
                         </button>
 
                         {showTechnicalTrace && (
-                          <div className="mt-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] font-mono flex flex-col gap-1 text-slate-600">
+                          <div className="mt-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] font-mono flex flex-col gap-2 text-slate-600">
                             <div className="flex justify-between">
                               <span>Pre-Arbiter:</span>
                               <span className="font-bold text-slate-900">{boardData?.trace?.pre_arbiter_latency_us || 32} µs</span>
@@ -1081,6 +1369,33 @@ export default function ConsultPage() {
                                 <span className="text-slate-800">{boardData.trace.audit_sha256}</span>
                               </div>
                             )}
+
+                            {/* Clinical Evidence & RAG Knowledge Provenance */}
+                            {boardData?.citations && Object.keys(boardData.citations).length > 0 && (
+                              <div className="pt-2 border-t border-slate-200 flex flex-col gap-1.5">
+                                <span className="font-bold text-slate-800 uppercase tracking-wider text-[9px]">
+                                  Clinical Guidelines & Evidence Provenance ({Object.keys(boardData.citations).length})
+                                </span>
+                                <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
+                                  {Object.values(boardData.citations).map((cit) => (
+                                    <div key={cit.id} className="p-2 rounded bg-white border border-slate-200 text-[10px] flex flex-col gap-0.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-bold text-slate-900">{cit.title}</span>
+                                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                                          {cit.id}
+                                        </span>
+                                      </div>
+                                      <span className="text-slate-500 text-[9px]">
+                                        {cit.organization} · {cit.section} · {cit.releaseDate}
+                                      </span>
+                                      <p className="text-slate-700 text-[9px] line-clamp-2 mt-0.5 font-sans leading-tight">
+                                        {cit.content}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1088,6 +1403,130 @@ export default function ConsultPage() {
                     </div>
                   )}
 
+                </div>
+              )}
+
+
+              {/* TAB: CLINICAL CONTEXT & HISTORY GATHERING */}
+              {activeRightTab === "context" && (
+                <div className="flex flex-col gap-3 py-1 animate-in fade-in duration-200">
+                  {/* Progress Header */}
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+                          <ClipboardCheck className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900">
+                            {boardData?.phase === "gathering_history"
+                              ? "Clinical Context Intake in Progress"
+                              : "Diagnostic Context Established"}
+                          </h4>
+                          <p className="text-[10px] text-slate-500">
+                            {boardData?.phase === "gathering_history"
+                              ? "Collecting core clinical dimensions before locking diagnostic triage."
+                              : "Multi-turn intake complete. Sufficient clinical history gathered."}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-slate-800">
+                        {Math.round((boardData?.completeness_score ?? (triageData ? 1.0 : 0)) * 100)}%
+                      </span>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-linear-to-r from-teal-500 to-emerald-500 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.max(15, Math.round((boardData?.completeness_score ?? (triageData ? 1.0 : 0.2)) * 100))}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Active Inquiring Physician Card (During Gathering History) */}
+                  {boardData?.inquiry && boardData.phase === "gathering_history" && (
+                    <div className="p-3 rounded-xl bg-cyan-50/60 border border-cyan-200/80 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-cyan-200/80 flex items-center justify-center font-bold text-xs text-cyan-900">
+                            {boardData.inquiry.doctor_name.includes("Marcus") ? "MV" : boardData.inquiry.doctor_name.includes("Arthur") ? "AP" : "SC"}
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-900">{boardData.inquiry.doctor_name}</span>
+                            <span className="text-[10px] text-slate-500 ml-1.5">· {boardData.inquiry.specialty}</span>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-cyan-800 bg-cyan-100 px-2 py-0.5 rounded">
+                          REQUESTING CLARIFICATION
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-800 leading-relaxed italic bg-white/70 p-2.5 rounded-lg border border-cyan-100">
+                        "{boardData.inquiry.question}"
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Two Column Fact Grid: Established vs Needed */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* What We Know */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          Established Facts ({boardData?.known_facts?.length || 0})
+                        </span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      </div>
+                      <div className="flex flex-col gap-1.5 min-h-[90px]">
+                        {!boardData?.known_facts || boardData.known_facts.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 italic">Listening for presenting symptoms...</p>
+                        ) : (
+                          boardData.known_facts.map((fact, i) => (
+                            <div key={i} className="text-[11px] text-slate-700 flex items-start gap-1.5">
+                              <span className="text-emerald-600 font-bold">✓</span>
+                              <span className="leading-tight">{fact}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Information Needed */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          Information Needed ({boardData?.missing_dimensions?.length || 0})
+                        </span>
+                        <HelpCircle className="w-3.5 h-3.5 text-amber-500" />
+                      </div>
+                      <div className="flex flex-col gap-1.5 min-h-[90px]">
+                        {!boardData?.missing_dimensions || boardData.missing_dimensions.length === 0 ? (
+                          <div className="text-[11px] text-emerald-700 flex items-center gap-1 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Clinical context sufficient</span>
+                          </div>
+                        ) : (
+                          boardData.missing_dimensions.map((dim, i) => (
+                            <div key={i} className="text-[11px] text-slate-600 flex items-start gap-1.5">
+                              <span className="text-amber-500 font-bold">○</span>
+                              <span className="leading-tight capitalize">{dim.replace(/_/g, " ")}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Safety Gate Notice */}
+                  <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-amber-950 flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="text-[11px] leading-relaxed">
+                      <span className="font-bold text-amber-900">Information Sufficiency Invariant: </span>
+                      Acuity ESI scores are withheld while clinical context is underspecified. The full Multidisciplinary Board convenes once history is complete, or immediately upon detection of critical life-threats.
+                    </div>
+                  </div>
                 </div>
               )}
 

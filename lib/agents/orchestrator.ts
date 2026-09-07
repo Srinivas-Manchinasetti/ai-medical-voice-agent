@@ -128,16 +128,54 @@ export class TriageOrchestrator {
     const hasRespiratory = text.includes("cough") || text.includes("cold") || text.includes("congestion") || text.includes("sore throat") || text.includes("runny nose");
     const isRefill = text.includes("refill") || text.includes("prescription");
 
+    const hasLegNerveMuscle = /\b(leg|calf|thigh|hamstring|quadricep|shin)\b/i.test(text) &&
+                              /\b(needle|digged|digging|pins|sharp|stab|cramp|spasm|shoot|sciatica|nerve|paresthesia)\b/i.test(text);
+
+    let hypothesis = "General Ambulatory Review";
+    let concerns = ["General Medical Consultation", "Outpatient Symptom Review"];
+    let citations: string[] = [];
+    let actions = [
+      "Rest and adequate fluid intake",
+      "Over-the-counter symptomatic management as tolerated",
+      "Primary Care outpatient follow-up if symptoms persist past 3 days"
+    ];
+
+    if (isRefill) {
+      hypothesis = "Maintenance Medication Refill";
+      concerns = ["Routine Prescription Maintenance", "Medication Adherence Review"];
+      actions = [
+        "Review last recorded blood pressure log",
+        "Authorize maintenance medication refill pending physician sign-off"
+      ];
+    } else if (hasLegNerveMuscle) {
+      hypothesis = "Sciatic Nerve Irritation / Lumbar Radiculopathy vs. Acute Muscle Spasm";
+      concerns = [
+        "Sciatic Nerve Irritation / Radiculopathy",
+        "Acute Focal Muscle Cramp / Spasm",
+        "Peripheral Sensory Neuropathy"
+      ];
+      citations = ["MPLUS-1532-OVERVIEW", "MPLUS-1707-OVERVIEW", "MPLUS-1095-OVERVIEW"];
+      actions = [
+        "Rest in position of comfort with slight knee elevation",
+        "Avoid heavy lifting, sudden twisting, or prolonged static sitting",
+        "Gentle hamstring stretching and adequate hydration/electrolytes",
+        "Seek immediate emergency care if foot drop, saddle numbness, or loss of bowel/bladder control occurs"
+      ];
+    } else if (hasRespiratory) {
+      hypothesis = "Viral Upper Respiratory Infection";
+      concerns = ["Upper Respiratory Tract Infection", "Viral Pharyngitis/Rhinitis"];
+    } else if (hasFever) {
+      hypothesis = "Pyrexia of unknown origin";
+      concerns = ["Pyrexia of unknown origin", "Mild infectious illness"];
+    }
+
     return {
       agent: "primary-care-chen",
       doctor_name: "Dr. Sarah Chen, MD",
       specialty: "Internal Medicine & Primary Triage",
       deliberation_round: round,
-      primary_hypothesis: isRefill ? "Maintenance Medication Refill" : hasRespiratory ? "Viral Upper Respiratory Infection" : "General Ambulatory Review",
-      concerns: isRefill ? ["Routine Prescription Maintenance", "Medication Adherence Review"] :
-                hasRespiratory ? ["Upper Respiratory Tract Infection", "Viral Pharyngitis/Rhinitis"] :
-                hasFever ? ["Pyrexia of unknown origin", "Mild infectious illness"] :
-                ["General Medical Consultation", "Outpatient Symptom Review"],
+      primary_hypothesis: hypothesis,
+      concerns: concerns,
       evidence: [
         patientCase.transcript,
         `Vitals status: ${Object.keys(patientCase.vitals).length ? JSON.stringify(patientCase.vitals) : "Stable / Non-acute"}`
@@ -149,19 +187,13 @@ export class TriageOrchestrator {
       challenges_issued: [],
       challenges_received: [],
       risk_level: patientCase.immediate_danger_detected ? "high" : "low",
-      recommended_actions: isRefill ? [
-        "Review last recorded blood pressure log",
-        "Authorize maintenance medication refill pending physician sign-off"
-      ] : [
-        "Rest and adequate fluid intake",
-        "Over-the-counter symptomatic management as tolerated",
-        "Primary Care outpatient follow-up if symptoms persist past 3 days"
-      ],
+      recommended_actions: actions,
       confidence: 0.90,
       confidence_semantics: "uncalibrated_model_score",
       requires_escalation: patientCase.immediate_danger_detected,
       speech_observations_evaluated: patientCase.speech_features?.observations || [],
-      clinical_protocol: isRefill ? "Routine Medication Refill Protocol" : "Internal Medicine Ambulatory Protocol"
+      clinical_protocol: isRefill ? "Routine Medication Refill Protocol" : hasLegNerveMuscle ? "Peripheral Radiculopathy & Musculoskeletal Guideline" : "Internal Medicine Ambulatory Protocol",
+      retrieved_citations: citations
     };
   }
 
@@ -353,7 +385,9 @@ export class TriageOrchestrator {
         specialty: cardioOp.specialty,
         type: "assessment",
         content: cardioSummary,
-        references: cardioEvidence.length > 0 ? cardioEvidence : ["chest pressure", "radiating pain"],
+        references: (cardioOp.retrieved_citations && cardioOp.retrieved_citations.length > 0)
+          ? cardioOp.retrieved_citations
+          : (cardioEvidence.length > 0 ? cardioEvidence : ["chest pressure", "radiating pain"]),
         timestamp: new Date().toISOString(),
         case_version: currentCaseVersion
       });
@@ -402,7 +436,9 @@ export class TriageOrchestrator {
         specialty: neuroOp.specialty,
         type: "assessment",
         content: neuroSummary,
-        references: neuroEvidence.length > 0 ? neuroEvidence : ["unilateral weakness", "facial droop"],
+        references: (neuroOp.retrieved_citations && neuroOp.retrieved_citations.length > 0)
+          ? neuroOp.retrieved_citations
+          : (neuroEvidence.length > 0 ? neuroEvidence : ["unilateral weakness", "facial droop"]),
         timestamp: new Date().toISOString(),
         case_version: currentCaseVersion
       });
@@ -446,7 +482,9 @@ export class TriageOrchestrator {
         specialty: pedsOp.specialty,
         type: "assessment",
         content: pedsSummary,
-        references: ["neonatal fever", "lethargy"],
+        references: (pedsOp.retrieved_citations && pedsOp.retrieved_citations.length > 0)
+          ? pedsOp.retrieved_citations
+          : ["neonatal fever", "lethargy"],
         timestamp: new Date().toISOString(),
         case_version: currentCaseVersion
       });
