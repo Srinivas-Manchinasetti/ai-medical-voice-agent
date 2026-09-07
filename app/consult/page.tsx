@@ -28,7 +28,9 @@ import {
   Wrench,
   GitCompare,
   Lock,
-  Cpu
+  Cpu,
+  Layers,
+  Sparkle
 } from "lucide-react";
 import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
@@ -142,18 +144,26 @@ export default function ConsultPage() {
   
   const [savedReportId, setSavedReportId] = useState<string | null>(null);
   const [isSavingReport, setIsSavingReport] = useState<boolean>(false);
+  const [activeRightTab, setActiveRightTab] = useState<"triage" | "board">("board");
 
-  // Audio & Speech recognition refs
+  // Audio & speech recognition refs
   const recognitionRef = useRef<any>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isDoctorSpeakingRef = useRef<boolean>(false);
+  const callActiveRef = useRef<boolean>(false);
+
+  // Sync call active ref
+  useEffect(() => {
+    callActiveRef.current = callActive;
+  }, [callActive]);
 
   // Auto-scroll chat
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isProcessingAI, isDoctorSpeaking]);
+  }, [messages, isProcessingAI]);
 
   // Call duration timer
   useEffect(() => {
@@ -169,16 +179,33 @@ export default function ConsultPage() {
     };
   }, [callActive]);
 
-  // Text-To-Speech function
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // Text-To-Speech with strict echo feedback suppression
   const speakDoctorResponse = useCallback((text: string) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    const cleanText = text.replace(/[*_#`[\]()]/g, "").trim();
+    if (!cleanText) return;
+
+    // Immediately flag doctor speaking and abort recognition to kill speaker echo
+    isDoctorSpeakingRef.current = true;
+    setIsDoctorSpeaking(true);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {}
+    }
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = 1.0;
     utterance.pitch = selectedDoctor.voiceGender === "female" ? 1.15 : 0.95;
 
-    // Pick voice if available
     const voices = window.speechSynthesis.getVoices();
     const englishVoices = voices.filter((v) => v.lang.startsWith("en"));
     if (englishVoices.length > 0) {
@@ -191,15 +218,33 @@ export default function ConsultPage() {
       }
     }
 
-    utterance.onstart = () => setIsDoctorSpeaking(true);
-    utterance.onend = () => setIsDoctorSpeaking(false);
-    utterance.onerror = () => setIsDoctorSpeaking(false);
+    utterance.onstart = () => {
+      isDoctorSpeakingRef.current = true;
+      setIsDoctorSpeaking(true);
+    };
+
+    const handleSpeechEnd = () => {
+      isDoctorSpeakingRef.current = false;
+      setIsDoctorSpeaking(false);
+      // Wait 500ms after TTS finishes before resuming microphone
+      setTimeout(() => {
+        if (callActiveRef.current && recognitionRef.current && !isDoctorSpeakingRef.current) {
+          try {
+            recognitionRef.current.start();
+          } catch {}
+        }
+      }, 500);
+    };
+
+    utterance.onend = handleSpeechEnd;
+    utterance.onerror = handleSpeechEnd;
 
     window.speechSynthesis.speak(utterance);
   }, [selectedDoctor]);
 
   // Start voice consultation session
   const startConsultation = () => {
+    callActiveRef.current = true;
     setCallActive(true);
     setCallDuration(0);
     setSavedReportId(null);
@@ -207,7 +252,9 @@ export default function ConsultPage() {
       id: `msg-${Date.now()}`,
       role: "doctor",
       text: selectedDoctor.greeting,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      doctorName: selectedDoctor.name,
+      doctorSpecialty: selectedDoctor.department
     };
     setMessages([initialGreeting]);
     speakDoctorResponse(selectedDoctor.greeting);
@@ -236,6 +283,11 @@ export default function ConsultPage() {
       };
 
       recognition.onresult = (event: any) => {
+        // Drop any audio picked up while doctor is speaking to kill acoustic echo
+        if (isDoctorSpeakingRef.current) {
+          return;
+        }
+
         let finalTranscript = "";
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
@@ -286,7 +338,7 @@ export default function ConsultPage() {
     }
   };
 
-  // Quick clinical test scenarios for testing multi-agent board deliberation
+  // Quick clinical test scenarios
   const CLINICAL_SCENARIOS = [
     {
       label: "🫀 Cardio Emergency",
@@ -320,6 +372,7 @@ export default function ConsultPage() {
     if (!userText.trim()) return;
 
     if (!callActive) {
+      callActiveRef.current = true;
       setCallActive(true);
     }
 
@@ -382,6 +435,9 @@ export default function ConsultPage() {
         }
         if (data.board) {
           setBoardData(data.board);
+          if (data.board.specialists_summoned?.length > 0) {
+            setActiveRightTab("board");
+          }
         }
         if (data.speech_features) {
           setSpeechData(data.speech_features);
@@ -397,6 +453,7 @@ export default function ConsultPage() {
 
   // End consultation and save clinical SOAP report
   const endConsultationAndSave = async () => {
+    callActiveRef.current = false;
     if (recognitionRef.current) recognitionRef.current.stop();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -407,56 +464,58 @@ export default function ConsultPage() {
     setIsSavingReport(true);
 
     try {
-      const reportPayload = {
-        doctorId: selectedDoctor.id,
-        doctorName: selectedDoctor.name,
-        specialty: selectedDoctor.specialty,
-        chiefComplaint: messages.filter((m) => m.role === "patient").map((m) => m.text).join("; ") || "General Clinical Evaluation",
-        transcript: messages.map((m) => ({ role: m.role, text: m.text, timestamp: m.timestamp })),
-        triageLevel: triageData?.triageLevel || "routine",
-        triageTitle: triageData?.triageTitle || "LEVEL 3: ROUTINE CLINICAL CARE",
-        icd10Codes: triageData?.icdCodes || ["Z76.0"],
-        detectedSymptoms: triageData?.detectedSymptoms || ["General Consultation"],
-        soapSubjective: triageData?.soap.subjective || "Patient engaged in clinical voice consultation.",
-        soapObjective: triageData?.soap.objective || "Voice triage parsed successfully.",
-        soapAssessment: triageData?.soap.assessment || `Consultation performed by ${selectedDoctor.name}.`,
-        soapPlan: triageData?.soap.plan || "Review clinical summary and follow recommended guidelines.",
-        recommendedSpecialists: [selectedDoctor.specialty],
-        recommendedAction: triageData?.recommendedAction || "Outpatient follow-up.",
-        durationSeconds: callDuration
+      const fullTranscript = messages
+        .map((m) => `${m.role === "doctor" ? (m.doctorName || "Doctor") : "Patient"}: ${m.text}`)
+        .join("\\n");
+
+      const soapPayload = triageData?.soap || {
+        subjective: `Patient consultation with ${selectedDoctor.name}. Chief complaint: ${messages[1]?.text || "General health inquiry"}.`,
+        objective: `Vital Signs: Reassuring. Audio Biomarkers: ${speechData ? `${speechData.speech_rate_wpm} WPM, ${Math.round(speechData.speech_pause_ratio * 100)}% pauses` : "Normal cadence"}.`,
+        assessment: `${triageData?.triageTitle || "Clinical Voice Triage Evaluation"}. Diagnoses: ${triageData?.icdCodes.join(", ") || "Z76.0"}.`,
+        plan: `${triageData?.recommendedAction || "Outpatient clinical review if symptoms persist."}`,
       };
 
-      const res = await fetch("/api/consultations", {
+      const res = await fetch("/api/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reportPayload),
+        body: JSON.stringify({
+          patientName: "Alex Mercer",
+          patientAge: 45,
+          gender: "Male",
+          triageLevel: triageData?.triageLevel || "routine",
+          symptoms: triageData?.detectedSymptoms || ["General Consultation"],
+          icdCodes: triageData?.icdCodes || ["Z76.0"],
+          recommendedAction: triageData?.recommendedAction || "Outpatient follow-up.",
+          transcript: fullTranscript,
+          subjective: soapPayload.subjective,
+          objective: soapPayload.objective,
+          assessment: soapPayload.assessment,
+          plan: soapPayload.plan,
+          doctorName: selectedDoctor.name,
+          doctorSpecialty: selectedDoctor.specialty,
+        }),
       });
 
       if (res.ok) {
-        const data = await res.json();
-        setSavedReportId(data.consultation?.id || "MED-REPORT");
+        const saved = await res.json();
+        setSavedReportId(saved.report?.id || "REP-SUCCESS");
       }
     } catch (err) {
-      console.error("Save consultation error:", err);
+      console.error("Save report error:", err);
     } finally {
       setIsSavingReport(false);
     }
   };
 
-  const formatTimer = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
-
   const getUrgencyBadge = (level: string) => {
-    if (level === "emergency") {
-      return "bg-rose-50 text-rose-700 border-rose-200 font-bold animate-pulse";
+    switch (level) {
+      case "emergency":
+        return "bg-rose-50 text-rose-700 border-rose-200";
+      case "priority":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      default:
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
     }
-    if (level === "priority") {
-      return "bg-amber-50 text-amber-700 border-amber-200 font-semibold";
-    }
-    return "bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold";
   };
 
   return (
@@ -465,444 +524,91 @@ export default function ConsultPage() {
         <Navbar />
 
         {/* PAGE HEADER */}
-        <section className="pt-14 pb-8 px-6 max-w-4xl mx-auto text-center space-y-3">
+        <section className="pt-10 pb-5 px-6 max-w-4xl mx-auto text-center space-y-2">
           <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-700 bg-cyan-50 border border-cyan-200 px-3.5 py-1 rounded-full inline-block">
-            REAL-TIME AI VOICE AGENT
+            AI MEDICAL VOICE AGENT
           </span>
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-950">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">
             Live Doctor Consultation Room
           </h1>
-          <p className="text-base text-slate-600 max-w-xl mx-auto leading-relaxed font-medium">
-            Speak directly with specialized clinical AI doctors. Real-time acoustic triage, diagnostic entity parsing, and instant SOAP documentation.
+          <p className="text-sm text-slate-600 max-w-xl mx-auto leading-relaxed font-medium">
+            Real-time voice consultation with specialized AI physicians, dual-arbiter safety verification, and multi-agent peer deliberations.
           </p>
         </section>
 
-        {/* MAIN CONSULTATION WORKSPACE */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* LEFT COLUMN: Doctor Selection & Live Status */}
-            <div className="lg:col-span-4 space-y-6">
-              {/* Doctor Specialist Selector */}
-              <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                    <Stethoscope className="w-4 h-4 text-cyan-700" />
-                    <span>Select Clinical Specialist</span>
-                  </h3>
-                  <span className="text-[10px] font-mono text-slate-400">5 Available</span>
-                </div>
-
-                <div className="space-y-2.5">
-                  {DOCTOR_PROFILES.map((doc) => {
-                    const isSelected = selectedDoctor.id === doc.id;
-                    return (
-                      <button
-                        key={doc.id}
-                        disabled={callActive}
-                        onClick={() => setSelectedDoctor(doc)}
-                        className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-center gap-3 ${
-                          isSelected
-                            ? "bg-cyan-50/50 border-cyan-500 shadow-sm ring-2 ring-cyan-500/10"
-                            : "bg-slate-50/60 border-slate-200/80 hover:bg-slate-100 hover:border-slate-300"
-                        } ${callActive ? "cursor-not-allowed opacity-60" : ""}`}
-                      >
-                        <img
-                          src={doc.avatarUrl}
-                          alt={doc.name}
-                          className="w-11 h-11 rounded-full object-cover border border-slate-200 flex-shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-extrabold text-slate-900 text-sm truncate">{doc.name}</span>
-                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                              {doc.specialty}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">{doc.title}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Live Triage Sidebar */}
-              {triageData && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono font-bold uppercase text-slate-500 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-rose-600" />
-                      <span>Live Clinical Triage</span>
-                    </span>
-                    <span className={`text-xs font-bold font-mono px-2.5 py-1 rounded-full uppercase border ${getUrgencyBadge(triageData.triageLevel)}`}>
-                      {triageData.triageLevel}
-                    </span>
-                  </div>
-
-                  <div>
-                    <div className="text-xs text-slate-500 font-mono font-bold mb-1">Detected Symptoms:</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {triageData.detectedSymptoms.map((sym, i) => (
-                        <span key={i} className="text-xs bg-slate-100 text-slate-800 border border-slate-200 px-2.5 py-1 rounded-lg font-medium">
-                          {sym}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-xs text-slate-500 font-mono font-bold mb-1">ICD-10 Diagnostic Codes:</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {triageData.icdCodes.map((code, i) => (
-                        <span key={i} className="text-xs bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md font-mono font-bold">
-                          {code}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
-                    <span className="font-bold text-slate-900 block mb-1">Clinical Action:</span>
-                    {triageData.recommendedAction}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Multi-Agent Clinical Board & Telemetry Panel */}
-              {boardData && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white border border-cyan-200/80 rounded-2xl p-5 shadow-sm space-y-4"
-                >
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div className="flex items-center gap-2 text-cyan-900 font-extrabold text-xs">
-                      <Users className="w-4 h-4 text-cyan-600" />
-                      <span>Clinical Board Synthesis</span>
-                    </div>
-                    <span className="text-[10px] font-mono font-bold bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                      Dual-Arbiter Protected
-                    </span>
-                  </div>
-
-                  {/* Active Board Specialists */}
-                  <div>
-                    <div className="text-[11px] font-mono font-bold text-slate-500 mb-1.5 uppercase tracking-wider flex items-center justify-between">
-                      <span>Board Specialists</span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {boardData.specialists_summoned.length ? `${boardData.specialists_summoned.length + 1} consulted` : "Solo Primary Care"}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {boardData.active_specialists.map((doc, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-50 border border-slate-200 text-slate-800 px-2.5 py-1 rounded-lg"
-                        >
-                          <Stethoscope className="w-3 h-3 text-cyan-600" />
-                          {doc.replace(/, MD.*$/, "")}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Specialist Opinions & Hypotheses */}
-                  {boardData.opinions && boardData.opinions.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] font-mono font-bold text-slate-500 mb-1 uppercase tracking-wider flex items-center justify-between">
-                        <span>Specialist Opinions</span>
-                        <span className="text-[10px] text-cyan-700 font-mono bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
-                          {boardData.opinions.length} opinion{boardData.opinions.length > 1 ? "s" : ""}
-                        </span>
-                      </div>
-                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                        {boardData.opinions.map((op, idx) => (
-                          <div
-                            key={idx}
-                            className="bg-slate-50/90 border border-slate-200/90 rounded-xl p-2.5 text-xs space-y-1.5 hover:border-cyan-300 transition-colors"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
-                                <span className="font-bold text-slate-900 text-[11px]">
-                                  {op.doctor_name.replace(/, MD.*$/, "")}
-                                </span>
-                                <span className="text-[9px] font-mono text-slate-500 bg-white border border-slate-200 px-1 py-0.2 rounded">
-                                  {op.specialty}
-                                </span>
-                              </div>
-                              <span
-                                className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.2 rounded border ${
-                                  op.risk_level === "high"
-                                    ? "bg-rose-50 text-rose-700 border-rose-200"
-                                    : op.risk_level === "moderate"
-                                    ? "bg-amber-50 text-amber-700 border-amber-200"
-                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                }`}
-                              >
-                                {op.risk_level}
-                              </span>
-                            </div>
-
-                            {op.primary_hypothesis && (
-                              <div className="bg-white border border-slate-200/80 rounded-lg p-1.5 text-[11px]">
-                                <span className="text-slate-400 font-mono text-[9px] uppercase block font-bold">
-                                  Hypothesis:
-                                </span>
-                                <span className="font-semibold text-slate-800 leading-tight">
-                                  {op.primary_hypothesis}
-                                </span>
-                              </div>
-                            )}
-
-                            {op.concerns && op.concerns.length > 0 && (
-                              <div className="space-y-0.5">
-                                <span className="text-[9px] text-slate-500 font-mono font-bold block">
-                                  Concerns:
-                                </span>
-                                <div className="flex flex-wrap gap-1">
-                                  {op.concerns.map((c, ci) => (
-                                    <span
-                                      key={ci}
-                                      className="text-[9px] bg-white border border-slate-200 text-slate-700 px-1.5 py-0.2 rounded"
-                                    >
-                                      {c}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {op.confidence !== undefined && (
-                              <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 pt-1 border-t border-slate-200/50">
-                                <span>Confidence: {Math.round(op.confidence * 100)}%</span>
-                                <span className="text-slate-500">{op.confidence_semantics?.replace(/_/g, " ") || "score"}</span>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Speech / Paralinguistic Signals */}
-                  {speechData && (
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
-                      <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-600">
-                        <span className="flex items-center gap-1.5">
-                          <Radio className="w-3 h-3 text-cyan-600" />
-                          Acoustic Biomarkers
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          {speechData.speech_rate_wpm} WPM • {Math.round(speechData.speech_pause_ratio * 100)}% pause
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {speechData.observations.map((obs, idx) => (
-                          <span
-                            key={idx}
-                            className="text-[10px] bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md"
-                          >
-                            {obs}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Differential Diagnosis Table */}
-                  {boardData.differential.length > 0 && (
-                    <div>
-                      <div className="text-[11px] font-mono font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
-                        Ranked Differential
-                      </div>
-                      <div className="space-y-1.5">
-                        {boardData.differential.slice(0, 3).map((item, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs"
-                          >
-                            <span className="font-semibold text-slate-800 truncate max-w-[170px]">
-                              {item.condition}
-                            </span>
-                            <span
-                              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                                item.probability === "high"
-                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                  : item.probability === "moderate"
-                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                  : "bg-slate-100 text-slate-600"
-                              }`}
-                            >
-                              {item.probability}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Multi-Specialty Conflicts Resolved */}
-                  {boardData.conflicts.length > 0 && (
-                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
-                      <span className="font-bold flex items-center gap-1.5 text-amber-800">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                        Clinical Conflict Resolved:
-                      </span>
-                      <p className="text-[11px] leading-relaxed text-amber-950">
-                        {boardData.conflicts[0].description}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Bounded Diagnostic Tools Executed */}
-                  {boardData.tools_executed && boardData.tools_executed.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider">
-                        <span className="flex items-center gap-1.5">
-                          <Wrench className="w-3 h-3 text-cyan-600" />
-                          Diagnostic Tools
-                        </span>
-                        <span className="text-[10px] text-cyan-700 font-mono bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
-                          {boardData.tools_executed.length} executed
-                        </span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {boardData.tools_executed_details && boardData.tools_executed_details.length > 0 ? (
-                          boardData.tools_executed_details.map((tool, idx) => (
-                            <div
-                              key={idx}
-                              className="bg-slate-50 border border-slate-200/90 rounded-lg p-2 text-xs space-y-0.5"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-mono font-bold text-[10px] text-slate-800 flex items-center gap-1">
-                                  <Cpu className="w-3 h-3 text-cyan-600" />
-                                  {tool.tool_name.replace(/_/g, " ").toUpperCase()}
-                                </span>
-                                <span className="text-[9px] font-mono text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
-                                  {tool.latency_ms}ms
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-slate-600 leading-tight">
-                                {tool.clinical_summary}
-                              </p>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="flex flex-wrap gap-1">
-                            {boardData.tools_executed.map((tool, idx) => (
-                              <span
-                                key={idx}
-                                className="inline-flex items-center gap-1 text-[10px] font-mono font-medium bg-slate-50 border border-slate-200 text-slate-700 px-2 py-0.5 rounded"
-                              >
-                                <Cpu className="w-2.5 h-2.5 text-cyan-600" />
-                                {tool}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Multi-Round Peer Review Challenges */}
-                  {boardData.peer_challenges && boardData.peer_challenges.length > 0 && (
-                    <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-2.5 text-xs text-indigo-950 space-y-1.5">
-                      <div className="flex items-center justify-between text-indigo-900 font-bold">
-                        <span className="flex items-center gap-1.5 text-[11px]">
-                          <GitCompare className="w-3.5 h-3.5 text-indigo-600" />
-                          Round 2 Peer Challenges
-                        </span>
-                        <span className="text-[9px] font-mono bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded border border-indigo-300">
-                          {boardData.peer_challenges.length} issued
-                        </span>
-                      </div>
-                      {boardData.peer_challenges.map((ch, idx) => (
-                        <div key={idx} className="bg-white/90 border border-indigo-200/80 rounded-lg p-2 space-y-1">
-                          <div className="text-[10px] font-mono font-bold text-indigo-700 flex items-center justify-between">
-                            <span>{ch.from_agent.replace(/-.*$/, "")} ➔ {ch.to_agent.replace(/-.*$/, "")}</span>
-                            <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
-                              Resolved
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-700 leading-snug">
-                            <strong className="text-slate-900">Dispute:</strong> {ch.claim_disputed}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Tamper-Evident Audit Hash Chain Explorer */}
-                  {boardData.trace.audit_hash_chain && boardData.trace.audit_hash_chain.length > 0 && (
-                    <div className="border border-slate-200 bg-slate-50/80 rounded-xl p-2.5 space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-mono font-bold text-slate-600">
-                        <span className="flex items-center gap-1 text-slate-700">
-                          <Lock className="w-3 h-3 text-emerald-600" />
-                          Audit Hash Chain
-                        </span>
-                        <span className="text-[9px] text-emerald-700 font-mono bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                          SHA-256 Chained
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        {boardData.trace.audit_hash_chain.map((block, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between text-[9px] font-mono bg-white border border-slate-200/90 px-2 py-1 rounded"
-                          >
-                            <span className="font-semibold text-slate-700 truncate max-w-[130px]">
-                              B{block.block_index}: {block.event_type.replace(/_/g, " ")}
-                            </span>
-                            <span className="text-slate-500 font-mono" title={block.current_hash}>
-                              {block.current_hash.slice(0, 8)}...
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Empirical Pipeline Latency */}
-                  <div className="text-[10px] font-mono text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
-                    <span>Board Runtime: {boardData.trace.total_board_latency_ms}ms</span>
-                    <span>Pre: {boardData.trace.pre_arbiter_latency_us}µs | Post: {boardData.trace.post_arbiter_latency_us}µs</span>
-                  </div>
-                </motion.div>
-              )}
+        {/* HORIZONTAL SPECIALIST SELECTOR STRIP */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-6">
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 shadow-xs">
+            <div className="flex items-center justify-between mb-2.5 px-1">
+              <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <Stethoscope className="w-3.5 h-3.5 text-cyan-700" />
+                Select Attending Physician
+              </span>
+              <span className="text-[11px] text-slate-400 font-medium">
+                {callActive ? `Active Call: ${selectedDoctor.name}` : "Click doctor to switch attending specialist"}
+              </span>
             </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+              {DOCTOR_PROFILES.map((doc) => {
+                const isSelected = selectedDoctor.id === doc.id;
+                return (
+                  <button
+                    key={doc.id}
+                    disabled={callActive}
+                    onClick={() => setSelectedDoctor(doc)}
+                    className={`p-2.5 rounded-xl border transition-all flex items-center gap-2.5 text-left ${
+                      isSelected
+                        ? "bg-cyan-50/80 border-cyan-500 shadow-xs ring-2 ring-cyan-500/10"
+                        : "bg-slate-50/60 border-slate-200/80 hover:bg-slate-100 hover:border-slate-300"
+                    } ${callActive ? "cursor-not-allowed opacity-60" : ""}`}
+                  >
+                    <img
+                      src={doc.avatarUrl}
+                      alt={doc.name}
+                      className="w-10 h-10 rounded-full object-cover border border-slate-200 flex-shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-extrabold text-slate-900 text-xs truncate">{doc.name}</div>
+                      <div className="text-[10px] text-cyan-800 font-semibold truncate">{doc.specialty}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
 
-            {/* RIGHT COLUMN: Interactive Voice Screen & Conversation */}
-            <div className="lg:col-span-8 flex flex-col space-y-6">
-              
-              {/* Voice Room Container */}
-              <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-sm flex flex-col justify-between min-h-[500px]">
+        {/* MAIN BALANCED 2-COLUMN WORKSPACE */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* LEFT COLUMN (7 of 12): Telehealth Room & Deliberation Chat */}
+            <div className="lg:col-span-7 flex flex-col space-y-4">
+              <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col justify-between min-h-[620px]">
                 
-                {/* Consultation Room Top Bar */}
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                {/* Consultation Room Header */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <img
                         src={selectedDoctor.avatarUrl}
                         alt={selectedDoctor.name}
-                        className="w-12 h-12 rounded-full object-cover border-2 border-cyan-500 shadow-sm"
+                        className="w-11 h-11 rounded-full object-cover border-2 border-cyan-500 shadow-xs"
                       />
                       {callActive && (
-                        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full animate-pulse" />
+                        <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full animate-pulse" />
                       )}
                     </div>
                     <div>
-                      <h2 className="text-slate-950 font-extrabold text-base flex items-center gap-2">
+                      <h2 className="text-slate-950 font-extrabold text-sm sm:text-base flex items-center gap-2">
                         <span>{selectedDoctor.name}</span>
-                        {callActive && (
-                          <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        {callActive ? (
+                          <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                             LIVE CALL
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                            READY
                           </span>
                         )}
                       </h2>
@@ -910,120 +616,76 @@ export default function ConsultPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    {callActive && (
-                      <div className="font-mono text-sm font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-3 py-1 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    {callActive ? (
+                      <div className="font-mono text-xs font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2.5 py-1 rounded-lg">
                         {formatTimer(callDuration)}
                       </div>
+                    ) : (
+                      <button
+                        onClick={startConsultation}
+                        className="inline-flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-xs transition-all"
+                      >
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>Start Call</span>
+                      </button>
                     )}
                   </div>
                 </div>
 
-                {/* Center Visualizer */}
-                <div className="my-8 flex flex-col items-center justify-center text-center">
-                  {!callActive ? (
-                    <div className="space-y-4 py-8">
-                      <div className="w-20 h-20 mx-auto rounded-full bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700 shadow-sm">
-                        <Mic className="w-9 h-9" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-extrabold text-slate-950">Ready for Voice Consultation</h3>
-                        <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 font-medium">
-                          Click below to start your private real-time audio triage consultation with {selectedDoctor.name}.
-                        </p>
-                      </div>
-                      <button
-                        onClick={startConsultation}
-                        className="inline-flex items-center gap-2 bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-xs px-6 py-3.5 rounded-xl shadow-md transition-all scale-100 hover:scale-105"
-                      >
-                        <Mic className="w-4 h-4" />
-                        <span>Start Voice Consultation</span>
-                      </button>
-
-                      <div className="pt-3 border-t border-slate-100/80 max-w-xl mx-auto">
-                        <div className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-2">
-                          Or Click to Simulate Multi-Agent Case:
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center gap-1.5">
-                          {CLINICAL_SCENARIOS.map((sc, i) => (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => {
-                                startConsultation();
-                                setTimeout(() => handleUserUtterance(sc.text), 400);
-                              }}
-                              className="text-[11px] font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 border border-slate-200 hover:border-cyan-300 px-2.5 py-1.5 rounded-xl transition-all shadow-xs"
-                              title={sc.desc}
-                            >
-                              {sc.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-5 w-full max-w-md mx-auto">
-                      {/* Pulsing Sphere */}
-                      <div className="relative flex items-center justify-center">
-                        <motion.div
-                          animate={{
-                            scale: isDoctorSpeaking ? [1, 1.25, 1] : isRecording ? [1, 1.15, 1] : 1,
-                            opacity: isDoctorSpeaking || isRecording ? [0.3, 0.6, 0.3] : 0.1
-                          }}
-                          transition={{ repeat: Infinity, duration: 1.5 }}
-                          className={`absolute w-32 h-32 rounded-full blur-lg ${
-                            isDoctorSpeaking ? "bg-cyan-400" : isRecording ? "bg-emerald-400" : "bg-slate-300"
-                          }`}
-                        />
-                        <div
-                          className={`relative w-24 h-24 rounded-full border-2 flex items-center justify-center transition-all ${
-                            isDoctorSpeaking
-                              ? "bg-cyan-50 border-cyan-500 text-cyan-700 shadow-md"
-                              : isRecording
-                              ? "bg-emerald-50 border-emerald-500 text-emerald-700 shadow-md animate-pulse"
-                              : "bg-slate-100 border-slate-200 text-slate-400"
-                          }`}
-                        >
-                          {isDoctorSpeaking ? (
-                            <Volume2 className="w-9 h-9 animate-bounce" />
-                          ) : (
-                            <Mic className="w-9 h-9" />
-                          )}
-                        </div>
-                      </div>
-
-                      {/* State Indicator */}
-                      <div className="text-center">
-                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-600">
-                          {isDoctorSpeaking
-                            ? `${selectedDoctor.name} is speaking...`
-                            : isRecording
-                            ? "Listening to your voice (Speak now)..."
-                            : isProcessingAI
-                            ? "AI evaluating clinical assessment..."
-                            : "Microphone idle"}
-                        </span>
-                        {transcriptText && (
-                          <div className="mt-2 text-xs text-cyan-900 bg-cyan-50 border border-cyan-200 px-3 py-1.5 rounded-xl italic max-w-sm mx-auto truncate font-medium">
-                            "{transcriptText}"
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                {/* Compact Audio / Voice State Indicator */}
+                <div className="py-2.5 px-3 bg-slate-50/80 border border-slate-200/70 rounded-xl my-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${
+                      isDoctorSpeaking
+                        ? "bg-cyan-500 animate-ping"
+                        : isRecording
+                        ? "bg-emerald-500 animate-pulse"
+                        : isProcessingAI
+                        ? "bg-amber-500 animate-spin"
+                        : "bg-slate-300"
+                    }`} />
+                    <span className="text-xs font-mono font-bold text-slate-700">
+                      {isDoctorSpeaking
+                        ? `${selectedDoctor.name} is speaking...`
+                        : isRecording
+                        ? "Listening to microphone (Speak now)..."
+                        : isProcessingAI
+                        ? "Clinical Board deliberating multi-specialist assessment..."
+                        : callActive
+                        ? "Microphone ready — speak or type symptoms"
+                        : "Call offline — click 'Start Call' or pick a scenario below"}
+                    </span>
+                  </div>
+                  {transcriptText && (
+                    <span className="text-[11px] text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded max-w-xs truncate italic">
+                      "${transcriptText}"
+                    </span>
                   )}
                 </div>
 
-                {/* Consultation Live Chat Feed */}
-                {callActive && (
-                  <div
-                    ref={chatScrollRef}
-                    className="max-h-56 overflow-y-auto space-y-3 p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl mb-4"
-                  >
-                    {messages.map((msg) => (
+                {/* Live Conversation Chat Room */}
+                <div
+                  ref={chatScrollRef}
+                  className="flex-1 overflow-y-auto space-y-3 p-4 bg-slate-50/60 border border-slate-200/80 rounded-xl mb-3 min-h-[380px] max-h-[440px]"
+                >
+                  {messages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
+                      <div className="w-14 h-14 rounded-full bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700 shadow-xs">
+                        <Mic className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-slate-900 text-sm">Consultation Feed Ready</h4>
+                        <p className="text-xs text-slate-500 max-w-sm mx-auto mt-0.5 font-medium">
+                          Click <strong>Start Call</strong> or select a <strong>Test Scenario</strong> to start your consultation.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    messages.map((msg) => (
                       <div
                         key={msg.id}
-                        className={`flex gap-3 text-xs leading-relaxed ${
+                        className={`flex gap-2.5 text-xs leading-relaxed ${
                           msg.role === "doctor" ? "justify-start" : "justify-end"
                         }`}
                       >
@@ -1037,12 +699,12 @@ export default function ConsultPage() {
                           </div>
                         )}
                         <div
-                          className={`max-w-[80%] rounded-2xl p-3.5 ${
+                          className={`max-w-[85%] rounded-2xl p-3.5 ${
                             msg.role === "doctor"
                               ? msg.isSpecialistChime
-                                ? "bg-amber-50/80 border border-amber-200 text-slate-800 shadow-sm"
-                                : "bg-white border border-slate-200/90 text-slate-800 shadow-sm"
-                              : "bg-slate-950 text-white font-medium shadow-sm"
+                                ? "bg-amber-50/90 border border-amber-200 text-slate-900 shadow-xs"
+                                : "bg-white border border-slate-200/90 text-slate-800 shadow-xs"
+                              : "bg-slate-950 text-white font-medium shadow-xs"
                           }`}
                         >
                           {msg.isSpecialistChime && (
@@ -1058,126 +720,510 @@ export default function ConsultPage() {
                           <span className="text-[9px] opacity-60 block mt-1 font-mono">{msg.timestamp}</span>
                         </div>
                       </div>
-                    ))}
+                    ))
+                  )}
 
-                    {isProcessingAI && (
-                      <div className="flex items-center gap-2 text-xs text-slate-500 italic p-2">
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-700" />
-                        <span>Clinical Board evaluating multi-specialist assessment...</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Call Control Footer */}
-                {callActive && (
-                  <div className="space-y-3 pt-3 border-t border-slate-100">
-                    {/* Quick Multi-Agent Case Test Scenarios */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mr-1">
-                        Test Scenarios:
-                      </span>
-                      {CLINICAL_SCENARIOS.map((sc, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => handleUserUtterance(sc.text)}
-                          className="text-[11px] font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 border border-slate-200 hover:border-cyan-300 px-2.5 py-1 rounded-lg transition-all shadow-xs"
-                          title={sc.desc}
-                        >
-                          {sc.label}
-                        </button>
-                      ))}
+                  {isProcessingAI && (
+                    <div className="flex items-center gap-2 text-xs text-slate-500 italic p-2 bg-white/70 rounded-lg border border-slate-200/50">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-700" />
+                      <span>Multi-Agent Board synthesizing specialist findings...</span>
                     </div>
+                  )}
+                </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={toggleMic}
-                          className={`px-3.5 py-2.5 rounded-xl border font-bold text-xs flex items-center gap-2 transition-all ${
-                            isRecording
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm"
-                              : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
-                          }`}
-                        >
-                          {isRecording ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-                          <span>{isRecording ? "Mute Mic" : "Unmute Mic"}</span>
-                        </button>
-
-                        {/* Text Input Fallback */}
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            if (typedInput.trim()) {
-                              handleUserUtterance(typedInput.trim());
-                              setTypedInput("");
-                            }
-                          }}
-                          className="flex items-center gap-2"
-                        >
-                          <input
-                            type="text"
-                            value={typedInput}
-                            onChange={(e) => setTypedInput(e.target.value)}
-                            placeholder="Type symptom text..."
-                            className="bg-slate-50 border border-slate-200 focus:border-slate-400 focus:bg-white rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none w-44 sm:w-64 transition-all"
-                          />
-                          <button
-                            type="submit"
-                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </button>
-                        </form>
-                      </div>
-
+                {/* Quick Simulation Scenarios Bar */}
+                <div className="pt-2 pb-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                      Quick Clinical Test Scenarios:
+                    </span>
+                    <span className="text-[10px] text-slate-400">1-click simulation</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CLINICAL_SCENARIOS.map((sc, i) => (
                       <button
-                        onClick={endConsultationAndSave}
-                        disabled={isSavingReport}
-                        className="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-sm transition-all ml-auto"
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          if (!callActive) startConsultation();
+                          setTimeout(() => handleUserUtterance(sc.text), 300);
+                        }}
+                        className="text-[11px] font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 border border-slate-200 hover:border-cyan-300 px-2.5 py-1 rounded-lg transition-all shadow-xs"
+                        title={sc.desc}
                       >
-                        <PhoneOff className="w-4 h-4" />
-                        <span>{isSavingReport ? "Saving SOAP..." : "End & Generate SOAP"}</span>
+                        {sc.label}
                       </button>
-                    </div>
+                    ))}
                   </div>
-                )}
+                </div>
+
+                {/* Bottom Call Controls & Input Bar */}
+                <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2 flex-1">
+                    <button
+                      onClick={callActive ? toggleMic : startConsultation}
+                      className={`px-3.5 py-2 rounded-xl border font-bold text-xs flex items-center gap-2 transition-all ${
+                        isRecording
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200 shadow-xs"
+                          : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+                      }`}
+                    >
+                      {isRecording ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                      <span>{isRecording ? "Mute Mic" : "Unmute Mic"}</span>
+                    </button>
+
+                    {/* Text Input Fallback */}
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (typedInput.trim()) {
+                          handleUserUtterance(typedInput.trim());
+                          setTypedInput("");
+                        }
+                      }}
+                      className="flex items-center gap-1.5 flex-1"
+                    >
+                      <input
+                        type="text"
+                        value={typedInput}
+                        onChange={(e) => setTypedInput(e.target.value)}
+                        placeholder="Type symptoms or speak into mic..."
+                        className="bg-slate-50 border border-slate-200 focus:border-slate-400 focus:bg-white rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none flex-1 transition-all"
+                      />
+                      <button
+                        type="submit"
+                        className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </form>
+                  </div>
+
+                  {callActive && (
+                    <button
+                      onClick={endConsultationAndSave}
+                      disabled={isSavingReport}
+                      className="inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-xs transition-all flex-shrink-0"
+                    >
+                      <PhoneOff className="w-3.5 h-3.5" />
+                      <span>{isSavingReport ? "Saving..." : "End Call"}</span>
+                    </button>
+                  )}
+                </div>
               </div>
+            </div>
+
+            {/* RIGHT COLUMN (5 of 12): Clinical Intelligence & Board Telemetry */}
+            <div className="lg:col-span-5 flex flex-col space-y-4">
+              
+              {/* Tab Navigation Header */}
+              <div className="bg-white border border-slate-200/90 rounded-2xl p-1.5 shadow-xs flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("board")}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    activeRightTab === "board"
+                      ? "bg-cyan-50 text-cyan-900 border border-cyan-200/90 shadow-xs"
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-cyan-600" />
+                  <span>Clinical Board Deliberation</span>
+                  {boardData?.opinions && boardData.opinions.length > 1 && (
+                    <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("triage")}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    activeRightTab === "triage"
+                      ? "bg-cyan-50 text-cyan-900 border border-cyan-200/90 shadow-xs"
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Triage & SOAP Assessment</span>
+                </button>
+              </div>
+
+              {/* TAB CONTENT 1: MULTI-AGENT CLINICAL BOARD */}
+              {activeRightTab === "board" && (
+                <div className="space-y-4">
+                  {boardData ? (
+                    <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
+                      
+                      {/* Board Header & Arbiter Shield */}
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-2 text-cyan-900 font-extrabold text-xs">
+                          <Users className="w-4 h-4 text-cyan-600" />
+                          <span>Multi-Agent Specialist Deliberation</span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                          Dual-Arbiter Protected
+                        </span>
+                      </div>
+
+                      {/* Active Board Specialists Tags */}
+                      <div>
+                        <div className="text-[11px] font-mono font-bold text-slate-500 mb-1.5 uppercase tracking-wider flex items-center justify-between">
+                          <span>Board Specialists Summoned</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {boardData.specialists_summoned.length ? `${boardData.specialists_summoned.length + 1} consulted` : "Solo Primary Care"}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {boardData.active_specialists.map((doc, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-50 border border-slate-200 text-slate-800 px-2.5 py-1 rounded-lg"
+                            >
+                              <Stethoscope className="w-3 h-3 text-cyan-600" />
+                              {doc.replace(/, MD.*$/, "")}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Specialist Opinions & Hypotheses Cards */}
+                      {boardData.opinions && boardData.opinions.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[11px] font-mono font-bold text-slate-500 mb-1 uppercase tracking-wider flex items-center justify-between">
+                            <span>Specialist Opinions & Hypotheses</span>
+                            <span className="text-[10px] text-cyan-700 font-mono bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
+                              {boardData.opinions.length} opinion{boardData.opinions.length > 1 ? "s" : ""}
+                            </span>
+                          </div>
+                          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                            {boardData.opinions.map((op, idx) => (
+                              <div
+                                key={idx}
+                                className="bg-slate-50/90 border border-slate-200/90 rounded-xl p-3 text-xs space-y-1.5 hover:border-cyan-300 transition-colors"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                                    <span className="font-bold text-slate-900 text-xs">
+                                      {op.doctor_name.replace(/, MD.*$/, "")}
+                                    </span>
+                                    <span className="text-[9px] font-mono text-slate-500 bg-white border border-slate-200 px-1 py-0.2 rounded">
+                                      {op.specialty}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.2 rounded border ${
+                                      op.risk_level === "high"
+                                        ? "bg-rose-50 text-rose-700 border-rose-200"
+                                        : op.risk_level === "moderate"
+                                        ? "bg-amber-50 text-amber-700 border-amber-200"
+                                        : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    }`}
+                                  >
+                                    {op.risk_level} risk
+                                  </span>
+                                </div>
+
+                                {op.primary_hypothesis && (
+                                  <div className="bg-white border border-slate-200/80 rounded-lg p-2 text-[11px]">
+                                    <span className="text-slate-400 font-mono text-[9px] uppercase block font-bold">
+                                      Primary Clinical Hypothesis:
+                                    </span>
+                                    <span className="font-semibold text-slate-800 leading-tight">
+                                      {op.primary_hypothesis}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {op.concerns && op.concerns.length > 0 && (
+                                  <div className="space-y-0.5">
+                                    <span className="text-[9px] text-slate-500 font-mono font-bold block">
+                                      Key Concerns:
+                                    </span>
+                                    <div className="flex flex-wrap gap-1">
+                                      {op.concerns.map((c, ci) => (
+                                        <span
+                                          key={ci}
+                                          className="text-[9px] bg-white border border-slate-200 text-slate-700 px-1.5 py-0.2 rounded"
+                                        >
+                                          {c}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {op.confidence !== undefined && (
+                                  <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 pt-1 border-t border-slate-200/50">
+                                    <span>Confidence: {Math.round(op.confidence * 100)}%</span>
+                                    <span className="text-slate-500">{op.confidence_semantics?.replace(/_/g, " ") || "model score"}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Bounded Diagnostic Tools Executed */}
+                      {boardData.tools_executed && boardData.tools_executed.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                            <span className="flex items-center gap-1.5">
+                              <Wrench className="w-3 h-3 text-cyan-600" />
+                              Diagnostic Tools Executed
+                            </span>
+                            <span className="text-[10px] text-cyan-700 font-mono bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
+                              {boardData.tools_executed.length} executed
+                            </span>
+                          </div>
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                            {boardData.tools_executed_details && boardData.tools_executed_details.length > 0 ? (
+                              boardData.tools_executed_details.map((tool, idx) => (
+                                <div
+                                  key={idx}
+                                  className="bg-slate-50 border border-slate-200/90 rounded-lg p-2 text-xs space-y-0.5"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-mono font-bold text-[10px] text-slate-800 flex items-center gap-1">
+                                      <Cpu className="w-3 h-3 text-cyan-600" />
+                                      {tool.tool_name.replace(/_/g, " ").toUpperCase()}
+                                    </span>
+                                    <span className="text-[9px] font-mono text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                                      {tool.latency_ms}ms
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-600 leading-tight">
+                                    {tool.clinical_summary}
+                                  </p>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {boardData.tools_executed.map((tool, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center gap-1 text-[10px] font-mono font-medium bg-slate-50 border border-slate-200 text-slate-700 px-2 py-0.5 rounded"
+                                  >
+                                    <Cpu className="w-2.5 h-2.5 text-cyan-600" />
+                                    {tool}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Multi-Round Peer Challenges */}
+                      {boardData.peer_challenges && boardData.peer_challenges.length > 0 && (
+                        <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-2.5 text-xs text-indigo-950 space-y-1.5">
+                          <div className="flex items-center justify-between text-indigo-900 font-bold">
+                            <span className="flex items-center gap-1.5 text-[11px]">
+                              <GitCompare className="w-3.5 h-3.5 text-indigo-600" />
+                              Round 2 Peer Review Challenges
+                            </span>
+                            <span className="text-[9px] font-mono bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded border border-indigo-300">
+                              {boardData.peer_challenges.length} issued
+                            </span>
+                          </div>
+                          {boardData.peer_challenges.map((ch, idx) => (
+                            <div key={idx} className="bg-white/90 border border-indigo-200/80 rounded-lg p-2 space-y-1">
+                              <div className="text-[10px] font-mono font-bold text-indigo-700 flex items-center justify-between">
+                                <span>{ch.from_agent.replace(/-.*$/, "")} ➔ {ch.to_agent.replace(/-.*$/, "")}</span>
+                                <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                                  Resolved in Consensus
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-700 leading-snug">
+                                <strong className="text-slate-900">Dispute:</strong> {ch.claim_disputed}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Tamper-Evident SHA-256 Audit Chain */}
+                      {boardData.trace.audit_hash_chain && boardData.trace.audit_hash_chain.length > 0 && (
+                        <div className="border border-slate-200 bg-slate-50/80 rounded-xl p-2.5 space-y-1.5">
+                          <div className="flex items-center justify-between text-[10px] font-mono font-bold text-slate-600">
+                            <span className="flex items-center gap-1 text-slate-700">
+                              <Lock className="w-3 h-3 text-emerald-600" />
+                              Tamper-Evident Audit Hash Chain
+                            </span>
+                            <span className="text-[9px] text-emerald-700 font-mono bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                              SHA-256 Chained
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {boardData.trace.audit_hash_chain.map((block, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between text-[9px] font-mono bg-white border border-slate-200/90 px-2 py-1 rounded"
+                              >
+                                <span className="font-semibold text-slate-700 truncate max-w-[150px]">
+                                  B{block.block_index}: {block.event_type.replace(/_/g, " ")}
+                                </span>
+                                <span className="text-slate-500 font-mono" title={block.current_hash}>
+                                  {block.current_hash.slice(0, 10)}...
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Pipeline Latency Footer */}
+                      <div className="text-[10px] font-mono text-slate-400 border-t border-slate-100 pt-2 flex items-center justify-between">
+                        <span>Board Runtime: {boardData.trace.total_board_latency_ms}ms</span>
+                        <span>Pre: {boardData.trace.pre_arbiter_latency_us}µs | Post: {boardData.trace.post_arbiter_latency_us}µs</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-slate-200/90 rounded-2xl p-8 text-center space-y-3 shadow-xs">
+                      <div className="w-12 h-12 rounded-full bg-cyan-50 border border-cyan-200 text-cyan-700 flex items-center justify-center mx-auto">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <h4 className="font-extrabold text-slate-900 text-sm">Clinical Board Ready</h4>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                        When you describe symptoms or click a test scenario on the left, specialists will be summoned here to deliberate hypotheses, run diagnostic tools, and issue peer reviews.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB CONTENT 2: LIVE CLINICAL TRIAGE & RISK */}
+              {activeRightTab === "triage" && (
+                <div className="space-y-4">
+                  {triageData ? (
+                    <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
+                      
+                      {/* Urgency Level Header */}
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <span className="text-xs font-mono font-bold uppercase text-slate-500 flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-rose-600" />
+                          <span>Emergency Severity Triage</span>
+                        </span>
+                        <span className={`text-xs font-bold font-mono px-3 py-1 rounded-full uppercase border ${getUrgencyBadge(triageData.triageLevel)}`}>
+                          {triageData.triageLevel}
+                        </span>
+                      </div>
+
+                      {/* Triage Title & Clinical Action */}
+                      <div className={`p-3.5 rounded-xl border ${
+                        triageData.triageLevel === "emergency"
+                          ? "bg-rose-50/80 border-rose-200 text-rose-950"
+                          : triageData.triageLevel === "priority"
+                          ? "bg-amber-50/80 border-amber-200 text-amber-950"
+                          : "bg-emerald-50/80 border-emerald-200 text-emerald-950"
+                      }`}>
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider block opacity-70">
+                          Primary Disposition Recommendation:
+                        </span>
+                        <h4 className="font-extrabold text-sm mt-0.5">
+                          {triageData.triageTitle}
+                        </h4>
+                        <p className="text-xs mt-1 leading-relaxed opacity-90">
+                          {triageData.recommendedAction}
+                        </p>
+                      </div>
+
+                      {/* Detected Symptoms List */}
+                      <div>
+                        <div className="text-xs text-slate-500 font-mono font-bold mb-1.5 uppercase tracking-wider">
+                          Detected Symptoms:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {triageData.detectedSymptoms.map((sym, i) => (
+                            <span key={i} className="text-xs bg-slate-100 text-slate-800 border border-slate-200 px-2.5 py-1 rounded-lg font-medium">
+                              {sym}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* ICD-10 Diagnostic Codes */}
+                      <div>
+                        <div className="text-xs text-slate-500 font-mono font-bold mb-1.5 uppercase tracking-wider">
+                          ICD-10 Diagnostic Codes:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {triageData.icdCodes.map((code, i) => (
+                            <span key={i} className="text-xs bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md font-mono font-bold">
+                              {code}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Speech Paralinguistics */}
+                      {speechData && (
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-600">
+                            <span className="flex items-center gap-1.5">
+                              <Radio className="w-3 h-3 text-cyan-600" />
+                              Acoustic Biomarkers
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {speechData.speech_rate_wpm} WPM • {Math.round(speechData.speech_pause_ratio * 100)}% pause
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {speechData.observations.map((obs, idx) => (
+                              <span
+                                key={idx}
+                                className="text-[10px] bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md"
+                              >
+                                {obs}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-slate-200/90 rounded-2xl p-8 text-center space-y-3 shadow-xs">
+                      <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto">
+                        <Activity className="w-6 h-6" />
+                      </div>
+                      <h4 className="font-extrabold text-slate-900 text-sm">Triage Engine Ready</h4>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                        Speak or select a scenario to evaluate Emergency Severity Index (ESI), ICD-10 diagnosis codes, and deterministic safety rules.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Saved Report Notification Banner */}
               {savedReportId && (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="bg-white border border-emerald-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  className="bg-white border border-emerald-200 rounded-2xl p-4 shadow-sm flex items-center gap-3"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 flex-shrink-0">
-                      <CheckCircle className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-extrabold text-slate-950 text-sm">Clinical SOAP Report Generated & Saved</h4>
-                      <p className="text-xs text-slate-500 font-medium">
-                        Record ID: <span className="font-mono text-slate-800 font-bold">{savedReportId}</span>. Saved to your consultation records.
-                      </p>
-                    </div>
+                  <div className="w-9 h-9 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 flex-shrink-0">
+                    <CheckCircle className="w-4 h-4" />
                   </div>
-
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-extrabold text-slate-950 text-xs">SOAP Report Saved</h4>
+                    <p className="text-[11px] text-slate-500 font-medium truncate">
+                      Record ID: <span className="font-mono text-slate-800 font-bold">{savedReportId}</span>
+                    </p>
+                  </div>
                   <Link
-                    href="/dashboard"
-                    className="inline-flex items-center justify-center gap-2 bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-sm transition-all flex-shrink-0"
+                    href="/reports"
+                    className="text-xs font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-3 py-1.5 rounded-xl hover:bg-cyan-100 transition-colors flex-shrink-0"
                   >
-                    <span>View in SOAP Dashboard</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    View
                   </Link>
                 </motion.div>
               )}
             </div>
-
           </div>
         </div>
       </div>
-
       <Footer />
     </div>
   );

@@ -22,11 +22,67 @@ export async function POST(request: Request) {
 
     const doctor = getDoctorById(doctorId);
 
-    // Cumulative patient utterances for comprehensive clinical context
-    const allUserUtterances = [
-      ...conversationHistory.filter((m: any) => m.role === "patient").map((m: any) => m.text),
-      message
-    ].join(" ");
+    const cleanMsg = message.trim();
+    const cleanMsgLower = cleanMsg.toLowerCase();
+
+    // Check if this is a conversational greeting, mic check, or polite small talk without symptoms
+    const isGreeting =
+      /^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me|testing|greetings)[.!?\s]*$/i.test(cleanMsgLower) ||
+      (cleanMsg.length <= 15 && /\b(hello|hi|hey|greetings)\b/i.test(cleanMsgLower));
+
+    const isThankYou = /^(thank\s+you|thanks|thank\s+you\s+so\s+much|ok\s+thanks|bye|goodbye)[.!?\s]*$/i.test(cleanMsgLower);
+
+    if (isGreeting) {
+      const greetingReplies: Record<string, string> = {
+        "dr-sarah-chen": "Hello! I'm Dr. Sarah Chen, Chief of Internal Medicine. I can hear you clearly. What symptoms or medical concerns brought you in today?",
+        "dr-marcus-vance": "Hello, I'm Dr. Marcus Vance, Senior Cardiologist. I'm listening closely. Please describe any chest discomfort, palpitations, or symptoms you're feeling.",
+        "dr-elena-rostova": "Hello! I'm Dr. Elena Rostova, Consultant Pediatrician. How can I assist you or your family today?",
+        "dr-arthur-pendelton": "Good day, I'm Dr. Arthur Pendelton in Neurology. How are you feeling today, and what symptoms would you like us to evaluate?",
+        "dr-priya-patel": "Hello, I'm Dr. Priya Patel, Consultant Dermatologist. Please tell me about any symptoms, skin changes, or reactions you're experiencing."
+      };
+      const doctorGreeting = greetingReplies[doctor.id] || `Hello! I'm ${doctor.name}. I'm here and ready to help. What symptoms are you experiencing?`;
+
+      return NextResponse.json({
+        doctorReply: doctorGreeting,
+        doctor: {
+          id: doctor.id,
+          name: doctor.name,
+          specialty: doctor.specialty,
+          avatarUrl: doctor.avatarUrl,
+          voiceGender: doctor.voiceGender,
+        },
+        board: null,
+        speech_features: null,
+        triage: null
+      });
+    }
+
+    if (isThankYou) {
+      return NextResponse.json({
+        doctorReply: "You're very welcome! Please don't hesitate to reach back out if your symptoms change or worsen. Take care and stay safe.",
+        doctor: {
+          id: doctor.id,
+          name: doctor.name,
+          specialty: doctor.specialty,
+          avatarUrl: doctor.avatarUrl,
+          voiceGender: doctor.voiceGender,
+        },
+        board: null,
+        speech_features: null,
+        triage: null
+      });
+    }
+
+    // Cumulative patient utterances for comprehensive clinical context (filtering out raw greetings)
+    const patientHistory = conversationHistory
+      .filter((m: any) => m.role === "patient")
+      .map((m: any) => m.text.trim())
+      .filter((t: string) => !/^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me)[.!?\s]*$/i.test(t));
+    
+    const allUtterances = [...patientHistory, cleanMsg];
+    // Remove exact duplicate phrases from consecutive submissions
+    const uniqueUtterances = allUtterances.filter((u, i) => allUtterances.indexOf(u) === i);
+    const cumulativeTranscript = uniqueUtterances.join(". ");
 
     // 1. Extract measured speech features & paralinguistics
     const speechFeatures = extractSpeechFeatures({
@@ -48,7 +104,7 @@ export async function POST(request: Request) {
     const patientCase: PatientCase = {
       patient_id: `PT-${Date.now().toString().slice(-4)}`,
       patient_name: patientName,
-      transcript: allUserUtterances,
+      transcript: cumulativeTranscript,
       conversation_history: conversationHistory,
       demographics: {
         age: ageNum,

@@ -137,7 +137,12 @@ export class ClinicalSynthesizer {
     } else if (consensus_risk === "urgent") {
       synthesized_reply_narrative = "Thank you for explaining what you're feeling. Our clinical team has reviewed your symptoms and recommends an urgent medical evaluation today. Please monitor your temperature and vitals closely.";
     } else {
-      synthesized_reply_narrative = "I've reviewed your symptoms. They appear consistent with a routine, low-acuity presentation. Stay hydrated, rest, and follow up with your primary physician if symptoms persist beyond three days.";
+      const topFinding = key_findings.length > 0 ? key_findings[0] : "";
+      if (topFinding) {
+        synthesized_reply_narrative = `I have reviewed your presentation regarding ${topFinding.toLowerCase()}. Based on standard clinical guidelines, this appears consistent with a routine, low-acuity presentation. Please rest, stay hydrated, and follow up with your primary care doctor if symptoms persist or worsen.`;
+      } else {
+        synthesized_reply_narrative = "I've reviewed your symptoms. They appear consistent with a routine, low-acuity presentation. Stay hydrated, rest, and follow up with your primary physician if symptoms persist beyond three days.";
+      }
     }
 
     const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
