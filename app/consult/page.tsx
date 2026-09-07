@@ -40,6 +40,9 @@ interface ChatMessage {
   role: "doctor" | "patient" | "system";
   text: string;
   timestamp: string;
+  doctorName?: string;
+  doctorSpecialty?: string;
+  isSpecialistChime?: boolean;
 }
 
 interface LiveTriageData {
@@ -84,6 +87,8 @@ interface BoardData {
     risk_level: string;
     confidence?: number;
     confidence_semantics?: string;
+    primary_hypothesis?: string;
+    recommended_actions?: string[];
   }>;
   differential: Array<{
     condition: string;
@@ -281,9 +286,42 @@ export default function ConsultPage() {
     }
   };
 
+  // Quick clinical test scenarios for testing multi-agent board deliberation
+  const CLINICAL_SCENARIOS = [
+    {
+      label: "🫀 Cardio Emergency",
+      text: "I've had crushing pressure in the center of my chest for thirty minutes radiating into my left arm with cold sweats.",
+      desc: "Summons Dr. Vance (Cardiology) • Runs ECG & TIMI tools • ESI 2"
+    },
+    {
+      label: "🧠 Stroke (BE-FAST)",
+      text: "My wife noticed my right face is drooping, my right arm is weak and I have trouble getting my words out.",
+      desc: "Summons Dr. Pendelton (Neurology) • Runs BE-FAST & NIHSS • ESI 2"
+    },
+    {
+      label: "⚡ Cardioneuro Dual-Threat",
+      text: "I have sudden severe chest tightness, my left arm is numb, and I felt like I was going to black out with dizziness.",
+      desc: "Summons Vance + Pendelton • Triggers Round 2 Peer Cross-Examination!"
+    },
+    {
+      label: "💊 Lethal Drug Contraindication",
+      text: "I am experiencing severe tight chest pressure and took sildenafil four hours ago. Can I take sublingual nitroglycerin for relief?",
+      desc: "Cardiology • Absolute Nitrate + PDE5 Contraindication Flagged"
+    },
+    {
+      label: "👶 Pediatric Sepsis",
+      text: "My 7-week-old newborn has a rectal temperature of 102.5 and is unusually floppy, grunting, and refusing to wake up to feed.",
+      desc: "Summons Dr. Rostova (Pediatrics) • Runs PEWS tool • ESI 2"
+    }
+  ];
+
   // Process User Utterance & Trigger Doctor Reasoning
   const handleUserUtterance = async (userText: string) => {
     if (!userText.trim()) return;
+
+    if (!callActive) {
+      setCallActive(true);
+    }
 
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -309,16 +347,36 @@ export default function ConsultPage() {
 
       if (res.ok) {
         const data = await res.json();
+        const newMessages: ChatMessage[] = [];
+
+        // If specialists were summoned, add their opinions to the live deliberation chat
+        if (data.board?.opinions && data.board.opinions.length > 0) {
+          for (const op of data.board.opinions) {
+            if (op.doctor_name !== selectedDoctor.name && op.primary_hypothesis) {
+              newMessages.push({
+                id: `msg-spec-${Date.now()}-${op.specialty}`,
+                role: "doctor",
+                text: `${op.primary_hypothesis}. Priority Concern: ${op.concerns?.[0] || op.specialty}. Recommended action: ${op.recommended_actions?.[0] || "Urgent clinical workup."}`,
+                timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                doctorName: op.doctor_name,
+                doctorSpecialty: op.specialty,
+                isSpecialistChime: true
+              });
+            }
+          }
+        }
+
         const doctorReplyText = data.doctorReply || "I have received your symptoms and documented them.";
-        
-        const doctorMessage: ChatMessage = {
+        newMessages.push({
           id: `msg-${Date.now() + 1}`,
           role: "doctor",
           text: doctorReplyText,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        };
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          doctorName: selectedDoctor.name,
+          doctorSpecialty: selectedDoctor.department
+        });
 
-        setMessages((prev) => [...prev, doctorMessage]);
+        setMessages((prev) => [...prev, ...newMessages]);
         if (data.triage) {
           setTriageData(data.triage);
         }
@@ -553,6 +611,85 @@ export default function ConsultPage() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Specialist Opinions & Hypotheses */}
+                  {boardData.opinions && boardData.opinions.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-mono font-bold text-slate-500 mb-1 uppercase tracking-wider flex items-center justify-between">
+                        <span>Specialist Opinions</span>
+                        <span className="text-[10px] text-cyan-700 font-mono bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
+                          {boardData.opinions.length} opinion{boardData.opinions.length > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {boardData.opinions.map((op, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-slate-50/90 border border-slate-200/90 rounded-xl p-2.5 text-xs space-y-1.5 hover:border-cyan-300 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                                <span className="font-bold text-slate-900 text-[11px]">
+                                  {op.doctor_name.replace(/, MD.*$/, "")}
+                                </span>
+                                <span className="text-[9px] font-mono text-slate-500 bg-white border border-slate-200 px-1 py-0.2 rounded">
+                                  {op.specialty}
+                                </span>
+                              </div>
+                              <span
+                                className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.2 rounded border ${
+                                  op.risk_level === "high"
+                                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                                    : op.risk_level === "moderate"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                }`}
+                              >
+                                {op.risk_level}
+                              </span>
+                            </div>
+
+                            {op.primary_hypothesis && (
+                              <div className="bg-white border border-slate-200/80 rounded-lg p-1.5 text-[11px]">
+                                <span className="text-slate-400 font-mono text-[9px] uppercase block font-bold">
+                                  Hypothesis:
+                                </span>
+                                <span className="font-semibold text-slate-800 leading-tight">
+                                  {op.primary_hypothesis}
+                                </span>
+                              </div>
+                            )}
+
+                            {op.concerns && op.concerns.length > 0 && (
+                              <div className="space-y-0.5">
+                                <span className="text-[9px] text-slate-500 font-mono font-bold block">
+                                  Concerns:
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {op.concerns.map((c, ci) => (
+                                    <span
+                                      key={ci}
+                                      className="text-[9px] bg-white border border-slate-200 text-slate-700 px-1.5 py-0.2 rounded"
+                                    >
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {op.confidence !== undefined && (
+                              <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 pt-1 border-t border-slate-200/50">
+                                <span>Confidence: {Math.round(op.confidence * 100)}%</span>
+                                <span className="text-slate-500">{op.confidence_semantics?.replace(/_/g, " ") || "score"}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Speech / Paralinguistic Signals */}
                   {speechData && (
@@ -802,6 +939,28 @@ export default function ConsultPage() {
                         <Mic className="w-4 h-4" />
                         <span>Start Voice Consultation</span>
                       </button>
+
+                      <div className="pt-3 border-t border-slate-100/80 max-w-xl mx-auto">
+                        <div className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-2">
+                          Or Click to Simulate Multi-Agent Case:
+                        </div>
+                        <div className="flex flex-wrap items-center justify-center gap-1.5">
+                          {CLINICAL_SCENARIOS.map((sc, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => {
+                                startConsultation();
+                                setTimeout(() => handleUserUtterance(sc.text), 400);
+                              }}
+                              className="text-[11px] font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 border border-slate-200 hover:border-cyan-300 px-2.5 py-1.5 rounded-xl transition-all shadow-xs"
+                              title={sc.desc}
+                            >
+                              {sc.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-5 w-full max-w-md mx-auto">
@@ -869,17 +1028,32 @@ export default function ConsultPage() {
                         }`}
                       >
                         {msg.role === "doctor" && (
-                          <div className="w-7 h-7 rounded-full bg-cyan-100 border border-cyan-200 flex items-center justify-center text-cyan-800 flex-shrink-0 font-bold text-[10px]">
-                            DR
+                          <div className={`w-7 h-7 rounded-full border flex items-center justify-center flex-shrink-0 font-bold text-[10px] ${
+                            msg.isSpecialistChime
+                              ? "bg-amber-100 border-amber-300 text-amber-900"
+                              : "bg-cyan-100 border-cyan-200 text-cyan-800"
+                          }`}>
+                            {msg.isSpecialistChime ? "MD" : "DR"}
                           </div>
                         )}
                         <div
                           className={`max-w-[80%] rounded-2xl p-3.5 ${
                             msg.role === "doctor"
-                              ? "bg-white border border-slate-200/90 text-slate-800 shadow-sm"
+                              ? msg.isSpecialistChime
+                                ? "bg-amber-50/80 border border-amber-200 text-slate-800 shadow-sm"
+                                : "bg-white border border-slate-200/90 text-slate-800 shadow-sm"
                               : "bg-slate-950 text-white font-medium shadow-sm"
                           }`}
                         >
+                          {msg.isSpecialistChime && (
+                            <div className="flex items-center gap-1.5 mb-1.5 pb-1 border-b border-amber-200/70 text-[11px] font-bold text-amber-900">
+                              <Stethoscope className="w-3.5 h-3.5 text-amber-700" />
+                              <span>{msg.doctorName || "Specialist"} ({msg.doctorSpecialty})</span>
+                              <span className="text-[9px] font-mono bg-amber-200 text-amber-950 px-1 py-0.2 rounded ml-auto">
+                                BOARD CONSULT
+                              </span>
+                            </div>
+                          )}
                           <p>{msg.text}</p>
                           <span className="text-[9px] opacity-60 block mt-1 font-mono">{msg.timestamp}</span>
                         </div>
@@ -889,7 +1063,7 @@ export default function ConsultPage() {
                     {isProcessingAI && (
                       <div className="flex items-center gap-2 text-xs text-slate-500 italic p-2">
                         <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-700" />
-                        <span>{selectedDoctor.name} is evaluating clinical assessment...</span>
+                        <span>Clinical Board evaluating multi-specialist assessment...</span>
                       </div>
                     )}
                   </div>
@@ -897,55 +1071,75 @@ export default function ConsultPage() {
 
                 {/* Call Control Footer */}
                 {callActive && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={toggleMic}
-                        className={`px-3.5 py-2.5 rounded-xl border font-bold text-xs flex items-center gap-2 transition-all ${
-                          isRecording
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm"
-                            : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
-                        }`}
-                      >
-                        {isRecording ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-                        <span>{isRecording ? "Mute Mic" : "Unmute Mic"}</span>
-                      </button>
-
-                      {/* Text Input Fallback */}
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (typedInput.trim()) {
-                            handleUserUtterance(typedInput.trim());
-                            setTypedInput("");
-                          }
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <input
-                          type="text"
-                          value={typedInput}
-                          onChange={(e) => setTypedInput(e.target.value)}
-                          placeholder="Type symptom text..."
-                          className="bg-slate-50 border border-slate-200 focus:border-slate-400 focus:bg-white rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none w-44 sm:w-64 transition-all"
-                        />
+                  <div className="space-y-3 pt-3 border-t border-slate-100">
+                    {/* Quick Multi-Agent Case Test Scenarios */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mr-1">
+                        Test Scenarios:
+                      </span>
+                      {CLINICAL_SCENARIOS.map((sc, i) => (
                         <button
-                          type="submit"
-                          className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700"
+                          key={i}
+                          type="button"
+                          onClick={() => handleUserUtterance(sc.text)}
+                          className="text-[11px] font-medium bg-slate-50 hover:bg-cyan-50 text-slate-700 hover:text-cyan-800 border border-slate-200 hover:border-cyan-300 px-2.5 py-1 rounded-lg transition-all shadow-xs"
+                          title={sc.desc}
                         >
-                          <Send className="w-3.5 h-3.5" />
+                          {sc.label}
                         </button>
-                      </form>
+                      ))}
                     </div>
 
-                    <button
-                      onClick={endConsultationAndSave}
-                      disabled={isSavingReport}
-                      className="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-sm transition-all ml-auto"
-                    >
-                      <PhoneOff className="w-4 h-4" />
-                      <span>{isSavingReport ? "Saving SOAP..." : "End & Generate SOAP"}</span>
-                    </button>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={toggleMic}
+                          className={`px-3.5 py-2.5 rounded-xl border font-bold text-xs flex items-center gap-2 transition-all ${
+                            isRecording
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm"
+                              : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+                          }`}
+                        >
+                          {isRecording ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                          <span>{isRecording ? "Mute Mic" : "Unmute Mic"}</span>
+                        </button>
+
+                        {/* Text Input Fallback */}
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (typedInput.trim()) {
+                              handleUserUtterance(typedInput.trim());
+                              setTypedInput("");
+                            }
+                          }}
+                          className="flex items-center gap-2"
+                        >
+                          <input
+                            type="text"
+                            value={typedInput}
+                            onChange={(e) => setTypedInput(e.target.value)}
+                            placeholder="Type symptom text..."
+                            className="bg-slate-50 border border-slate-200 focus:border-slate-400 focus:bg-white rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none w-44 sm:w-64 transition-all"
+                          />
+                          <button
+                            type="submit"
+                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </button>
+                        </form>
+                      </div>
+
+                      <button
+                        onClick={endConsultationAndSave}
+                        disabled={isSavingReport}
+                        className="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-sm transition-all ml-auto"
+                      >
+                        <PhoneOff className="w-4 h-4" />
+                        <span>{isSavingReport ? "Saving SOAP..." : "End & Generate SOAP"}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
