@@ -76,8 +76,7 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
   const hasNeuroDeficit = hasAffirmative([
     "facial droop", "face drooping", "arm weakness", "slurred speech", "cannot speak",
     "sudden numbness", "loss of speech", "sudden confusion", "hemiparesis",
-    "thunderclap headache", "worst headache of my life"
-  ]) || hasAffirmativeRegex(/\b(facial.*droop|face.*droop|arm.*weak|slurred.*speech|sudden.*numb)\b/i);
+  ]) || hasAffirmativeRegex(/\b(facial.*droop|face.*droop|arm.*weak|cannot.*lift.*arm|slurred.*speech|sudden.*numb)/i);
 
   if (hasNeuroDeficit) {
     pre_safety_flags.push("PRE_FLAG_ACUTE_NEUROLOGIC_DEFICIT");

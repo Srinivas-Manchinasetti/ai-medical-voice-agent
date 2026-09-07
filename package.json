@@ -10,9 +10,11 @@
     "test:clinical": "tsx scripts/run-clinical-eval.ts",
     "test:board": "tsx scripts/run-multi-agent-eval.ts",
     "test:bargein": "tsx scripts/test-bargein.ts",
+    "test:discussion": "tsx scripts/test-cardioneuro-discussion.ts",
+    "test:acceptance": "tsx scripts/test-bargein-acceptance.ts",
     "test:fhir": "tsx tests/fhir-eval/fhir.test.ts",
     "test:dispatch": "tsx tests/emergency-eval/dispatch.test.ts",
-    "test:all": "npm run test:board && npm run test:clinical && npm run test:bargein && npm run test:fhir && npm run test:dispatch"
+    "test:all": "npm run test:board && npm run test:clinical && npm run test:bargein && npm run test:discussion && npm run test:acceptance && npm run test:fhir && npm run test:dispatch"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

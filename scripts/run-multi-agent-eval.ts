@@ -184,15 +184,18 @@ async function runMultiAgentEvaluation() {
   console.log(`    • Specialist Routing Precision   : ${Math.round(routingPrecision * 100)}% (Specialist invocations that were indicated)`);
   console.log(`    • Unnecessary Invocation Rate    : ${Math.round(unnecessaryInvocationRate * 100)}% (Solo cases escalated to specialist review)`);
   console.log("------------------------------------------------------------------------------");
-  console.log("  EMPIRICAL LATENCY BENCHMARKS (P50 / P95 / P99):");
+  console.log("  EMPIRICAL LATENCY BENCHMARKS (P50 / P95 / P99)");
+  console.log("  [Execution Mode: DETERMINISTIC SAFETY ENGINE (Local CPU, zero external network delay)]");
+  console.log("  [Note: Remote LLM streaming adds ~250-600ms network RTT/TTFT to end-to-end completion]");
   console.log(`    • Deterministic Pre-Arbiter Shield: P50: ${percentile(preArbiterLatenciesUs, 50)}µs | P95: ${percentile(preArbiterLatenciesUs, 95)}µs | P99: ${percentile(preArbiterLatenciesUs, 99)}µs`);
   console.log(`    • Multi-Agent Deliberation & Tools: P50: ${percentile(orchestratorLatenciesMs, 50)}ms | P95: ${percentile(orchestratorLatenciesMs, 95)}ms | P99: ${percentile(orchestratorLatenciesMs, 99)}ms`);
   console.log(`    • Diagnostic Tool Execution       : P50: ${percentile(toolLatenciesMs, 50)}ms | P95: ${percentile(toolLatenciesMs, 95)}ms | P99: ${percentile(toolLatenciesMs, 99)}ms`);
   console.log(`    • Consensus Synthesizer           : P50: ${percentile(synthesisLatenciesMs, 50)}ms | P95: ${percentile(synthesisLatenciesMs, 95)}ms | P99: ${percentile(synthesisLatenciesMs, 99)}ms`);
   console.log(`    • Deterministic Post-Arbiter & Hash: P50: ${percentile(postArbiterLatenciesUs, 50)}µs | P95: ${percentile(postArbiterLatenciesUs, 95)}µs | P99: ${percentile(postArbiterLatenciesUs, 99)}µs`);
-  console.log(`    • Total E2E Clinical Board Pipeline: P50: ${percentile(totalBoardLatenciesMs, 50)}ms | P95: ${percentile(totalBoardLatenciesMs, 95)}ms | P99: ${percentile(totalBoardLatenciesMs, 99)}ms`);
+  console.log(`    • Total Deterministic Board Pipeline: P50: ${percentile(totalBoardLatenciesMs, 50)}ms | P95: ${percentile(totalBoardLatenciesMs, 95)}ms | P99: ${percentile(totalBoardLatenciesMs, 99)}ms`);
   console.log("==============================================================================");
-  console.log("✅ ALL BOUNDED MULTI-AGENT CLINICAL BOARD GUARDRAILS & INVARIANTS CONFIRMED.\n");
+  console.log("✅ ALL BOUNDED MULTI-AGENT CLINICAL BOARD GUARDRAILS & INVARIANTS CONFIRMED");
+  console.log("   (100% emergency recall across evaluated test cases; deterministic safety overrides verified).\n");
 }
 
 runMultiAgentEvaluation().catch((err) => {

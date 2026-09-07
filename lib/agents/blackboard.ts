@@ -33,6 +33,7 @@ export interface BlackboardEvent {
  */
 export class Blackboard {
   public case_id: string;
+  public case_version: number = 1;
   public round: number = 1;
   public evidence: Map<string, EvidenceItem> = new Map();
   public opinions: Map<string, AgentOpinion> = new Map();
@@ -43,6 +44,7 @@ export class Blackboard {
 
   constructor(patientCase: PatientCase) {
     this.case_id = patientCase.patient_id;
+    this.case_version = patientCase.case_version || 1;
     this.initializeFromCase(patientCase);
   }
 
@@ -129,6 +131,9 @@ export class Blackboard {
   }
 
   public recordPatientInterruption(utterance: string, interruptedAgent?: string): void {
+    // Increment case version when patient provides new evidence via barge-in
+    this.case_version++;
+
     // 1. Interaction Event (high priority in interaction runtime)
     this.events.push({
       event_id: `evt-bargein-${Date.now()}`,
@@ -137,7 +142,7 @@ export class Blackboard {
       source: "patient_barge_in",
       type: "patient_interruption",
       priority: "interaction",
-      summary: `Patient barged in during ${interruptedAgent || "doctor"} statement: "${utterance}"`
+      summary: `Patient barged in during ${interruptedAgent || "doctor"} statement (case_version -> v${this.case_version}): "${utterance}"`
     });
 
     // 2. Clinical Evidence extracted from utterance
@@ -149,11 +154,11 @@ export class Blackboard {
       confidence: 1.0,
       confidence_semantics: "patient_statement",
       timestamp: new Date().toISOString(),
-      raw_payload: { interrupted_agent: interruptedAgent, is_barge_in: true }
+      raw_payload: { interrupted_agent: interruptedAgent, is_barge_in: true, case_version: this.case_version }
     });
 
     // 3. Invariant: New patient evidence supersedes stale agent assessments
-    this.invalidateStaleAssessments("New patient evidence from barge-in supersedes stale agent assessments");
+    this.invalidateStaleAssessments(`New patient evidence from barge-in (case_version v${this.case_version}) supersedes prior agent assessments`);
   }
 
   public invalidateStaleAssessments(reason: string): void {

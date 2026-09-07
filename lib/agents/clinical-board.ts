@@ -60,6 +60,8 @@ export class ClinicalBoard {
     const postResult = evaluatePostArbiter(patientCase, synthResult.consensus);
 
     // 5. Append Safety Arbiter disposition to the deliberation stream
+    const activeCaseVersion = orchResult.blackboard.case_version || patientCase.case_version || 1;
+    patientCase.case_version = activeCaseVersion;
     synthResult.consensus.deliberation_messages.push({
       id: `safety-arbiter-${Date.now()}`,
       round: orchResult.deliberation_rounds_completed,
@@ -70,8 +72,9 @@ export class ClinicalBoard {
       type: "safety_disposition",
       content: postResult.arbiter_override_applied
         ? `DETERMINISTIC OVERRIDE ENFORCED: ${postResult.override_rationale || "Emergency criteria confirmed"}. Final disposition locked to ${postResult.final_esi_title} (ESI ${postResult.final_esi_level}).`
-        : `SAFETY AUDIT VERIFIED: Disposition confirmed at ${postResult.final_esi_title} (ESI ${postResult.final_esi_level}). Tamper-evident hash: ${postResult.audit_sha256.slice(0, 16)}...`,
+        : `SAFETY AUDIT VERIFIED: Disposition confirmed at ${postResult.final_esi_title} (ESI ${postResult.final_esi_level}). Cryptographically linked, tamper-evident hash: ${postResult.audit_sha256.slice(0, 16)}...`,
       references: postResult.red_flags,
+      case_version: activeCaseVersion,
       timestamp: new Date().toISOString()
     });
 
@@ -93,6 +96,8 @@ export class ClinicalBoard {
     const trace: BoardExecutionTrace = {
       timestamp: new Date().toISOString(),
       patient_id: patientCase.patient_id,
+      case_version: activeCaseVersion,
+      execution_mode: "deterministic_pipeline",
       deliberation_rounds: orchResult.deliberation_rounds_completed,
       pre_arbiter_latency_us: preResult.latency_us,
       orchestrator_latency_ms: orchResult.latency_ms,

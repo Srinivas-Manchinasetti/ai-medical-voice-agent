@@ -122,7 +122,7 @@ function runClinicalEvaluation() {
   console.log(`  Fatal False Negatives:            ${falseNegatives}`);
   console.log(`  Safety Arbiter Overrides Fired:   ${overridesFired} (Unsafe model downplays neutralized)`);
   console.log('-'.repeat(78));
-  console.log('  OPERATIONAL LATENCY METRICS:');
+  console.log('  OPERATIONAL LATENCY METRICS (Deterministic Safety Arbiter, Zero Network Overhead):');
   console.log(`  Mean Decision Latency:            ${meanLatency} ms`);
   console.log(`  P50 Decision Latency:             ${p50} ms`);
   console.log(`  P95 Decision Latency:             ${p95} ms`);
@@ -138,7 +138,7 @@ function runClinicalEvaluation() {
     console.error('FAILED: Clinical Safety Arbiter allowed false negatives on life-threatening cases.');
     process.exit(1);
   } else {
-    console.log('✅ ALL CLINICAL SAFETY GUARDRAILS VERIFIED. 100% SENSITIVITY CONFIRMED.\n');
+    console.log('✅ ALL CLINICAL SAFETY GUARDRAILS VERIFIED. 100% EMERGENCY RECALL ACROSS EVALUATED TEST SUITE.\n');
   }
 }
 

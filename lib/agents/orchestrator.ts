@@ -229,7 +229,8 @@ export class TriageOrchestrator {
       finalOpinions,
       allToolsRun,
       allChallenges,
-      deliberation_rounds_completed
+      deliberation_rounds_completed,
+      blackboard.case_version
     );
 
     return {
@@ -248,7 +249,7 @@ export class TriageOrchestrator {
 
   /**
    * Generates event-derived BoardMessages representing each specialist's actions,
-   * inline diagnostic tools, peer challenges, and lead synthesis proposal.
+   * inline diagnostic tools, peer challenges, responses, revisions, and lead synthesis proposal.
    */
   public buildDeliberationMessages(
     patientCase: PatientCase,
@@ -256,7 +257,8 @@ export class TriageOrchestrator {
     opinions: AgentOpinion[],
     toolsRun: ToolResult[],
     challenges: PeerChallenge[],
-    rounds: number
+    rounds: number,
+    caseVersion: number = 1
   ): BoardMessage[] {
     const messages: BoardMessage[] = [];
     let msgIdx = 0;
@@ -455,6 +457,7 @@ export class TriageOrchestrator {
           type: "challenge",
           content: `Challenge to ${targetDoctor}: "${ch.claim_disputed}" - ${ch.challenge_rationale}`,
           references: ch.counter_evidence,
+          case_version: caseVersion,
           timestamp: new Date().toISOString()
         });
 
@@ -469,6 +472,22 @@ export class TriageOrchestrator {
           type: "response",
           content: ch.response_rationale || `Acknowledging challenge from ${challengerDoctor}. Both acute pathways must remain simultaneously active under emergency protocol.`,
           references: ch.counter_evidence,
+          case_version: caseVersion,
+          timestamp: new Date().toISOString()
+        });
+
+        // Challenger revision message: confirms collaborative convergence without dropping life threats
+        messages.push({
+          id: nextId(),
+          round: 2,
+          speakerRole: "specialist",
+          agentId: ch.from_agent,
+          doctorName: challengerDoctor,
+          specialty: ch.from_agent.includes("cardio") ? "Cardiology" : "Neurology",
+          type: "revision",
+          content: `Revised stance: Concur with ${targetDoctor}. Maintaining ACS as a co-primary emergency pathway while honoring the independent neurological deficit. Proceeding to dual-threat stabilization.`,
+          references: ch.counter_evidence,
+          case_version: caseVersion,
           timestamp: new Date().toISOString()
         });
       }
@@ -494,10 +513,11 @@ export class TriageOrchestrator {
         specialty: "Internal Medicine & Primary Triage",
         type: "synthesis",
         content: synthesisText,
+        case_version: caseVersion,
         timestamp: new Date().toISOString()
       });
     }
 
-    return messages;
+    return messages.map(m => ({ ...m, case_version: m.case_version || caseVersion }));
   }
 }

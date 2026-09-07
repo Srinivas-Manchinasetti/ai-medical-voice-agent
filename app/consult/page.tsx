@@ -1109,13 +1109,18 @@ export default function ConsultPage() {
                                 <span className="font-bold text-slate-900">{msg.doctorName}</span>
                                 <span className="text-[10px] text-slate-500">({msg.specialty})</span>
                               </div>
-                              <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-semibold uppercase ${
-                                isChallenge ? "bg-amber-200 text-amber-900" :
-                                isResponse ? "bg-purple-200 text-purple-900" :
-                                isLead ? "bg-cyan-200 text-cyan-900" : "bg-slate-200 text-slate-700"
-                              }`}>
-                                {msg.type}
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[9px] font-mono text-slate-500 bg-slate-100 border border-slate-200 px-1 py-0.2 rounded">
+                                  v{msg.case_version || 1}
+                                </span>
+                                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-semibold uppercase ${
+                                  isChallenge ? "bg-amber-200 text-amber-900" :
+                                  isResponse ? "bg-purple-200 text-purple-900" :
+                                  isLead ? "bg-cyan-200 text-cyan-900" : "bg-slate-200 text-slate-700"
+                                }`}>
+                                  {msg.type}
+                                </span>
+                              </div>
                             </div>
 
                             <p className="text-slate-800 italic">"{msg.content}"</p>
@@ -1178,18 +1183,23 @@ export default function ConsultPage() {
                             <span className="font-bold text-slate-900">{boardData?.trace?.post_arbiter_latency_us || 184} µs</span>
                           </div>
                           <div className="p-2 rounded bg-slate-50 border border-slate-200">
-                            <span className="text-slate-500 block">Total Pipeline Latency</span>
+                            <span className="text-slate-500 block">Deterministic Latency</span>
                             <span className="font-bold text-emerald-700">{boardData?.trace?.total_board_latency_ms || 4} ms</span>
                           </div>
                           <div className="p-2 rounded bg-slate-50 border border-slate-200">
-                            <span className="text-slate-500 block">Tamper-Proof Blocks</span>
+                            <span className="text-slate-500 block">Tamper-Evident Blocks</span>
                             <span className="font-bold text-slate-900">{boardData?.trace?.audit_hash_chain?.length || 4} Blocks</span>
                           </div>
                         </div>
 
+                        <div className="flex items-center justify-between px-2 py-1 bg-slate-50 rounded border border-slate-200 text-[10px]">
+                          <span className="text-slate-500">Pipeline Execution Mode:</span>
+                          <span className="font-semibold text-slate-800">Deterministic Safety Engine</span>
+                        </div>
+
                         {boardData?.trace?.audit_sha256 && (
                           <div className="p-2 rounded bg-slate-950 text-cyan-400 text-[10px] break-all">
-                            <span className="text-slate-400 block mb-0.5">SHA-256 Root Hash:</span>
+                            <span className="text-slate-400 block mb-0.5">Cryptographically Linked SHA-256 Audit Hash:</span>
                             {boardData.trace.audit_sha256}
                           </div>
                         )}

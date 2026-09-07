@@ -101,7 +101,8 @@ export const PatientCaseSchema = z.object({
   immediate_danger_detected: z.boolean().default(false),
   provenance_evidence: z.array(EvidenceItemSchema).default([]),
   is_interruption: z.boolean().optional(),
-  interrupted_agent: z.string().optional()
+  interrupted_agent: z.string().optional(),
+  case_version: z.number().default(1)
 });
 export type PatientCase = z.infer<typeof PatientCaseSchema>;
 
@@ -242,6 +243,7 @@ export const BoardMessageSchema = z.object({
     latency_ms: z.number().optional(),
     details: z.record(z.string(), z.any()).optional()
   }).optional(),
+  case_version: z.number().default(1),
   timestamp: z.string().default(() => new Date().toISOString())
 });
 export type BoardMessage = z.infer<typeof BoardMessageSchema>;
@@ -287,6 +289,8 @@ export interface HashChainBlock {
 export interface BoardExecutionTrace {
   timestamp: string;
   patient_id: string;
+  case_version: number;
+  execution_mode: "deterministic_pipeline" | "hybrid_llm";
   deliberation_rounds: number;
   pre_arbiter_latency_us: number;
   orchestrator_latency_ms: number;
