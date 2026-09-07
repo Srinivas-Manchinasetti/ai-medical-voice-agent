@@ -14,6 +14,8 @@ export async function POST(request: Request) {
       patientName = "Patient",
       patientAge,
       audioMetrics,
+      isInterruption = false,
+      interruptedAgent = "",
     } = body;
 
     if (!message || !message.trim()) {
@@ -116,6 +118,8 @@ export async function POST(request: Request) {
       pre_safety_flags: [],
       immediate_danger_detected: false,
       provenance_evidence: [],
+      is_interruption: Boolean(isInterruption),
+      interrupted_agent: interruptedAgent || undefined,
     };
 
     // 3. Execute Multi-Agent Clinical Board (Pre-Arbiter -> Orchestrator -> Specialists -> Synthesizer -> Post-Arbiter)
@@ -144,6 +148,7 @@ export async function POST(request: Request) {
         tools_executed_details: boardOutput.trace.tools_executed_details,
         peer_challenges_count: boardOutput.trace.peer_challenges_count,
         peer_challenges: boardOutput.trace.peer_challenges,
+        deliberation_messages: boardOutput.trace.deliberation_messages || [],
         trace: {
           pre_arbiter_latency_us: boardOutput.trace.pre_arbiter_latency_us,
           orchestrator_latency_ms: boardOutput.trace.orchestrator_latency_ms,

@@ -12,7 +12,16 @@ export interface BlackboardEvent {
   round: number;
   timestamp: string;
   source: string;
-  type: "evidence_added" | "hypothesis_posted" | "tool_requested" | "tool_completed" | "challenge_issued" | "challenge_answered";
+  type:
+    | "evidence_added"
+    | "hypothesis_posted"
+    | "tool_requested"
+    | "tool_completed"
+    | "challenge_issued"
+    | "challenge_answered"
+    | "patient_interruption"
+    | "assessments_invalidated";
+  priority?: "interaction" | "clinical" | "safety";
   summary: string;
 }
 
@@ -112,6 +121,52 @@ export class Blackboard {
         timestamp: now,
       });
     });
+
+    // 6. Handle patient interruption / barge-in evidence if present
+    if (patientCase.is_interruption) {
+      this.recordPatientInterruption(patientCase.transcript, patientCase.interrupted_agent);
+    }
+  }
+
+  public recordPatientInterruption(utterance: string, interruptedAgent?: string): void {
+    // 1. Interaction Event (high priority in interaction runtime)
+    this.events.push({
+      event_id: `evt-bargein-${Date.now()}`,
+      round: this.round,
+      timestamp: new Date().toISOString(),
+      source: "patient_barge_in",
+      type: "patient_interruption",
+      priority: "interaction",
+      summary: `Patient barged in during ${interruptedAgent || "doctor"} statement: "${utterance}"`
+    });
+
+    // 2. Clinical Evidence extracted from utterance
+    this.addEvidence({
+      id: `ev-interruption-${Date.now()}`,
+      type: "interruption_patient_statement",
+      description: utterance,
+      source: "patient_reported",
+      confidence: 1.0,
+      confidence_semantics: "patient_statement",
+      timestamp: new Date().toISOString(),
+      raw_payload: { interrupted_agent: interruptedAgent, is_barge_in: true }
+    });
+
+    // 3. Invariant: New patient evidence supersedes stale agent assessments
+    this.invalidateStaleAssessments("New patient evidence from barge-in supersedes stale agent assessments");
+  }
+
+  public invalidateStaleAssessments(reason: string): void {
+    this.events.push({
+      event_id: `evt-inval-${Date.now()}`,
+      round: this.round,
+      timestamp: new Date().toISOString(),
+      source: "blackboard_runtime",
+      type: "assessments_invalidated",
+      priority: "safety",
+      summary: reason
+    });
+    this.opinions.clear();
   }
 
   public addEvidence(item: EvidenceItem): void {

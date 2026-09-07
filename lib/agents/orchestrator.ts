@@ -1,4 +1,4 @@
-import { AgentOpinion, PatientCase, SpecialistRequest, PeerChallenge, ToolResult } from "./schemas";
+import { AgentOpinion, PatientCase, SpecialistRequest, PeerChallenge, ToolResult, BoardMessage } from "./schemas";
 import { Blackboard } from "./blackboard";
 import { CardiologyAgent } from "./specialists/cardiology-agent";
 import { NeurologyAgent } from "./specialists/neurology-agent";
@@ -14,6 +14,7 @@ export interface OrchestrationResult {
   deliberation_rounds_completed: number;
   latency_ms: number;
   blackboard: Blackboard;
+  deliberation_messages: BoardMessage[];
 }
 
 /**
@@ -221,6 +222,16 @@ export class TriageOrchestrator {
       ? "Evaluated solo by Dr. Sarah Chen. Routine presentation; no specialist cross-consultation indicated."
       : `Dr. Sarah Chen summoned ${activeAgents.length} specialist(s) [${requests.map(r => r.specialty).join(", ")}] across ${activeAgents.length > 1 ? 2 : 1} deliberation rounds with ${allToolsRun.length} diagnostic tool(s) and ${allChallenges.length} peer challenge(s).`;
 
+    const deliberation_rounds_completed = activeAgents.length > 1 ? 2 : 1;
+    const deliberation_messages = this.buildDeliberationMessages(
+      patientCase,
+      requests,
+      finalOpinions,
+      allToolsRun,
+      allChallenges,
+      deliberation_rounds_completed
+    );
+
     return {
       orchestrator_summary,
       specialists_requested: requests,
@@ -228,9 +239,265 @@ export class TriageOrchestrator {
       active_specialists: activeSpecialists,
       tools_executed: allToolsRun,
       challenges: allChallenges,
-      deliberation_rounds_completed: activeAgents.length > 1 ? 2 : 1,
+      deliberation_rounds_completed,
       latency_ms,
-      blackboard
+      blackboard,
+      deliberation_messages
     };
+  }
+
+  /**
+   * Generates event-derived BoardMessages representing each specialist's actions,
+   * inline diagnostic tools, peer challenges, and lead synthesis proposal.
+   */
+  public buildDeliberationMessages(
+    patientCase: PatientCase,
+    requests: SpecialistRequest[],
+    opinions: AgentOpinion[],
+    toolsRun: ToolResult[],
+    challenges: PeerChallenge[],
+    rounds: number
+  ): BoardMessage[] {
+    const messages: BoardMessage[] = [];
+    let msgIdx = 0;
+    const nextId = () => `bmsg-${Date.now()}-${++msgIdx}`;
+
+    // Round 1: Lead Triage Assessment
+    if (patientCase.is_interruption) {
+      messages.push({
+        id: nextId(),
+        round: 1,
+        speakerRole: "lead",
+        agentId: "primary-care-chen",
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Primary Triage",
+        type: "assessment",
+        content: `Patient has barged in with new urgent clinical statement: "${patientCase.transcript}". Prior assessments invalidated. Re-evaluating immediately with clinical board.`,
+        timestamp: new Date().toISOString()
+      });
+    } else if (requests.length > 0) {
+      const specNames = requests.map(r => r.specialty).join(" and ");
+      messages.push({
+        id: nextId(),
+        round: 1,
+        speakerRole: "lead",
+        agentId: "primary-care-chen",
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Primary Triage",
+        type: "assessment",
+        content: `Patient presents with acute multi-domain symptoms. Summoning ${specNames} to evaluate competing emergency pathways.`,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      messages.push({
+        id: nextId(),
+        round: 1,
+        speakerRole: "lead",
+        agentId: "primary-care-chen",
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Primary Triage",
+        type: "assessment",
+        content: "Evaluating presentation. Non-acute clinical findings consistent with routine ambulatory care.",
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Round 1: Specialist Intake, Tools & Assessments
+    const cardioOp = opinions.find(o => o.agent.includes("cardio"));
+    const neuroOp = opinions.find(o => o.agent.includes("neuro"));
+    const pedsOp = opinions.find(o => o.agent.includes("ped"));
+
+    // If Cardiology was summoned
+    if (cardioOp) {
+      // Diagnostic tools executed by Cardiology
+      const cardioTools = toolsRun.filter(t => ["analyze_ecg", "calculate_timi", "check_drug_interactions"].includes(t.tool_name));
+      for (const ct of cardioTools) {
+        messages.push({
+          id: nextId(),
+          round: 1,
+          speakerRole: "tool",
+          agentId: "tool-cardiology",
+          doctorName: "Dr. Marcus Vance, MD, FACC",
+          specialty: "Diagnostic Tool",
+          type: "tool_result",
+          content: `Executed ${ct.tool_name}: ${ct.clinical_summary}`,
+          tool_data: {
+            tool_name: ct.tool_name,
+            summary: ct.clinical_summary,
+            status: ct.status,
+            latency_ms: ct.latency_ms,
+            details: ct.output
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const cardioSummary = cardioOp.concerns.length > 0
+        ? `Cardiovascular evaluation: ${cardioOp.primary_hypothesis}. ${cardioOp.concerns.slice(0, 2).join(", ")}. Risk assessment: ${cardioOp.risk_level.toUpperCase()}.`
+        : "Cardiovascular evaluation: Non-acute cardiac findings; no urgent ischemic indicators detected.";
+      messages.push({
+        id: nextId(),
+        round: 1,
+        speakerRole: "specialist",
+        agentId: cardioOp.agent,
+        doctorName: cardioOp.doctor_name,
+        specialty: cardioOp.specialty,
+        type: "assessment",
+        content: cardioSummary,
+        references: cardioOp.evidence.slice(0, 3),
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // If Neurology was summoned
+    if (neuroOp) {
+      // Diagnostic tools executed by Neurology
+      const neuroTools = toolsRun.filter(t => ["compute_befast", "compute_nihss"].includes(t.tool_name));
+      for (const nt of neuroTools) {
+        messages.push({
+          id: nextId(),
+          round: 1,
+          speakerRole: "tool",
+          agentId: "tool-neurology",
+          doctorName: "Dr. Arthur Pendelton, MD, PhD",
+          specialty: "Diagnostic Tool",
+          type: "tool_result",
+          content: `Executed ${nt.tool_name}: ${nt.clinical_summary}`,
+          tool_data: {
+            tool_name: nt.tool_name,
+            summary: nt.clinical_summary,
+            status: nt.status,
+            latency_ms: nt.latency_ms,
+            details: nt.output
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const neuroSummary = neuroOp.concerns.length > 0
+        ? `Neurological evaluation: ${neuroOp.primary_hypothesis}. Focal deficit screening: ${neuroOp.concerns.slice(0, 2).join(", ")}. Risk assessment: ${neuroOp.risk_level.toUpperCase()}.`
+        : "Neurological screening: Normal motor, speech, and cranial baseline. No focal ischemic signs.";
+      messages.push({
+        id: nextId(),
+        round: 1,
+        speakerRole: "specialist",
+        agentId: neuroOp.agent,
+        doctorName: neuroOp.doctor_name,
+        specialty: neuroOp.specialty,
+        type: "assessment",
+        content: neuroSummary,
+        references: neuroOp.evidence.slice(0, 3),
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // If Pediatrics was summoned
+    if (pedsOp) {
+      const pedsTools = toolsRun.filter(t => ["calculate_pews"].includes(t.tool_name));
+      for (const pt of pedsTools) {
+        messages.push({
+          id: nextId(),
+          round: 1,
+          speakerRole: "tool",
+          agentId: "tool-pediatrics",
+          doctorName: "Dr. Elena Rostova, MD, FAAP",
+          specialty: "Diagnostic Tool",
+          type: "tool_result",
+          content: `Executed ${pt.tool_name}: ${pt.clinical_summary}`,
+          tool_data: {
+            tool_name: pt.tool_name,
+            summary: pt.clinical_summary,
+            status: pt.status,
+            latency_ms: pt.latency_ms,
+            details: pt.output
+          },
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const pedsSummary = `Pediatric evaluation: ${pedsOp.primary_hypothesis}. ${pedsOp.concerns.slice(0, 2).join(", ")}. Risk level: ${pedsOp.risk_level.toUpperCase()}.`;
+      messages.push({
+        id: nextId(),
+        round: 1,
+        speakerRole: "specialist",
+        agentId: pedsOp.agent,
+        doctorName: pedsOp.doctor_name,
+        specialty: pedsOp.specialty,
+        type: "assessment",
+        content: pedsSummary,
+        references: pedsOp.evidence.slice(0, 3),
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Round 2: Peer Cross-Examination & Responses
+    if (rounds >= 2 && challenges.length > 0) {
+      for (const ch of challenges) {
+        const challengerDoctor = ch.from_agent.includes("cardio")
+          ? "Dr. Marcus Vance, MD, FACC"
+          : ch.from_agent.includes("neuro")
+          ? "Dr. Arthur Pendelton, MD, PhD"
+          : "Specialist";
+        const targetDoctor = ch.to_agent.includes("cardio")
+          ? "Dr. Marcus Vance, MD, FACC"
+          : ch.to_agent.includes("neuro")
+          ? "Dr. Arthur Pendelton, MD, PhD"
+          : "Specialist";
+
+        // Challenge message
+        messages.push({
+          id: nextId(),
+          round: 2,
+          speakerRole: "specialist",
+          agentId: ch.from_agent,
+          doctorName: challengerDoctor,
+          specialty: ch.from_agent.includes("cardio") ? "Cardiology" : "Neurology",
+          type: "challenge",
+          content: `Challenge to ${targetDoctor}: "${ch.claim_disputed}" - ${ch.challenge_rationale}`,
+          references: ch.counter_evidence,
+          timestamp: new Date().toISOString()
+        });
+
+        // Target response message
+        messages.push({
+          id: nextId(),
+          round: 2,
+          speakerRole: "specialist",
+          agentId: ch.to_agent,
+          doctorName: targetDoctor,
+          specialty: ch.to_agent.includes("cardio") ? "Cardiology" : "Neurology",
+          type: "response",
+          content: ch.response_rationale || `Acknowledging challenge from ${challengerDoctor}. Both acute pathways must remain simultaneously active under emergency protocol.`,
+          references: ch.counter_evidence,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Round 3 / Synthesis Proposal from Lead Dr. Sarah Chen
+    if (opinions.length > 1) {
+      const hasHighCardio = opinions.some(o => o.specialty.includes("Cardio") && o.risk_level === "high");
+      const hasHighNeuro = opinions.some(o => o.specialty.includes("Neuro") && o.risk_level === "high");
+
+      const synthesisText = (hasHighCardio && hasHighNeuro)
+        ? "Board Decision: We will not collapse this into a single diagnosis. We are maintaining both acute pathways (ACS + Acute Neurologic Event) under immediate emergency disposition."
+        : opinions.some(o => o.risk_level === "high")
+        ? `Board Decision: Acute indicators confirmed by ${opinions.filter(o => o.risk_level === "high").map(o => o.specialty).join(", ")}. Immediate hospital escalation required.`
+        : "Board Decision: Specialists agree there are no emergent life threats. Recommending urgent or routine outpatient evaluation.";
+
+      messages.push({
+        id: nextId(),
+        round: Math.min(rounds + 1, 3),
+        speakerRole: "lead",
+        agentId: "primary-care-chen",
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Primary Triage",
+        type: "synthesis",
+        content: synthesisText,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return messages;
   }
 }

@@ -52,16 +52,33 @@ export class ClinicalBoard {
       orchResult.orchestrator_summary,
       orchResult.active_specialists,
       orchResult.deliberation_rounds_completed,
-      orchResult.blackboard
+      orchResult.blackboard,
+      orchResult.deliberation_messages
     );
 
     // 4. Post-Arbiter: Deterministic Hard Overrides & Sequential Hash Chaining
     const postResult = evaluatePostArbiter(patientCase, synthResult.consensus);
 
+    // 5. Append Safety Arbiter disposition to the deliberation stream
+    synthResult.consensus.deliberation_messages.push({
+      id: `safety-arbiter-${Date.now()}`,
+      round: orchResult.deliberation_rounds_completed,
+      speakerRole: "safety_arbiter",
+      agentId: "deterministic-post-arbiter",
+      doctorName: "Deterministic Safety Arbiter",
+      specialty: "Clinical Safety Arbiter",
+      type: "safety_disposition",
+      content: postResult.arbiter_override_applied
+        ? `DETERMINISTIC OVERRIDE ENFORCED: ${postResult.override_rationale || "Emergency criteria confirmed"}. Final disposition locked to ${postResult.final_esi_title} (ESI ${postResult.final_esi_level}).`
+        : `SAFETY AUDIT VERIFIED: Disposition confirmed at ${postResult.final_esi_title} (ESI ${postResult.final_esi_level}). Tamper-evident hash: ${postResult.audit_sha256.slice(0, 16)}...`,
+      references: postResult.red_flags,
+      timestamp: new Date().toISOString()
+    });
+
     const boardEnd = typeof performance !== "undefined" ? performance.now() : Date.now();
     const total_board_latency_ms = Math.round(boardEnd - boardStart);
 
-    // 5. Compute Specialist and Tool Latencies
+    // 6. Compute Specialist and Tool Latencies
     const specialistLatencies: Record<string, number> = {};
     orchResult.specialists_requested.forEach(s => {
       specialistLatencies[s.specialty] = orchResult.latency_ms;
@@ -72,7 +89,7 @@ export class ClinicalBoard {
       toolLatencies[t.tool_name] = t.latency_ms;
     });
 
-    // 6. Assemble Comprehensive Audit Trace
+    // 7. Assemble Comprehensive Audit Trace
     const trace: BoardExecutionTrace = {
       timestamp: new Date().toISOString(),
       patient_id: patientCase.patient_id,
@@ -97,7 +114,8 @@ export class ClinicalBoard {
       final_esi_level: postResult.final_esi_level,
       final_disposition: postResult.final_disposition,
       audit_hash_chain: postResult.audit_hash_chain,
-      root_audit_hash: postResult.audit_sha256
+      root_audit_hash: postResult.audit_sha256,
+      deliberation_messages: synthResult.consensus.deliberation_messages
     };
 
     // 7. Generate Formal Multi-Agent SOAP Documentation

@@ -3,7 +3,8 @@ import {
   ClinicalConflict,
   ClinicalConsensus,
   DifferentialItem,
-  PatientCase
+  PatientCase,
+  BoardMessage
 } from "./schemas";
 import { Blackboard } from "./blackboard";
 
@@ -28,7 +29,8 @@ export class ClinicalSynthesizer {
     orchestratorSummary: string,
     activeSpecialists: string[],
     deliberationRounds: number = 1,
-    blackboard?: Blackboard
+    blackboard?: Blackboard,
+    deliberationMessages: BoardMessage[] = []
   ): Promise<SynthesisResult> {
     const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
 
@@ -159,7 +161,8 @@ export class ClinicalSynthesizer {
       orchestrator_summary: orchestratorSummary,
       requires_immediate_escalation,
       active_specialists: activeSpecialists,
-      deliberation_rounds_completed: deliberationRounds
+      deliberation_rounds_completed: deliberationRounds,
+      deliberation_messages: deliberationMessages
     };
 
     return {

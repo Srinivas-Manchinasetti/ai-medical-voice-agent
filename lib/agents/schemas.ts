@@ -99,7 +99,9 @@ export const PatientCaseSchema = z.object({
   }),
   pre_safety_flags: z.array(z.string()).default([]),
   immediate_danger_detected: z.boolean().default(false),
-  provenance_evidence: z.array(EvidenceItemSchema).default([])
+  provenance_evidence: z.array(EvidenceItemSchema).default([]),
+  is_interruption: z.boolean().optional(),
+  interrupted_agent: z.string().optional()
 });
 export type PatientCase = z.infer<typeof PatientCaseSchema>;
 
@@ -199,6 +201,52 @@ export const ClinicalConflictSchema = z.object({
 export type ClinicalConflict = z.infer<typeof ClinicalConflictSchema>;
 
 /**
+ * BOARD MESSAGE & CONVERSATIONAL DELIBERATION SCHEMA
+ * Represents one discrete, observable event in the multi-agent clinical deliberation.
+ */
+export const BoardMessageSpeakerRoleSchema = z.enum([
+  "lead",
+  "specialist",
+  "tool",
+  "system",
+  "safety_arbiter"
+]);
+export type BoardMessageSpeakerRole = z.infer<typeof BoardMessageSpeakerRoleSchema>;
+
+export const BoardMessageTypeSchema = z.enum([
+  "assessment",
+  "challenge",
+  "response",
+  "evidence_request",
+  "tool_result",
+  "revision",
+  "synthesis",
+  "safety_disposition"
+]);
+export type BoardMessageType = z.infer<typeof BoardMessageTypeSchema>;
+
+export const BoardMessageSchema = z.object({
+  id: z.string(),
+  speakerRole: BoardMessageSpeakerRoleSchema,
+  agentId: z.string(),
+  doctorName: z.string(),
+  specialty: z.string(),
+  round: z.number().default(1),
+  type: BoardMessageTypeSchema,
+  content: z.string(),
+  references: z.array(z.string()).optional(),
+  tool_data: z.object({
+    tool_name: z.string(),
+    summary: z.string(),
+    status: z.string(),
+    latency_ms: z.number().optional(),
+    details: z.record(z.string(), z.any()).optional()
+  }).optional(),
+  timestamp: z.string().default(() => new Date().toISOString())
+});
+export type BoardMessage = z.infer<typeof BoardMessageSchema>;
+
+/**
  * CLINICAL CONSENSUS SCHEMA
  */
 export const ClinicalConsensusSchema = z.object({
@@ -216,7 +264,8 @@ export const ClinicalConsensusSchema = z.object({
   orchestrator_summary: z.string(),
   requires_immediate_escalation: z.boolean().default(false),
   active_specialists: z.array(z.string()),
-  deliberation_rounds_completed: z.number().default(1)
+  deliberation_rounds_completed: z.number().default(1),
+  deliberation_messages: z.array(BoardMessageSchema).default([])
 });
 export type ClinicalConsensus = z.infer<typeof ClinicalConsensusSchema>;
 
@@ -260,4 +309,5 @@ export interface BoardExecutionTrace {
   final_disposition: string;
   audit_hash_chain: HashChainBlock[];
   root_audit_hash: string;
+  deliberation_messages: BoardMessage[];
 }
