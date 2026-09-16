@@ -1,10 +1,28 @@
 import { AgentRequest, PendingQuestion, PatientCase } from "../agents/schemas";
-import { evaluatePreArbiter } from "./pre-arbiter";
+import { evaluatePreArbiter, PreArbiterResult } from "./pre-arbiter";
 import { CardiologyAgent } from "../agents/specialists/cardiology-agent";
 import { NeurologyAgent } from "../agents/specialists/neurology-agent";
 import { PediatricsAgent } from "../agents/specialists/pediatrics-agent";
 import { ConversationInterpreter } from "./conversation-interpreter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
+import { clinicalDecisionEngine } from "./clinical-decision-engine";
+import { responsePlanner, ResponsePlan } from "./response-planner";
+
+export interface ConversationMemory {
+  confirmedFacts: string[];
+  deniedSymptoms: string[];
+  questionsAlreadyAsked: string[];
+  askedTopics?: string[];
+  lastDoctorQuestion?: string;
+  patientCorrections: Array<{ target: string; value: string }>;
+  patientObjections: string[];
+  patientConcerns: string[];
+  accessConstraints: string[];
+  frequencyPattern?: string;
+  durationPattern?: string;
+  riskFactors?: string;
+  uncertainties: string[];
+}
 
 export interface DomainSufficiencyStatus {
   status: "inactive" | "gathering" | "sufficient";
@@ -46,6 +64,44 @@ export interface ClinicalInterviewState {
     pediatrics: DomainSufficiencyStatus;
   };
   cumulativeTranscript: string;
+  emergencyDialogueState?: {
+    acknowledged: boolean;
+    domain: "neurology" | "cardiology" | "respiratory" | "pediatric" | "general";
+    turnsCompleted: number;
+    addressedSymptoms: string[];
+  };
+  structuredHistory?: {
+    chiefComplaint?: string;
+    timeline: {
+      anchor?: string;
+      duration?: string;
+      isSudden?: boolean;
+      temporalShiftDetected?: boolean;
+      temporalShiftDescription?: string;
+    };
+    unansweredDimensions: string[];
+    patientCorrections: Array<{ slot: string; from: string; to: string }>;
+    patientQuestions: string[];
+    recentDoctorReplies: string[];
+    turnCount: number;
+    accessConstraints?: {
+      financial?: boolean;
+      remoteLocation?: boolean;
+      transportation?: "available" | "unavailable" | "unknown";
+      caregiverAvailable?: boolean;
+      locationPermission?: "granted" | "denied" | "unknown";
+      userLocation?: { latitude?: number; longitude?: number; city?: string };
+    };
+    evidenceStatus?: {
+      enoughForDisposition: boolean;
+      missingKeyDimensions: string[];
+      clinicalConfidence: "insufficient" | "moderate" | "high";
+      dispositionTier: "emergency" | "urgent_evaluation" | "routine_evaluation" | "self_care_with_monitoring" | "insufficient_information";
+    };
+    nearbyHospitals?: any[];
+  };
+  conversationMemory?: ConversationMemory;
+  responsePlan?: ResponsePlan;
 }
 
 export interface ConversationTurnResult {
@@ -96,7 +152,54 @@ export class ConversationManager {
         neurology: { status: "inactive", missing: [] },
         pediatrics: { status: "inactive", missing: [] }
       },
-      cumulativeTranscript: ""
+      cumulativeTranscript: "",
+      emergencyDialogueState: {
+        acknowledged: false,
+        domain: "general",
+        turnsCompleted: 0,
+        addressedSymptoms: []
+      },
+      structuredHistory: {
+        chiefComplaint: undefined,
+        timeline: {},
+        unansweredDimensions: [
+          "onset_time",
+          "sudden_vs_gradual",
+          "speech_difficulty",
+          "visual_deficit",
+          "severe_headache",
+          "leg_mobility"
+        ],
+        patientCorrections: [],
+        patientQuestions: [],
+        recentDoctorReplies: [],
+        turnCount: 0,
+        accessConstraints: {
+          financial: false,
+          remoteLocation: false,
+          transportation: "unknown",
+          caregiverAvailable: undefined,
+          locationPermission: "unknown",
+        },
+        evidenceStatus: {
+          enoughForDisposition: false,
+          missingKeyDimensions: ["onset", "character", "severity", "progression"],
+          clinicalConfidence: "insufficient",
+          dispositionTier: "insufficient_information",
+        },
+        nearbyHospitals: [],
+      },
+      conversationMemory: {
+        confirmedFacts: [],
+        deniedSymptoms: [],
+        questionsAlreadyAsked: [],
+        askedTopics: [],
+        patientCorrections: [],
+        patientObjections: [],
+        patientConcerns: [],
+        accessConstraints: [],
+        uncertainties: [],
+      }
     };
   }
 
@@ -247,7 +350,7 @@ export class ConversationManager {
   public async processTurn(
     patientUtterance: string,
     existingState?: ClinicalInterviewState,
-    demographics: { age?: number; age_group?: any } = { age_group: "adult" },
+    demographics: { age?: number | null; age_group?: any; age_source?: string } = { age: null, age_group: "adult", age_source: "unknown" },
     localeConfig: LocaleConfig = DEFAULT_LOCALE_CONFIG
   ): Promise<ConversationTurnResult> {
     const state: ClinicalInterviewState = existingState || this.createInitialState();
@@ -263,7 +366,7 @@ export class ConversationManager {
     const preArbiterResult = evaluatePreArbiter({
       transcript: state.cumulativeTranscript,
       demographics: {
-        age: demographics.age,
+        age: demographics.age ?? undefined,
         age_group: demographics.age_group || "adult"
       }
     });
@@ -318,15 +421,173 @@ export class ConversationManager {
         if (req.status === "pending") req.status = "superseded";
       });
 
-      const reply = preArbiterResult.pre_safety_flags.some(f => f.includes("NEURO"))
-        ? "I hear you, and that sudden facial drooping and arm weakness are urgent signs of a stroke. Please stay right where you are, do not try to stand up, and emergency stroke protocols are being started right now."
-        : "I'm very concerned about what you're experiencing with your chest. For your immediate safety, please sit down comfortably, take slow breaths, and emergency medical help is being contacted right now.";
+      // State-Aware Emergency Dialogue Engine: reacts dynamically to patient's new inputs & missing facts
+      const reply = this.handleEmergencyTurn(cleanMsg, state, preArbiterResult, localeConfig);
 
       return {
         action: "EMERGENCY_CONVENE_BOARD",
         doctorReply: reply,
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead",
+        state,
+        preArbiterResult
+      };
+    }
+
+    // Initialize conversation memory if missing
+    if (!state.conversationMemory) {
+      state.conversationMemory = {
+        confirmedFacts: [...state.slots.known_facts],
+        deniedSymptoms: [],
+        questionsAlreadyAsked: [],
+        askedTopics: [],
+        patientCorrections: [],
+        patientObjections: [],
+        patientConcerns: [],
+        accessConstraints: [],
+        uncertainties: [],
+      };
+    }
+    const mem = state.conversationMemory;
+
+    // Ingest extra semantic information into memory
+    if (semantic.extractedFrequency) {
+      mem.frequencyPattern = semantic.extractedFrequency;
+      const fact = `Frequency: ${semantic.extractedFrequency}`;
+      if (!state.slots.known_facts.includes(fact)) {
+        state.slots.known_facts.push(fact);
+        mem.confirmedFacts.push(fact);
+      }
+    }
+    if (semantic.extractedRiskFactors) {
+      mem.riskFactors = semantic.extractedRiskFactors;
+      const fact = `Risk factors: ${semantic.extractedRiskFactors}`;
+      if (!state.slots.known_facts.includes(fact)) {
+        state.slots.known_facts.push(fact);
+        mem.confirmedFacts.push(fact);
+      }
+    }
+    if (semantic.isObjectionRepetition) {
+      mem.patientObjections.push(cleanMsg);
+    }
+    if (semantic.isEmotionalDistress) {
+      mem.patientConcerns.push("fear / anxiety");
+    }
+
+    // --- STEP 1.5: RESPONSE PLANNER EXECUTION ---
+    const plan = responsePlanner.plan(cleanMsg, semantic, state, preArbiterResult, [], localeConfig);
+    state.responsePlan = plan;
+
+    // Handle high-priority non-intake conversational goals:
+    if (plan.primaryGoal === "RESOLVE_OBJECTION_REPETITION") {
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: "req-resolve-objection",
+        targetSlot: "patient_objection",
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: "Resolve patient objection about repetition and clarify focus",
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
+        state,
+        preArbiterResult
+      };
+    }
+
+    if (plan.primaryGoal === "VALIDATE_EMOTION_BEFORE_INQUIRY") {
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: "req-validate-emotion",
+        targetSlot: "emotional_concern",
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: "Validate emotional distress before clinical interrogation",
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
+        state,
+        preArbiterResult
+      };
+    }
+
+    if (plan.primaryGoal === "ACKNOWLEDGE_AND_EXPLORE" && plan.nextHighValueInquiry) {
+      const nextTargetSlot = plan.nextHighValueInquiry.topic;
+      mem.questionsAlreadyAsked.push(nextTargetSlot);
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: `req-explore-${nextTargetSlot}`,
+        targetSlot: nextTargetSlot,
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: plan.nextHighValueInquiry.clinicalRationale,
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
+        state,
+        preArbiterResult
+      };
+    }
+
+    if (plan.primaryGoal === "CLARIFY_MEMORY_OR_IDENTITY") {
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: "req-clarify-chief-complaint",
+        targetSlot: "chief_complaint",
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: "Clarify presenting illness or chief complaint",
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
         state,
         preArbiterResult
       };
@@ -354,7 +615,36 @@ export class ConversationManager {
       const slot = interpretation.resolvedSlot || semantic.resolvedSlot!;
       const val = interpretation.resolvedValue || semantic.resolvedValue!;
 
-      if (slot === "associated_symptoms" && Array.isArray(val)) {
+      if (val === "denied" || val === "negative") {
+        const questionText = state.pendingQuestion?.question?.toLowerCase() || "";
+        const deniedList: string[] = [];
+        if (/droop/i.test(questionText)) deniedList.push("facial drooping");
+        if (/speech|words|speak|slur/i.test(questionText)) deniedList.push("speech difficulty");
+        if (/vision|see|blurry/i.test(questionText)) deniedList.push("vision changes");
+        if (/weakness|arms?\s+or\s+legs?/i.test(questionText)) deniedList.push("unilateral weakness");
+        if (/numbness/i.test(questionText)) deniedList.push("numbness");
+        if (/sweat|clammy/i.test(questionText)) deniedList.push("cold sweating");
+        if (/shortness\s+of\s+breath|breathing/i.test(questionText)) deniedList.push("shortness of breath");
+        if (/nausea|vomit/i.test(questionText)) deniedList.push("nausea");
+
+        if (deniedList.length === 0) {
+          deniedList.push(slot);
+        }
+
+        deniedList.forEach(d => {
+          if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(d)) {
+            state.conversationMemory.deniedSymptoms.push(d);
+          }
+          if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(d)) {
+            state.conversationMemory.questionsAlreadyAsked.push(d);
+          }
+        });
+
+        const fact = `Denied: ${deniedList.join(", ")}`;
+        if (!state.slots.known_facts.includes(fact)) {
+          state.slots.known_facts.push(fact);
+        }
+      } else if (slot === "associated_symptoms" && Array.isArray(val)) {
         state.slots.associated_symptoms = Array.from(new Set([...state.slots.associated_symptoms, ...val]));
         state.slots.known_facts.push(`Associated: ${val.join(", ")}`);
       } else if (slot === "neurological_signs" && Array.isArray(val)) {
@@ -400,12 +690,29 @@ export class ConversationManager {
     }
 
     // Opportunistic extraction from transcript
+    if (!state.slots.duration) {
+      const durMatch = state.cumulativeTranscript.match(/\b(?:for\s+)?(\d+\s*(?:minutes?|hours?|seconds?|days?)|a\s+minute|few\s+seconds|few\s+minutes)\b/i);
+      if (durMatch) {
+        state.slots.duration = `approx. ${durMatch[0]}`;
+        if (state.conversationMemory) state.conversationMemory.durationPattern = `approx. ${durMatch[0]}`;
+        const fact = `Duration: approx. ${durMatch[0]}`;
+        if (!state.slots.known_facts.includes(fact)) {
+          state.slots.known_facts.push(fact);
+        }
+      }
+    }
     if (!state.slots.character) {
       const charMatch = state.cumulativeTranscript.match(/\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/i);
       if (charMatch) {
         state.slots.character = charMatch[0];
         if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
           state.slots.known_facts.push(`CHARACTER: ${charMatch[0]}`);
+        }
+      } else if (/\b(dizzy|dizziness|lightheaded)\b/i.test(state.cumulativeTranscript)) {
+        const isPostural = /\b(when\s+i\s+stand|after\s+i\s+sat|standing\s+up|getting\s+up|sitting\s+for\s+long)\b/i.test(state.cumulativeTranscript);
+        state.slots.character = isPostural ? "postural dizziness upon standing after sitting" : "dizziness";
+        if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
+          state.slots.known_facts.push(`CHARACTER: ${state.slots.character}`);
         }
       }
     }
@@ -416,6 +723,21 @@ export class ConversationManager {
         if (!state.slots.known_facts.some(f => f.startsWith("ONSET"))) {
           state.slots.known_facts.push(`ONSET: ${onsetMatch[0]}`);
         }
+      } else if (/\b(when\s+i\s+stand|standing\s+up|after\s+i\s+sat)\b/i.test(state.cumulativeTranscript)) {
+        state.slots.onset = "intermittent upon standing after sitting";
+        if (!state.slots.known_facts.some(f => f.startsWith("ONSET"))) {
+          state.slots.known_facts.push(`ONSET: ${state.slots.onset}`);
+        }
+      }
+    }
+    if (/\b(weak|weakness|numb|numbness)\b/i.test(state.cumulativeTranscript) && !state.slots.neurological_signs.includes("transient weakness and numbness")) {
+      state.slots.neurological_signs.push("transient weakness and numbness");
+      const fact = "Reported: transient weakness and numbness";
+      if (!state.slots.known_facts.includes(fact)) {
+        state.slots.known_facts.push(fact);
+      }
+      if (state.conversationMemory && !state.conversationMemory.uncertainties.includes("weakness_distribution")) {
+        state.conversationMemory.uncertainties.push("distribution of weakness/numbness (unilateral vs bilateral)");
       }
     }
 
@@ -426,7 +748,7 @@ export class ConversationManager {
       transcript: state.cumulativeTranscript,
       conversation_history: [],
       demographics: {
-        age: demographics.age,
+        age: demographics.age ?? undefined,
         age_group: demographics.age_group
       },
       detected_symptoms: state.slots.known_facts,
@@ -457,7 +779,7 @@ export class ConversationManager {
     // Update domain sufficiency states
     const hasChest = /\b(chest|heart|sternum|angina|pressure|tightness)\b/i.test(state.cumulativeTranscript);
     const hasNeuro = /\b(headache|dizz|droop|weak|numb|speech)\b/i.test(state.cumulativeTranscript);
-    const hasPeds = demographics.age !== undefined && demographics.age < 16;
+    const hasPeds = typeof demographics.age === "number" && demographics.age < 16;
 
     if (hasChest) {
       const missingCardio = [];
@@ -564,6 +886,10 @@ export class ConversationManager {
         caseVersion: state.caseVersion
       };
 
+      if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(nextReq.targetSlot)) {
+        state.conversationMemory.questionsAlreadyAsked.push(nextReq.targetSlot);
+      }
+
       return {
         action: "ASK_PATIENT",
         doctorReply: sarahQuestion,
@@ -606,8 +932,16 @@ export class ConversationManager {
       initialTargetSlot = "headache_onset_character";
       initialPurpose = "Screen for headache character and onset acuity";
       initialDoctorReply = "I hear you regarding your headache. Did it come on all of a sudden like a clap of thunder, or build up gradually, and are you sensitive to bright lights or sound?";
+    } else if (state.responsePlan?.nextHighValueInquiry) {
+      initialTargetSlot = state.responsePlan.nextHighValueInquiry.topic;
+      initialPurpose = state.responsePlan.nextHighValueInquiry.clinicalRationale;
+      initialDoctorReply = state.responsePlan.suggestedSpokenReply || state.responsePlan.nextHighValueInquiry.suggestedPhrasing;
     } else if (!isChestPresentation) {
       initialDoctorReply = "Thank you for describing what you're experiencing. Could you tell me when this began, and whether it started suddenly or built up gradually?";
+    }
+
+    if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(initialTargetSlot)) {
+      state.conversationMemory.questionsAlreadyAsked.push(initialTargetSlot);
     }
 
     state.pendingQuestion = {
@@ -633,6 +967,34 @@ export class ConversationManager {
       state,
       preArbiterResult
     };
+  }
+
+  /**
+   * Stateful Clinical Dialogue Policy:
+   * Powered by clinicalDecisionEngine:
+   * 1. Classifies the patient turn (intent, questions, temporal shifts, corrections, emotions).
+   * 2. Maintains structured clinical state (symptoms, timeline anchors, known facts).
+   * 3. Selects the next-turn clinical action decision (answers direct inquiries, advances interview).
+   * 4. Enforces anti-repetition shield so the doctor never replays duplicate responses.
+   */
+  private handleEmergencyTurn(
+    cleanMsg: string,
+    state: ClinicalInterviewState,
+    preArbiterResult: PreArbiterResult,
+    localeConfig: LocaleConfig
+  ): string {
+    const classification = clinicalDecisionEngine.classifyTurn(cleanMsg, state);
+    clinicalDecisionEngine.updateStructuredState(state, classification, cleanMsg);
+    const decision = clinicalDecisionEngine.decideNextAction(classification, state, preArbiterResult, localeConfig);
+
+    if (state.structuredHistory) {
+      state.structuredHistory.recentDoctorReplies.push(decision.spokenDoctorReply);
+      if (state.structuredHistory.recentDoctorReplies.length > 5) {
+        state.structuredHistory.recentDoctorReplies.shift();
+      }
+    }
+
+    return decision.spokenDoctorReply;
   }
 }
 

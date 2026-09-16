@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -56,3 +57,7 @@ scratch/
 
 # large raw clinical XML data
 data/medlineplus/raw/*.xml
+
+# test audio & benchmark artifacts
+data/test-audio/
+*.wav

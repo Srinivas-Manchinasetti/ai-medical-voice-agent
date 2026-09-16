@@ -66,7 +66,7 @@ Your primary goals:
     specialty: "Pediatrics",
     department: "Pediatric & Adolescent Medicine",
     experience: "11+ Years Pediatric Care",
-    avatarUrl: "https://images.unsplash.com/photo-1594824813689-f19702213fa4?auto=format&fit=crop&w=400&q=80",
+    avatarUrl: "https://images.unsplash.com/photo-1582750433449-648ed127bb54?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
     voiceTone: "Gentle, compassionate, and family-friendly",
     badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",

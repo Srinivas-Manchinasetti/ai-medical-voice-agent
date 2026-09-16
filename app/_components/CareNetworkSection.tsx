@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { PhoneCall, ExternalLink, Navigation, Search, MapPin, LocateFixed, Compass } from "lucide-react";
 import dynamic from "next/dynamic";
 import { HospitalItem } from "./InteractiveRouteMap";
+import CountUp from "@/components/CountUp";
 
 // Dynamically import Leaflet map with SSR disabled
 const InteractiveRouteMap = dynamic(
@@ -412,7 +413,7 @@ export function CareNetworkSection() {
                           <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
                             isSelected ? "bg-rose-500 text-white" : "bg-slate-100 text-slate-700"
                           }`}>
-                            {displayDist} km
+                            <CountUp to={displayDist} duration={1} /> km
                           </span>
                         </div>
                         <p className={`text-[11px] line-clamp-1 ${isSelected ? "text-slate-400" : "text-slate-500"}`}>
@@ -443,7 +444,7 @@ export function CareNetworkSection() {
                     24/7 Emergency Care
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs">
-                    {liveRoadStats ? liveRoadStats.roadDistanceKm : selectedHospital.distanceKm} km away • ~{liveRoadStats ? liveRoadStats.etaMinutes : selectedHospital.etaMinutes || 12} min drive (traffic)
+                    <CountUp to={liveRoadStats ? liveRoadStats.roadDistanceKm : selectedHospital.distanceKm} duration={1.2} /> km away • ~<CountUp to={liveRoadStats ? liveRoadStats.etaMinutes : selectedHospital.etaMinutes || 12} duration={1} /> min drive (traffic)
                   </span>
                   {selectedHospital.rating && (
                     <span className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs">

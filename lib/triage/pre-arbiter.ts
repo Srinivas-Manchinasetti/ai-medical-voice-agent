@@ -107,12 +107,18 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
   const isPediatric = patientCase.demographics?.age_group === "infant" ||
                       patientCase.demographics?.age_group === "pediatric" ||
                       (patientCase.demographics?.age !== undefined && patientCase.demographics.age < 16) ||
-                      hasAffirmative(["baby", "child", "infant", "toddler", "my son", "my daughter", "months old", "weeks old"]);
+                      hasAffirmative(["baby", "child", "infant", "newborn", "neonate", "toddler", "my son", "my daughter", "months old", "month old", "weeks old", "week old", "days old", "day old"]) ||
+                      hasAffirmativeRegex(/\b\d+\s*-(?:week|month|day|year)-old\b/i) ||
+                      hasAffirmativeRegex(/\b\d+\s+(?:weeks?|months?|days?|years?)\s+old\b/i);
 
-  const hasPediatricEmergency = isPediatric && hasAffirmative([
-    "inconsolable", "lethargic", "floppy", "not waking up", "grunting", "sunken fontanelle",
-    "fever in newborn", "high fever"
-  ]);
+  const hasPediatricEmergency = isPediatric && (
+    hasAffirmative([
+      "inconsolable", "lethargic", "floppy", "unusually floppy", "not waking up", "refusing to wake",
+      "grunting", "sunken fontanelle", "fever in newborn", "high fever", "refusing to feed", "won't wake", "cannot wake"
+    ]) ||
+    // Any fever in a newborn / young infant (< 3 months / 12 weeks) is a pediatric medical emergency
+    (hasAffirmativeRegex(/\b(?:newborn|neonate|\d+\s*-(?:day|week)-old|\d+\s+(?:days?|weeks?)\s+old)\b/i) && hasAffirmativeRegex(/\b(?:10[0-9](?:\.[0-9]+)?|38\.[0-9]|39|fever|temp(?:erature)?)\b/i))
+  );
 
   if (isPediatric) {
     suggested_specialists.push({

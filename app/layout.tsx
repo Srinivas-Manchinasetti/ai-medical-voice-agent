@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { StrandsBackground } from "@/components/StrandsBackground";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -32,8 +33,11 @@ export default function RootLayout({
         className={`${jakarta.variable} ${jetbrains.variable} h-full antialiased`}
         suppressHydrationWarning
       >
-        <body className="min-h-full flex flex-col font-sans bg-[#FAF9F6] text-slate-900">
-          {children}
+        <body className="min-h-full flex flex-col font-sans bg-[#F7F9FC] text-slate-900 relative">
+          <StrandsBackground />
+          <div className="relative z-10 flex-1 flex flex-col">
+            {children}
+          </div>
         </body>
       </html>
     </ClerkProvider>

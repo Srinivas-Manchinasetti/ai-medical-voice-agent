@@ -33,8 +33,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
-import { Footer } from "../_components/Footer";
+import { AppFooter } from "../_components/AppFooter";
 import { generateFHIRBundle } from "@/lib/fhir/bundle";
+import CountUp from "@/components/CountUp";
 
 interface ConsultationRecord {
   id: string;
@@ -293,7 +294,7 @@ export default function DashboardPage() {
   const activeDispatch = selectedReport ? dispatches[selectedReport.id] : null;
 
   return (
-    <div className="relative min-h-screen bg-[#FAF9F6] text-slate-900 font-sans flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
+    <div className="relative min-h-screen bg-transparent text-slate-900 font-sans flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
       <div>
         <Navbar />
 
@@ -319,6 +320,55 @@ export default function DashboardPage() {
         {/* MAIN WORKSPACE */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
           
+          {/* STATS OVERVIEW CARDS WITH COUNTUP */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">Total Encounters</span>
+              <div className="flex items-baseline gap-1.5 mt-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
+                  <CountUp to={consultations.length} duration={1.2} />
+                </span>
+                <span className="text-xs text-slate-500 font-medium">SOAP records</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-rose-600 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                Emergency Cases
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-rose-600 font-mono">
+                  <CountUp to={consultations.filter((c) => c.triageLevel === "emergency").length} duration={1.2} />
+                </span>
+                <span className="text-xs text-slate-500 font-medium">ESI 1-2 triage</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-cyan-700">Priority Outpatient</span>
+              <div className="flex items-baseline gap-1.5 mt-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
+                  <CountUp to={consultations.filter((c) => c.triageLevel !== "emergency").length} duration={1.2} />
+                </span>
+                <span className="text-xs text-slate-500 font-medium">ambulatory / urgent</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col justify-between">
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Interop Standard
+              </span>
+              <div className="flex items-baseline gap-1 mt-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono">
+                  <CountUp from={50} to={100} duration={1.5} />%
+                </span>
+                <span className="text-xs text-slate-500 font-medium">HL7 FHIR R4</span>
+              </div>
+            </div>
+          </div>
+
           {/* Action & Filter Bar */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-4 mb-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
@@ -367,7 +417,7 @@ export default function DashboardPage() {
             <div className="lg:col-span-5 space-y-3">
               <div className="flex items-center justify-between px-1">
                 <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500">
-                  Recorded Sessions ({filteredConsultations.length})
+                  Recorded Sessions (<CountUp to={filteredConsultations.length} duration={1} />)
                 </span>
                 <span className="text-[11px] text-slate-400 font-medium">Click to inspect SOAP chart</span>
               </div>
@@ -501,7 +551,7 @@ export default function DashboardPage() {
                         {activeDispatch ? (
                           <span className="text-[11px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
                             <CheckCircle className="w-3 h-3" />
-                            <span>ED BAY RESERVED ({activeDispatch.etaMinutes}m ETA)</span>
+                            <span>ED BAY RESERVED (~<CountUp to={activeDispatch.etaMinutes} duration={0.8} />m ETA)</span>
                           </span>
                         ) : (
                           <span className="text-[11px] font-mono text-slate-500 font-medium">
@@ -608,6 +658,24 @@ export default function DashboardPage() {
                     </button>
                   </div>
 
+                  {/* MANDATORY CLINICAL SAFETY WARNING BANNER */}
+                  <div className="p-3.5 rounded-xl bg-amber-50/90 border border-amber-300/80 shadow-2xs flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-800 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider font-mono px-1.5 py-0.5 rounded-md bg-amber-200/80 text-amber-950 border border-amber-300">
+                          AI GENERATED · CLINICAL REVIEW REQUIRED
+                        </span>
+                        <span className="text-[11px] text-amber-900 font-bold">
+                          Preliminary Medical Record
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-900/90 mt-1 leading-relaxed font-medium">
+                        Synthesized automatically from voice consultation and multi-specialist deliberation. Distinguishes patient-reported history from preliminary AI impressions. Licensed clinician review and approval required before official EHR filing.
+                      </p>
+                    </div>
+                  </div>
+
                   {/* SOAP NOTE CARDS */}
                   <div className="space-y-3.5 text-xs leading-relaxed">
                     {/* S - Subjective */}
@@ -616,7 +684,7 @@ export default function DashboardPage() {
                         <span className="w-5 h-5 rounded-full bg-cyan-100 border border-cyan-200 text-cyan-800 flex items-center justify-center text-[10px] font-bold">S</span>
                         <span>SUBJECTIVE (Patient Narrative & Chief Complaint)</span>
                       </h4>
-                      <p className="text-slate-700 font-medium">
+                      <p className="text-slate-700 font-medium whitespace-pre-line">
                         {selectedReport.soapSubjective || selectedReport.chiefComplaint || "No patient narrative logged."}
                       </p>
                     </div>
@@ -625,10 +693,10 @@ export default function DashboardPage() {
                     <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-sm">
                       <h4 className="font-extrabold text-teal-800 font-mono text-xs mb-1.5 flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-teal-100 border border-teal-200 text-teal-800 flex items-center justify-center text-[10px] font-bold">O</span>
-                        <span>OBJECTIVE (Parsed Features & ESI v4 Arbiter)</span>
+                        <span>OBJECTIVE (Acoustic Biomarkers & Verified Features)</span>
                       </h4>
-                      <p className="text-slate-700 font-medium">
-                        {selectedReport.soapObjective || `Detected symptoms: ${selectedReport.detectedSymptoms?.join(", ") || "None"}.`}
+                      <p className="text-slate-700 font-medium whitespace-pre-line">
+                        {selectedReport.soapObjective || `• Physical Exam / Vitals: No direct physical examination or automated biometric telemetry hardware connected during remote voice encounter. (Never fabricated).\n• Detected clinical features: ${selectedReport.detectedSymptoms?.join(", ") || "None specified"}.`}
                       </p>
                     </div>
 
@@ -773,7 +841,7 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
-      <Footer />
+      <AppFooter />
     </div>
   );
 }

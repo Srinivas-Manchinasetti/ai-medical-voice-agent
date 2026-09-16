@@ -2,37 +2,63 @@
 
 import React from "react";
 import { Activity, ShieldCheck, CheckCircle2, ArrowUpRight, Lock, Radio } from "lucide-react";
+import CursorGrid from "@/components/CursorGrid";
 
-export function Footer() {
+export function Footer({ showPayoffBanner = false }: { showPayoffBanner?: boolean }) {
   return (
-    <footer className="w-full bg-slate-950 text-slate-400 text-xs border-t border-slate-800">
-      {/* FINAL LANDING PAGE PAYOFF CTA BANNER */}
-      <div className="border-b border-slate-800 bg-[#0B0F17] py-24 sm:py-32 px-6 text-center">
-        <div className="max-w-3xl mx-auto space-y-6">
-          <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-400">
-            LISTEN · UNDERSTAND · ACT
-          </span>
-          <h2 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
-            Give every patient conversation a next step.
-          </h2>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <a
-              href="/demo"
-              className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white px-7 py-3.5 text-sm font-bold shadow-lg transition-all cursor-pointer"
-            >
-              <span>Book a Demo →</span>
-            </a>
-            <a
-              href="/product"
-              className="inline-flex items-center gap-2 text-slate-300 hover:text-white px-5 py-3 text-sm font-semibold transition-all cursor-pointer"
-            >
-              <span>See MedVoice in action</span>
-            </a>
+    <footer className="relative w-full text-slate-400 text-xs overflow-hidden">
+      {/* ATMOSPHERIC AURORA BRIDGE: Softly transitions light background into dark footer */}
+      <div className="w-full h-36 sm:h-52 bg-linear-to-b from-transparent via-slate-950/60 to-slate-950 pointer-events-none" />
+
+      {/* Optional Marketing Payoff Banner */}
+      {showPayoffBanner && (
+        <div className="relative border-b border-slate-800 bg-[#0B0F17] py-24 sm:py-32 px-6 text-center overflow-hidden">
+          {/* Interactive CursorGrid Background */}
+          <div className="absolute inset-0 z-0">
+            <CursorGrid
+              cellSize={70}
+              colors={["#00F0FF", "#3B82F6", "#8B5CF6", "#D946EF"]}
+              radius={140}
+              falloff="smooth"
+              holdTime={400}
+              fadeDuration={800}
+              lineWidth={1.2}
+              maxOpacity={1}
+              fillOpacity={0.08}
+              gridOpacity={0}
+              cellRadius={0}
+              clickPulse
+              pulseSpeed={600}
+            />
+          </div>
+
+          <div className="relative z-10 max-w-3xl mx-auto space-y-6 pointer-events-none">
+            <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-400">
+              LISTEN · UNDERSTAND · ACT
+            </span>
+            <h2 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
+              Give every patient conversation a next step.
+            </h2>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+              <a
+                href="/demo"
+                className="pointer-events-auto inline-flex items-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white px-7 py-3.5 text-sm font-bold shadow-lg transition-all cursor-pointer"
+              >
+                <span>Book a Demo →</span>
+              </a>
+              <a
+                href="/product"
+                className="pointer-events-auto inline-flex items-center gap-2 text-slate-300 hover:text-white px-5 py-3 text-sm font-semibold transition-all cursor-pointer"
+              >
+                <span>See MedVoice in action</span>
+              </a>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="mx-auto max-w-7xl px-6 pt-14 pb-10">
+      <div className="bg-slate-950 w-full">
+        <div className="mx-auto max-w-7xl px-6 pt-10 pb-10">
         {/* Main Footer Grid */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-10 border-b border-slate-800/80">
           {/* Brand Column (6 cols) */}
@@ -132,6 +158,7 @@ export function Footer() {
           </p>
         </div>
       </div>
-    </footer>
-  );
+    </div>
+  </footer>
+);
 }

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Navbar } from "../_components/Navbar";
-import { Footer } from "../_components/Footer";
+import { AppFooter } from "../_components/AppFooter";
 import { SecuritySection } from "../_components/SecuritySection";
 import { ShieldCheck, Lock, Key, FileText, CheckCircle2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -85,7 +85,7 @@ export default function PrivacyPolicyPage() {
         <SecuritySection />
       </div>
 
-      <Footer />
+      <AppFooter />
     </div>
   );
 }

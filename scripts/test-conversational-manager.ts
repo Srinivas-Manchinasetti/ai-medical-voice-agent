@@ -132,10 +132,22 @@ async function runConversationalManagerTest() {
   console.log(`• Information State: ${state.informationState}`);
   console.log(`• Sarah Spoken Reply: "${res7.doctorReply}"`);
 
-  if (!res7.doctorReply.includes("911") || !res7.doctorReply.toLowerCase().includes("speakerphone")) {
-    throw new Error(`Turn 7 failed: Expected deterministic 911 dispatch instructions, got "${res7.doctorReply}"`);
+  if ((!res7.doctorReply.includes("112") && !res7.doctorReply.includes("108") && !res7.doctorReply.includes("911")) || !res7.doctorReply.toLowerCase().includes("speakerphone")) {
+    throw new Error(`Turn 7 failed: Expected deterministic emergency dispatch instructions, got "${res7.doctorReply}"`);
   }
-  console.log("✅ Turn 7 PASSED: Deterministic 911 emergency dispatch instructions returned.");
+  console.log("✅ Turn 7 PASSED: Deterministic emergency dispatch instructions returned.");
+
+  // --- TURN 8: Memory & Context Inquiry on Fresh Consultation ---
+  console.log("\n--- TURN 8: Memory & Continuity Inquiry on Fresh State ---");
+  const freshState = conversationManager.createInitialState();
+  const res8 = await conversationManager.processTurn("Hey.. do you remember my illness?", freshState);
+  console.log(`• Patient: "Hey.. do you remember my illness?"`);
+  console.log(`• Action: ${res8.action}`);
+  console.log(`• Sarah Reply: "${res8.doctorReply}"`);
+  if (!res8.doctorReply.includes("assume I remember") || !res8.doctorReply.includes("What illness or symptoms are you referring to")) {
+    throw new Error(`Turn 8 failed: Expected honest, warm memory handling without premature onset question, got "${res8.doctorReply}"`);
+  }
+  console.log("✅ Turn 8 PASSED: Memory inquiry addressed honestly with no hallucinated illness or premature onset question.");
 
   console.log("\n==============================================================================");
   console.log("✅ ALL CONVERSATION MANAGER & AGENT REQUEST INVARIANTS VERIFIED SUCCESSFULLY.");

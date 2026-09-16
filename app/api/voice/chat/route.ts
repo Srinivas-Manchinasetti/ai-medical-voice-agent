@@ -6,6 +6,8 @@ import { PatientCase } from "@/lib/agents/schemas";
 
 import { conversationManager } from "@/lib/triage/conversation-manager";
 import { clinicalKnowledgeRetriever } from "@/lib/clinical-knowledge/retriever";
+import { generateDoctorTurnResponse } from "@/lib/ai/clinical-llm";
+import { hospitalRagService } from "@/lib/care-network/hospital-rag";
 
 export async function POST(request: Request) {
   try {
@@ -19,6 +21,8 @@ export async function POST(request: Request) {
       audioMetrics,
       isInterruption = false,
       interruptedAgent = "",
+      userLocation,
+      locationPermission,
     } = body;
 
     if (!message || !message.trim()) {
@@ -82,9 +86,9 @@ export async function POST(request: Request) {
 
     // Cumulative patient utterances for comprehensive clinical context (filtering out raw greetings)
     const patientHistory = conversationHistory
-      .filter((m: any) => m.role === "patient")
-      .map((m: any) => m.text.trim())
-      .filter((t: string) => !/^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me)[.!?\s]*$/i.test(t));
+      .filter((m: any) => m.role === "patient" || m.role === "user")
+      .map((m: any) => (m.text || m.content || "").trim())
+      .filter((t: string) => t.length > 0 && !/^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me)[.!?\s]*$/i.test(t));
     
     const allUtterances = [...patientHistory, cleanMsg];
     // Remove exact duplicate phrases from consecutive submissions
@@ -102,28 +106,158 @@ export async function POST(request: Request) {
       pitchVariance: audioMetrics?.pitchVariance,
     });
 
-    const ageNum = patientAge ? parseInt(patientAge, 10) : 45;
-    const ageGroup = ageNum < 18 ? "pediatric" : ageNum > 65 ? "geriatric" : "adult";
+    let ageNum: number | null = null;
+    let ageSource: "patient_reported" | "profile" | "unknown" = "unknown";
+    let ageGroup: "infant" | "pediatric" | "adult" | "geriatric" | "unknown" = "unknown";
+
+    if (patientAge && !isNaN(parseInt(patientAge, 10))) {
+      ageNum = parseInt(patientAge, 10);
+      ageSource = "profile";
+      ageGroup = ageNum < 1 ? "infant" : ageNum < 18 ? "pediatric" : ageNum > 65 ? "geriatric" : "adult";
+    } else {
+      // Check if age was explicitly reported in cumulative transcript, e.g. "I am 32 years old", "my 4-year-old"
+      const ageMatch = cumulativeTranscript.match(/\b(?:i(?:'m| am)|patient is|aged?)\s+(\d{1,3})\s*(?:years?|yrs?|yo)?\b/i);
+      if (ageMatch && parseInt(ageMatch[1], 10) > 0 && parseInt(ageMatch[1], 10) < 120) {
+        ageNum = parseInt(ageMatch[1], 10);
+        ageSource = "patient_reported";
+        ageGroup = ageNum < 1 ? "infant" : ageNum < 18 ? "pediatric" : ageNum > 65 ? "geriatric" : "adult";
+      } else {
+        const isInfant = /\b(newborn|neonate|infant|baby|\d+\s*-(?:week|month|day)-old|\d+\s+(?:weeks?|months?|days?)\s+old)\b/i.test(cumulativeTranscript);
+        if (isInfant) {
+          ageNum = 0;
+          ageSource = "patient_reported";
+          ageGroup = "infant";
+        } else {
+          ageNum = null;
+          ageSource = "unknown";
+          ageGroup = "unknown";
+        }
+      }
+    }
 
     // 2. Stateful Clinical Conversation Manager Turn Execution
     const turnResult = await conversationManager.processTurn(cleanMsg, body.interviewState, {
-      age: ageNum,
-      age_group: ageGroup
+      age: ageNum ?? undefined,
+      age_group: ageGroup === "unknown" ? "adult" : ageGroup,
+      age_source: ageSource
     });
+
+    const knownFactsCount = turnResult.state.slots.known_facts.length;
+    const slots = turnResult.state.slots;
+    const hasAnySymptoms = knownFactsCount > 0 || Boolean(slots.character || slots.onset);
+
+    let calculatedMissingDims: string[] = [];
+    if (!hasAnySymptoms) {
+      calculatedMissingDims = [
+        "Symptoms & chief complaint",
+        "Onset & timeline",
+        "Episode duration & frequency",
+        "Character & severity",
+        "Associated symptoms",
+      ];
+    } else {
+      if (!slots.onset) calculatedMissingDims.push("Onset & timeline");
+      if (!slots.character) calculatedMissingDims.push("Character & severity");
+      if (!slots.duration && !turnResult.state.conversationMemory?.frequencyPattern) {
+        calculatedMissingDims.push("Episode duration & frequency");
+      }
+      if (!slots.radiation && /\b(chest|heart|angina|leg|calf|back)\b/i.test(turnResult.state.cumulativeTranscript)) {
+        calculatedMissingDims.push("Radiation & spread");
+      }
+      if (!slots.exertional && /\b(chest|heart|angina)\b/i.test(turnResult.state.cumulativeTranscript)) {
+        calculatedMissingDims.push("Exertional relation");
+      }
+      if (slots.associated_symptoms.length === 0) {
+        calculatedMissingDims.push("Associated symptoms");
+      }
+    }
+
+    const totalRequired = Math.max(5, knownFactsCount + calculatedMissingDims.length);
+    const completenessScore = knownFactsCount === 0
+      ? 0
+      : Math.min(0.95, Math.round((knownFactsCount / totalRequired) * 100) / 100);
+
+    const missingDims = calculatedMissingDims;
+
+    // Conditioned Care Network RAG Trigger:
+    // Only invoke when an access constraint (financial or remote location) is present,
+    // OR when the patient specifically mentions outskirts, affordability, or hospital needs.
+    const constraints = turnResult.state.structuredHistory?.accessConstraints;
+    let nearbyHospitals: any[] = turnResult.state.structuredHistory?.nearbyHospitals || [];
+    let careOptions: any[] = [];
+    let careNetworkSummary: string | undefined = undefined;
+
+    const needsCareRouting = Boolean(
+      constraints?.financial ||
+      constraints?.remoteLocation ||
+      /\b(outskirts|hospital|far\s+away|remote|village|afford|poor|cost|ambulance)\b/i.test(cleanMsgLower)
+    );
+
+    if (needsCareRouting) {
+      const isNeuro = turnResult.preArbiterResult.pre_safety_flags.some((f: string) => f.includes("NEURO")) ||
+        /\b(droop|facial|arm|weakness|speech|slur|stroke|tia)\b/i.test(turnResult.state.cumulativeTranscript);
+      const isCardio = turnResult.preArbiterResult.pre_safety_flags.some((f: string) => f.includes("ACS") || f.includes("CARDIO")) ||
+        /\b(chest|crushing|pressure|radiat|angina)\b/i.test(turnResult.state.cumulativeTranscript);
+
+      const specialtyRequired = isNeuro ? "Neurology" : isCardio ? "Cardiology" : undefined;
+      const prioritizeAffordable = Boolean(constraints?.financial);
+
+      const userCoords = userLocation?.latitude && userLocation?.longitude
+        ? { latitude: userLocation.latitude, longitude: userLocation.longitude }
+        : undefined;
+
+      const ragResult = await hospitalRagService.findEmergencyCareFacilities({
+        userCoords,
+        cityOrLandmark: userLocation?.city,
+        specialtyRequired,
+        prioritizeAffordable,
+        maxResults: 3,
+      });
+
+      nearbyHospitals = ragResult.facilities;
+      careOptions = ragResult.careOptions;
+      careNetworkSummary = ragResult.summaryForLLM;
+
+      if (turnResult.state.structuredHistory) {
+        turnResult.state.structuredHistory.nearbyHospitals = nearbyHospitals;
+      }
+    }
+
+    // 3. Generative Clinical Turn Response (NVIDIA NIM LLM with Pre-Arbiter Emergency Invariant)
+    const llmResult = await generateDoctorTurnResponse({
+      patientUtterance: cleanMsg,
+      conversationHistory,
+      interviewState: turnResult.state,
+      preArbiterResult: turnResult.preArbiterResult,
+      demographics: { age: ageNum ?? undefined, age_group: ageGroup, age_source: ageSource },
+      doctor,
+      missingDimensions: missingDims,
+      fallbackReply: turnResult.doctorReply,
+      careNetworkSummary,
+    });
+
+    const activeDoctorReply = llmResult.reply || turnResult.doctorReply;
 
     // If conversation manager determined patient follow-up or clarification is needed
     if (turnResult.action === "ASK_PATIENT" || turnResult.action === "CLARIFY") {
       return NextResponse.json({
-        doctorReply: turnResult.doctorReply,
+        doctorReply: activeDoctorReply,
         doctor: {
-          id: "dr-sarah-chen",
-          name: turnResult.doctorName,
-          specialty: turnResult.specialty,
-          avatarUrl: "/avatars/sarah.png",
-          voiceGender: "female",
+          id: doctor.id,
+          name: doctor.name,
+          specialty: doctor.specialty,
+          avatarUrl: doctor.avatarUrl,
+          voiceGender: doctor.voiceGender,
         },
         phase: turnResult.state.phase,
         interviewState: turnResult.state,
+        nearbyHospitals: nearbyHospitals.length > 0 ? nearbyHospitals : undefined,
+        careOptions: careOptions.length > 0 ? careOptions : undefined,
+        llmMeta: {
+          provider: llmResult.provider,
+          model: llmResult.model,
+          latencyMs: llmResult.latencyMs,
+        },
         board: {
           phase: turnResult.state.phase,
           information_state: turnResult.state.informationState,
@@ -137,8 +271,12 @@ export async function POST(request: Request) {
             : ["Dr. Sarah Chen, MD (Lead)"],
           active_requests: turnResult.state.agentRequests.filter(r => r.status === "pending"),
           pending_question: turnResult.state.pendingQuestion,
+          completeness_score: completenessScore,
           known_facts: turnResult.state.slots.known_facts,
+          missing_dimensions: calculatedMissingDims,
           slots: turnResult.state.slots,
+          opinions: [],
+          consensus_summary: "Awaiting sufficient clinical evidence before disposition.",
           differential: [],
           conflicts: [],
           key_findings: turnResult.state.slots.known_facts,
@@ -169,7 +307,7 @@ export async function POST(request: Request) {
       transcript: turnResult.state.cumulativeTranscript,
       conversation_history: conversationHistory,
       demographics: {
-        age: ageNum,
+        age: ageNum ?? undefined,
         age_group: ageGroup as any,
       },
       detected_symptoms: turnResult.state.slots.known_facts,
@@ -185,14 +323,6 @@ export async function POST(request: Request) {
 
     // 4. Execute Multi-Agent Clinical Board (Pre-Arbiter -> Orchestrator -> Specialists -> Synthesizer -> Post-Arbiter)
     const boardOutput = await clinicalBoard.evaluate(patientCase);
-
-    const knownFactsCount = turnResult.state.slots.known_facts.length;
-    const missingDims = [
-      !turnResult.state.slots.onset && "Onset/Timeline",
-      !turnResult.state.slots.character && "Character/Quality",
-      !turnResult.state.slots.radiation && "Radiation/Spread",
-      !turnResult.state.slots.exertional && "Exertional relation",
-    ].filter(Boolean) as string[];
 
     const sufficiency = {
       is_sufficient: true,
@@ -234,10 +364,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const finalDoctorReply =
-      turnResult.action === "EMERGENCY_CONVENE_BOARD" && turnResult.doctorReply
-        ? turnResult.doctorReply
-        : boardOutput.doctor_reply;
+    const finalDoctorReply = activeDoctorReply || turnResult.doctorReply || boardOutput.doctor_reply;
 
     return NextResponse.json({
       doctorReply: finalDoctorReply,
@@ -253,6 +380,13 @@ export async function POST(request: Request) {
         ...turnResult.state,
         phase: "decided",
         informationState: "sufficient_for_decision",
+      },
+      nearbyHospitals: nearbyHospitals.length > 0 ? nearbyHospitals : undefined,
+      careOptions: careOptions.length > 0 ? careOptions : undefined,
+      llmMeta: {
+        provider: llmResult.provider,
+        model: llmResult.model,
+        latencyMs: llmResult.latencyMs,
       },
       sufficiency,
       board: {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { INDIAN_HOSPITALS_DATASET, calculateDistanceKm, Hospital } from "@/lib/hospitals-india-data";
+import { discoverHospitalsNearCoordinates } from "@/lib/care-network/osm-discovery";
 
 export function calculateRealisticDriveTime(distanceKm: number): number {
   if (distanceKm <= 4) {
@@ -22,9 +23,7 @@ export async function GET(request: Request) {
     const specialtyFilter = searchParams.get("specialty")?.toLowerCase().trim() || "";
     const searchFilter = searchParams.get("query")?.toLowerCase().trim() || "";
     const cityFilter = searchParams.get("city")?.toLowerCase().trim() || "";
-    const urgencyLevel = searchParams.get("urgency")?.toLowerCase().trim() || "emergency";
-
-    let hospitals = [...INDIAN_HOSPITALS_DATASET];
+    const urgencyLevel = searchParams.get("urgency")?.toLowerCase().trim() || "all";
 
     // Determine location context basis
     const hasGps = userLat !== null && !isNaN(userLat) && userLng !== null && !isNaN(userLng);
@@ -39,6 +38,22 @@ export async function GET(request: Request) {
     // Default reference coords if user GPS or search is not available (Guntur / AP default)
     const refLat = hasGps ? userLat! : 16.3067;
     const refLng = hasGps ? userLng! : 80.4365;
+
+    let hospitals = [...INDIAN_HOSPITALS_DATASET];
+
+    // DYNAMIC OSM DISCOVERY: If GPS or coordinates are present, discover real local hospitals
+    if (hasGps) {
+      try {
+        const liveDiscovered = await discoverHospitalsNearCoordinates(refLat, refLng, 35);
+        if (liveDiscovered && liveDiscovered.length > 0) {
+          const existingIds = new Set(hospitals.map((h) => h.id));
+          const fresh = liveDiscovered.filter((h) => !existingIds.has(h.id));
+          hospitals = [...fresh, ...hospitals];
+        }
+      } catch (err: any) {
+        console.warn("[HospitalsAPI] Dynamic OSM discovery failed, using registry:", err.message);
+      }
+    }
 
     // STEP 1: HARD CONSTRAINTS & ELIGIBILITY EVALUATION
     const processedHospitals = hospitals.map((h) => {
@@ -103,6 +118,9 @@ export async function GET(request: Request) {
         emergencyPhone: h.emergencyPhone,
         latitude: h.latitude,
         longitude: h.longitude,
+        ownership: h.ownership || "private",
+        affordabilityNotes: h.affordabilityNotes,
+        acceptsPublicInsurance: h.acceptsPublicInsurance,
         isEmergency24x7: h.isEmergency24x7,
         rating: h.rating,
         accreditation: h.accreditation,
