@@ -23,6 +23,7 @@ import {
   Mic,
   Bell,
 } from "lucide-react";
+import { PillNav } from "@/components/motion/PillNav";
 
 interface NavLinkItem {
   href: string;
@@ -32,10 +33,10 @@ interface NavLinkItem {
 
 const NAV_LINKS: NavLinkItem[] = [
   { href: "/", label: "Home", alt: "OVERVIEW" },
-  { href: "/consult", label: "Voice Consult", alt: "DELIBERATION" },
-  { href: "/dashboard", label: "SOAP Reports", alt: "CHARTS" },
-  { href: "/care", label: "Care Network", alt: "HOSPITALS" },
-  { href: "/privacy", label: "Safety & Privacy", alt: "SECURITY" },
+  { href: "/consult", label: "Consult", alt: "DELIBERATION" },
+  { href: "/dashboard", label: "SOAP", alt: "CHARTS" },
+  { href: "/care", label: "Care", alt: "HOSPITALS" },
+  { href: "/privacy", label: "Privacy", alt: "SECURITY" },
 ];
 
 export function Navbar() {
@@ -105,56 +106,46 @@ export function Navbar() {
 
   return (
     <>
-      {/* ============================================================ Floating Integrated Clinical Header */}
-      <header className="sticky top-0 z-50 w-full pt-2.5 sm:pt-3 px-3 sm:px-6 pointer-events-none transition-all duration-300">
-        <div className="mx-auto flex h-16 sm:h-[70px] max-w-7xl items-center justify-between px-5 sm:px-8 rounded-2xl bg-white/75 backdrop-blur-xl border border-white/60 shadow-[0_8px_30px_rgba(15,23,42,0.05)] pointer-events-auto transition-all">
+      {/* ============================================================ Floating Architectural Clinical Header */}
+      <header className="sticky top-0 z-50 w-full pt-2.5 px-4 sm:px-8 pointer-events-none transition-all duration-300">
+        <div
+          className="mx-auto flex h-[64px] sm:h-[68px] max-w-[1360px] items-center justify-between px-6 sm:px-8 rounded-2xl pointer-events-auto transition-all"
+          style={{
+            background: "rgba(255, 255, 255, 0.72)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            border: "1px solid rgba(255, 255, 255, 0.85)",
+            boxShadow: "0 10px 35px rgba(40, 70, 100, 0.06)",
+          }}
+        >
           
-          {/* Brand Logo with High-Craft Typography */}
-          <Link href="/" className="flex items-center gap-3 group cursor-pointer">
-            <div className="w-9 h-9 rounded-xl overflow-hidden border border-cyan-400/80 shadow-[0_0_12px_rgba(6,182,212,0.25)] bg-white flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-105">
-              <img
-                src="/images/medvoice-logo.png"
-                alt="MedVoice AI"
-                className="w-full h-full object-cover scale-110"
-              />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm sm:text-base font-black tracking-wider text-slate-950 uppercase leading-none">
-                ✦ MEDVOICE
-              </span>
-              <span className="text-[9px] font-extrabold tracking-[0.26em] text-cyan-700 uppercase leading-none mt-1">
-                CLINICAL INTELLIGENCE
-              </span>
-            </div>
-          </Link>
+          {/* Group 1: Brand Identity Anchor */}
+          <div className="flex items-center min-w-[200px]">
+            <Link href="/" className="flex items-center gap-2.5 group cursor-pointer">
+              {/* 34px clinical icon with subtle pulse waveform */}
+              <div className="w-[34px] h-[34px] rounded-xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center text-white shadow-[0_2px_8px_rgba(6,182,212,0.25)] flex-shrink-0 group-hover:scale-105 transition-transform">
+                <svg viewBox="0 0 24 24" className="w-4 h-4 text-white stroke-[2.2]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 13h3.5l2.5-6 3.5 12 3-8 2 4h3.5" />
+                </svg>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[15px] font-black tracking-tight text-slate-950 uppercase leading-none">
+                  MEDVOICE
+                </span>
+                <span className="font-mono text-[9px] font-bold text-cyan-600 tracking-[0.2em] uppercase mt-1">
+                  CLINICAL INTELLIGENCE
+                </span>
+              </div>
+            </Link>
+          </div>
 
-          {/* Desktop Nav Links with Restrained Motion and Active Glow */}
-          <nav className="hidden md:flex items-center gap-6 lg:gap-8">
-            {NAV_LINKS.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`relative py-1 text-xs sm:text-sm font-bold tracking-normal transition-all cursor-pointer group ${
-                    isActive
-                      ? "text-slate-950"
-                      : "text-slate-600 hover:text-slate-950"
-                  }`}
-                >
-                  <span>{item.label}</span>
-                  {isActive ? (
-                    <span className="absolute left-0 -bottom-1 w-full h-[2.5px] bg-cyan-500 rounded-full shadow-[0_0_8px_rgba(6,182,212,0.6)]" />
-                  ) : (
-                    <span className="absolute left-0 -bottom-1 w-0 h-[2px] bg-cyan-400 rounded-full transition-all duration-300 group-hover:w-full" />
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
+          {/* Group 2: Centered Navigation (Substantial separation from logo & action) */}
+          <div className="hidden md:flex items-center justify-center flex-1">
+            <PillNav items={NAV_LINKS} />
+          </div>
 
-          {/* Right Action Section: User Capsule */}
-          <div className="flex items-center gap-3">
+          {/* Group 3: Right Action Area */}
+          <div className="flex items-center justify-end min-w-[200px] gap-3">
             {mounted && isLoaded ? (
               isSignedIn ? (
                 /* Polished Signed-in User Capsule with Floating HUD Dropdown */
@@ -306,27 +297,27 @@ export function Navbar() {
                   )}
                 </div>
               ) : (
-                /* Signed-out Sign In Button */
+                /* Signed-out Sign In Button - Compact, architectural outlined action */
                 <Link
                   href="/sign-in"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/80 bg-slate-950 px-4 py-2 text-xs font-bold tracking-tight text-white shadow-xs transition-all hover:bg-slate-800 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white/80 hover:bg-white hover:border-cyan-400/80 px-3.5 py-1.5 text-xs font-semibold text-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-all cursor-pointer group"
                 >
-                  <span>Sign In</span>
-                  <ArrowRight className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>Sign in</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-cyan-600 group-hover:translate-x-0.5 transition-all" />
                 </Link>
               )
             ) : (
-              <div className="h-8 w-24 bg-slate-200/70 rounded-full animate-pulse" />
+              <div className="h-8 w-24 bg-slate-200/70 rounded-xl animate-pulse" />
             )}
 
-            {/* Menu Trigger */}
+            {/* Mobile Menu Trigger (strictly hidden on desktop) */}
             <button
               onClick={() => setDrawerOpen(true)}
               aria-label="Menu"
-              className="w-8 h-8 rounded-lg bg-slate-100/90 hover:bg-slate-200/80 flex flex-col justify-center items-center gap-1 cursor-pointer transition-colors"
+              className="inline-flex md:hidden w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200/80 flex-col justify-center items-center gap-1 cursor-pointer transition-colors border border-slate-200/80"
             >
-              <span className="block h-[2px] bg-slate-800 rounded-full w-4" />
-              <span className="block h-[2px] bg-slate-800 rounded-full w-4" />
+              <span className="block h-[1.5px] bg-slate-700 rounded-full w-4" />
+              <span className="block h-[1.5px] bg-slate-700 rounded-full w-4" />
             </button>
           </div>
 

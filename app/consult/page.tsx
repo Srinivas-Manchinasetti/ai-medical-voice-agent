@@ -36,6 +36,7 @@ import {
   Navigation,
   PhoneCall,
   Circle,
+  Info,
   X,
   AlertTriangle
 } from "lucide-react";
@@ -54,6 +55,11 @@ import { SpotlightCard } from "@/components/ui/spotlight-card";
 import { GlowingBorder } from "@/components/ui/glowing-border";
 import { MovingBorder } from "@/components/ui/moving-border";
 import { AnimatedContent } from "@/components/ui/animated-content";
+import { VoicePill, VoicePillState } from "@/components/clinical/VoicePill";
+import { ThoughtLine, ThoughtStep } from "@/components/clinical/ThoughtLine";
+import { PulseHeart } from "@/components/clinical/PulseHeart";
+import { SwipeToast } from "@/components/feedback/SwipeToast";
+import { PeekRating } from "@/components/feedback/PeekRating";
 
 
 type AudioState =
@@ -331,10 +337,13 @@ function formatClinicalFact(raw: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
+export type ConsultSessionMode = "CONSULT_LOBBY" | "ACTIVE_CONSULTATION" | "CONSULT_COMPLETE";
+
 export default function ConsultPage() {
   const { user } = useUser();
   const patientDisplayName = user?.fullName || user?.firstName || "Patient";
 
+  const [sessionMode, setSessionMode] = useState<ConsultSessionMode>("CONSULT_LOBBY");
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorProfile>(DOCTOR_PROFILES[0]);
   const [callActive, setCallActive] = useState<boolean>(false);
   const [audioState, setAudioState] = useState<AudioState>("IDLE");
@@ -417,6 +426,65 @@ export default function ConsultPage() {
     setExpandedEvidenceIds((prev) => ({ ...prev, [id]: !prev[id] }));
   };
   const [showSoapModal, setShowSoapModal] = useState<boolean>(false);
+  const [showRatingModal, setShowRatingModal] = useState<boolean>(false);
+  const [clinicalToasts, setClinicalToasts] = useState<Array<{ id: string; type: "success" | "warning" | "info"; title: string; description: string }>>([]);
+
+  const voicePillState: VoicePillState = 
+    audioState === "PATIENT_LISTENING"
+      ? "listening"
+      : audioState === "PROCESSING_PATIENT"
+      ? "transcribing"
+      : audioState === "DOCTOR_SPEAKING"
+      ? "responding"
+      : audioState === "BARGE_IN_DETECTED" || audioState === "PROCESSING_INTERRUPTION"
+      ? "understanding"
+      : "idle";
+
+  const clinicalThoughtSteps: ThoughtStep[] = [
+    {
+      id: "step-audio",
+      label: "Voice stream captured (16kHz PCM audio)",
+      detail: audioState === "PATIENT_LISTENING" ? "Streaming low-latency microphone intake" : "Acoustic intake channel ready",
+      status: callActive || audioState !== "IDLE" ? "completed" : "pending"
+    },
+    {
+      id: "step-transcription",
+      label: "Speech recognized & acoustic noise filtered",
+      detail: transcriptText ? `Transcribed: "${transcriptText.slice(0, 36)}..."` : (messages.some(m => m.role === "patient") ? "Patient utterance transcribed" : "Awaiting patient voice"),
+      status: transcriptText || messages.some(m => m.role === "patient") ? "completed" : (audioState === "PATIENT_LISTENING" ? "running" : "pending")
+    },
+    {
+      id: "step-entities",
+      label: "Clinical entity extraction & chief complaint",
+      detail: triageData?.detectedSymptoms && triageData.detectedSymptoms.length > 0
+        ? `Identified: ${triageData.detectedSymptoms.slice(0, 3).join(", ")}`
+        : (hasContextFacts ? `${contextKnownFacts.length} verified facts extracted` : "Extracting symptom semantics"),
+      status: (triageData?.detectedSymptoms && triageData.detectedSymptoms.length > 0) || hasContextFacts ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+    },
+    {
+      id: "step-deliberation",
+      label: "Multi-specialist clinical board deliberation",
+      detail: boardData?.opinions && boardData.opinions.length > 0
+        ? `${boardData.opinions.length} specialist evaluations synthesized`
+        : "Cardiology, neurology, and triage swarm reviewing",
+      status: boardData?.phase === "deliberating" || boardData?.phase === "decided" || (boardData?.opinions && boardData.opinions.length > 1) ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+    },
+    {
+      id: "step-esi",
+      label: "ESI triage urgency assessment",
+      detail: triageData?.esiScore
+        ? `Assigned ESI-${triageData.esiScore} (${triageData.triageLevel.toUpperCase()})`
+        : "Evaluating life-threat invariants & algorithmic guardrails",
+      status: triageData?.esiScore ? "completed" : "pending"
+    },
+    {
+      id: "step-response",
+      label: "Consensus response ready & clinical guidance",
+      detail: audioState === "DOCTOR_SPEAKING" ? "Dr. Sarah Chen audio synthesis streaming" : (messages.length > 0 ? "SOAP encounter note compiled" : "Standby for response synthesis"),
+      status: audioState === "DOCTOR_SPEAKING" || messages.some(m => m.role === "doctor") ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+    }
+  ];
+
   const [emergencyCallTarget, setEmergencyCallTarget] = useState<{
     isOpen: boolean;
     number: string;
@@ -830,22 +898,25 @@ export default function ConsultPage() {
   }, []);
 
   // Start consultation session
-  const startConsultation = async () => {
+  const startConsultation = async (doc?: DoctorProfile) => {
+    const doctorToUse = doc || selectedDoctor;
+    if (doc) setSelectedDoctor(doc);
     callActiveRef.current = true;
     setCallActive(true);
     setCallDuration(0);
     setMicPermissionError(null);
+    setSessionMode("ACTIVE_CONSULTATION");
 
     const initialGreeting: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "doctor",
-      text: selectedDoctor.greeting,
+      text: doctorToUse.greeting,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      doctorName: selectedDoctor.name,
-      doctorSpecialty: selectedDoctor.department
+      doctorName: doctorToUse.name,
+      doctorSpecialty: doctorToUse.department
     };
     setMessages([initialGreeting]);
-    speakDoctorResponse(selectedDoctor.greeting);
+    speakDoctorResponse(doctorToUse.greeting);
   };
 
   // End consultation session
@@ -873,10 +944,20 @@ export default function ConsultPage() {
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
-    // Transition to Clinical SOAP Review if an encounter took place
-    if (messages.length > 0) {
-      setShowSoapModal(true);
-    }
+    setSessionMode("CONSULT_COMPLETE");
+  };
+
+  // Return to lobby and start new consultation
+  const startNewConsultation = () => {
+    setMessages([]);
+    setTriageData(null);
+    setBoardData(null);
+    setCallDuration(0);
+    setTranscriptText("");
+    setTypedInput("");
+    setInterviewState(null);
+    setAudioState("IDLE");
+    setSessionMode("CONSULT_LOBBY");
   };
 
   // Process User Utterance (Preserves exact spoken text without artificial tag prefixes)
@@ -952,6 +1033,27 @@ export default function ConsultPage() {
 
         if (data.triage) {
           setTriageData(data.triage);
+          if (data.triage.triageLevel === "emergency") {
+            setClinicalToasts((prev) => [
+              ...prev,
+              {
+                id: `triage-emerg-${Date.now()}`,
+                type: "warning",
+                title: "ESI-2 Emergency Triage Flagged",
+                description: "Critical clinical invariants flagged. Immediate hospital ED escalation recommended."
+              }
+            ]);
+          } else if (data.triage.esiScore && data.triage.esiScore <= 3) {
+            setClinicalToasts((prev) => [
+              ...prev,
+              {
+                id: `triage-esi-${Date.now()}`,
+                type: "info",
+                title: `ESI-${data.triage.esiScore} Urgency Classified`,
+                description: `Triage rating: ${data.triage.triageTitle || "Priority Outpatient Evaluation"}.`
+              }
+            ]);
+          }
         }
         if (data.board) {
           setBoardData(data.board);
@@ -1032,235 +1134,327 @@ export default function ConsultPage() {
     <div className="relative min-h-screen bg-transparent text-slate-900 flex flex-col font-sans selection:bg-cyan-500 selection:text-white overflow-x-clip">
       <Navbar />
 
-      <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-16 flex flex-col gap-8">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-16 flex flex-col gap-8">
         
-        {/* DYNAMIC HERO SECTION: COMPACT CLINICAL WORKSTATION WHEN ACTIVE, EXPANDED OVERVIEW WHEN IDLE */}
-        {callActive ? (
-          /* COMPACT ACTIVE CONSULTATION BAR */
-          <header className="flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5 rounded-2xl bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_4px_20px_rgba(15,23,42,0.04)] animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-center gap-3.5 min-w-0">
-              <div className="relative flex-shrink-0">
-                <img
-                  src={selectedDoctor.avatarUrl}
-                  alt={selectedDoctor.name}
-                  className="w-11 h-11 rounded-xl object-cover border border-cyan-400 shadow-xs"
-                />
-                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white animate-pulse" />
-              </div>
-
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm sm:text-base font-black text-slate-950 truncate">
-                    {selectedDoctor.name}
-                  </span>
-                  <span className="text-xs text-slate-500 font-semibold truncate">
-                    · {selectedDoctor.department}
-                  </span>
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                    Active Session
+        <AnimatePresence mode="wait">
+          {/* ========================================================================= */}
+          {/* STATE A: CONSULT LOBBY (CHOOSE YOUR CLINICIAN EXPERIENCE)                 */}
+          {/* ========================================================================= */}
+          {sessionMode === "CONSULT_LOBBY" && (
+            <motion.div
+              key="consult-lobby"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: -16 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              className="flex flex-col gap-8 max-w-5xl mx-auto w-full"
+            >
+              {/* Calm Hero Header */}
+              <div className="flex flex-col items-center text-center space-y-4 pt-2 sm:pt-4">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-50 border border-cyan-200/90 shadow-2xs font-mono">
+                  <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                  <span className="text-xs font-bold uppercase tracking-[0.1em] text-cyan-900">
+                    MEDVOICE · VOICE CLINICAL CONSULTATION
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                  <span className="font-mono font-bold text-cyan-900 bg-cyan-50 px-1.5 py-0.2 rounded border border-cyan-200">
-                    ⏱ {formatTimer(callDuration)}
-                  </span>
-                  <span>·</span>
-                  <span className="text-slate-600 truncate">
-                    {audioState === "DOCTOR_SPEAKING"
-                      ? "Doctor speaking response..."
-                      : audioState === "PATIENT_LISTENING"
-                      ? "Listening to patient voice input..."
-                      : "Multi-specialist board listening"}
-                  </span>
+                <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-950 tracking-tight leading-[1.08]">
+                  Ready when you are.
+                </h1>
+                <p className="text-base sm:text-lg text-slate-600 max-w-2xl font-normal leading-relaxed">
+                  Choose who you&apos;d like to consult with to begin your clinical intake. Specialist agents listen concurrently in the background, evaluating acoustic biomarkers against deterministic ESI v4 safety protocols.
+                </p>
+              </div>
+
+              {/* Active Clinical Team Quick Roster Rail */}
+              <div className="flex flex-col items-center gap-3">
+                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
+                  ACTIVE CLINICAL TEAM
+                </span>
+                <div className="flex items-center justify-center gap-2 sm:gap-3 flex-wrap">
+                  {DOCTOR_PROFILES.map((doc) => {
+                    const isSelected = selectedDoctor.id === doc.id;
+                    const liveStatus = getDoctorLiveStatus(doc);
+                    return (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        onClick={() => setSelectedDoctor(doc)}
+                        className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                          isSelected
+                            ? "bg-slate-950 text-white shadow-sm ring-2 ring-cyan-500/30"
+                            : "bg-white text-slate-700 hover:bg-slate-50 border border-slate-200/90 shadow-2xs"
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${isSelected ? "bg-cyan-400 animate-pulse" : liveStatus.dot}`} />
+                        <span>{doc.name.split(" ")[1] || doc.name}</span>
+                        <span className={`text-[10px] font-mono uppercase ${isSelected ? "text-cyan-300" : "text-slate-400"}`}>
+                          {doc.specialty.split("&")[0].trim()}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-3">
-              <div className="hidden md:flex items-center gap-2 text-xs font-mono font-semibold text-slate-600 bg-slate-50/80 px-3 py-1.5 rounded-xl border border-slate-200">
-                <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
-                <span>5 Specialists Synchronized</span>
-              </div>
-
-              <PremiumButton
-                variant="danger"
-                size="md"
-                onClick={endConsultation}
-              >
-                ✦ End Consultation
-              </PremiumButton>
-            </div>
-          </header>
-        ) : (
-          /* EXPANDED INTAKE HERO (IDLE / PRE-SESSION) */
-          <header className="flex flex-col gap-6 pt-2 pb-2">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-100/90 border border-cyan-300/80 text-xs font-bold text-cyan-950 tracking-wider uppercase shadow-2xs">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse" />
-                <span>Autonomous Clinical Board</span>
-                <span className="text-cyan-600 font-normal">·</span>
-                <span className="text-cyan-800 font-semibold lowercase tracking-normal text-xs">multi-specialist live triage</span>
-              </div>
-
-              <div className="hidden sm:flex items-center gap-2.5 text-xs font-semibold text-slate-600">
-                <span className="px-3.5 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-2xs flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>Sub-2s Triage</span>
-                </span>
-                <span className="px-3.5 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-2xs">
-                  5 Board-Certified Agents
-                </span>
-                <span className="px-3.5 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-2xs font-medium">
-                  Deterministic Guardrails
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3.5">
-              <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tight text-slate-950 leading-[1.12] max-w-4xl">
-                Clinical intelligence, built around the conversation.
-              </h1>
-
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-lg sm:text-xl md:text-2xl font-bold text-slate-700">
-                <span className="text-slate-500 font-medium">Designed for</span>
-                <RotatingText
-                  texts={['Emergency Triage', 'Cardiology Care', 'Acute Neurology', 'Differential Diagnosis', 'Clinical Consensus']}
-                  mainClassName="px-3 sm:px-3.5 bg-cyan-300 text-black overflow-hidden py-1 sm:py-1.5 justify-center rounded-xl font-black text-base sm:text-lg md:text-xl shadow-xs"
-                  staggerFrom="first"
-                  initial={{ y: "100%", opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  exit={{ y: "-120%", opacity: 0 }}
-                  transition={{ type: "spring", damping: 26, stiffness: 350 }}
-                  rotationInterval={2500}
-                  splitBy="words"
-                  auto
-                  loop
-                />
-              </div>
-
-              <p className="text-base sm:text-lg text-slate-600 max-w-3xl font-normal leading-relaxed">
-                Initiate hands-free patient history intake with Dr. Sarah Chen. Specialist agents listen concurrently in the background, cross-examining acoustic biomarkers and guideline protocols to reach instant consensus.
-              </p>
-
-              <div className="flex flex-wrap items-center gap-4 pt-2">
-                <PremiumButton
-                  variant="primary"
-                  size="lg"
-                  onClick={startConsultation}
-                >
-                  ✦ Start Voice Consultation
-                </PremiumButton>
-
-                <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-600 bg-white/90 backdrop-blur-md px-4 py-2.5 rounded-full border border-slate-200/80 shadow-2xs">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
-                  <span>System Operational · 5 Specialists Online</span>
+              {/* Featured Lead Clinician Surface */}
+              <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs flex flex-col md:flex-row items-center md:items-start gap-6 sm:gap-8">
+                {/* Doctor Portrait with Live Status */}
+                <div className="relative flex-shrink-0">
+                  <img
+                    src={selectedDoctor.avatarUrl}
+                    alt={selectedDoctor.name}
+                    className="w-28 h-28 sm:w-36 sm:h-36 rounded-2xl object-cover border border-slate-200 shadow-sm"
+                  />
+                  <div className="absolute -bottom-2 -right-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 shadow-xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Available now</span>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </header>
-        )}
 
-        {/* SPECIALIST NETWORK RAIL — COMPACT HUD PILLS WHEN ACTIVE, EXPANDED SELECTION CARDS WHEN IDLE */}
-        {callActive ? (
-          /* COMPACT ACTIVE SPECIALIST HUD */
-          <section className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/70 backdrop-blur-md border border-slate-200/70 shadow-2xs overflow-x-auto scrollbar-none">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
-                Active Board:
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-none">
-              {DOCTOR_PROFILES.map((doc) => {
-                const isSelected = selectedDoctor.id === doc.id;
-                const liveStatus = getDoctorLiveStatus(doc);
-                return (
-                  <button
-                    key={doc.id}
-                    onClick={() => {
-                      setSelectedDoctor(doc);
-                      speakDoctorResponse(`Switched to ${doc.name}, ${doc.department}. How may I evaluate your symptoms?`);
-                    }}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex-shrink-0 ${
-                      isSelected
-                        ? "bg-cyan-500 text-white shadow-xs font-bold"
-                        : "bg-white/90 text-slate-700 hover:bg-white border border-slate-200/80"
-                    }`}
-                  >
-                    <img
-                      src={doc.avatarUrl}
-                      alt={doc.name}
-                      className="w-5 h-5 rounded-full object-cover border border-white/40"
-                    />
-                    <span className="truncate max-w-[120px]">
-                      {doc.name.split(" ")[1] || doc.name}
-                    </span>
-                    <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : liveStatus.dot}`} />
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ) : (
-          /* EXPANDED DOCTOR SHOWCASE CARDS (PRE-SESSION) */
-          <section className="flex flex-col gap-2 pt-1 pb-1">
-            <div className="px-1">
-              <span className="text-xs font-bold uppercase tracking-widest text-slate-600 font-mono">Specialist Network</span>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">5 board-certified agents · 1 lead clinician</p>
-            </div>
+                {/* Doctor Details & Action */}
+                <div className="flex-1 flex flex-col items-center md:items-start text-center md:text-left space-y-3">
+                  <div>
+                    <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
+                      {selectedDoctor.name}
+                    </h2>
+                    <p className="text-sm sm:text-base text-cyan-800 font-semibold mt-0.5">
+                      {selectedDoctor.department} · {selectedDoctor.experience}
+                    </p>
+                  </div>
 
-            {/* Horizontal scroll viewport with vertical breathing room for elevation & glow */}
-            <div className="overflow-x-auto scrollbar-none -mx-2 px-2">
-              <div className="flex items-stretch gap-4 pt-3 pb-4">
-                {DOCTOR_PROFILES.map((doc) => {
-                  const isSelected = selectedDoctor.id === doc.id;
-                  const liveStatus = getDoctorLiveStatus(doc);
-                  return (
+                  <p className="text-sm text-slate-600 leading-relaxed max-w-xl font-normal">
+                    &quot;{selectedDoctor.greeting}&quot;
+                  </p>
+
+                  {/* Clinical Focus Badges */}
+                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-1.5 pt-1">
+                    {selectedDoctor.clinicalFocus.map((focus, i) => (
+                      <span
+                        key={i}
+                        className="font-mono text-xs text-slate-600 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-lg"
+                      >
+                        {focus}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Begin Consultation CTA */}
+                  <div className="pt-3">
                     <button
-                      key={doc.id}
-                      onClick={() => {
-                        setSelectedDoctor(doc);
-                      }}
-                      className={`group relative flex flex-col justify-between p-4 rounded-2xl transition-all duration-200 text-left cursor-pointer w-[260px] min-w-[260px] max-w-[260px] h-[180px] min-h-[180px] flex-shrink-0 ${
-                        isSelected
-                          ? "bg-white/95 backdrop-blur-md border-2 border-cyan-500 shadow-[0_6px_20px_rgba(6,182,212,0.18)] ring-2 ring-cyan-400/25 -translate-y-1"
-                          : "bg-white/80 hover:bg-white/95 backdrop-blur-md border border-slate-200/80 hover:border-cyan-400/60 shadow-xs hover:shadow-md"
-                      }`}
+                      type="button"
+                      onClick={() => startConsultation(selectedDoctor)}
+                      className="inline-flex items-center justify-center gap-3 px-7 py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white text-sm sm:text-base font-bold shadow-md hover:shadow-lg transition-all cursor-pointer group"
                     >
-                      <div className="flex items-start justify-between w-full">
-                        <div className="relative">
+                      <Mic className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                      <span>Begin Voice Consultation with {selectedDoctor.name.split(",")[0]} →</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Specialists Grid: All 5 Doctors with One-Click Consult */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between px-1">
+                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-slate-600">
+                    Clinical Specialist Network (5 Board-Certified Agents)
+                  </span>
+                  <span className="text-xs text-slate-500 font-mono">16kHz PCM Stream Ready</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {DOCTOR_PROFILES.map((doc) => {
+                    const isSelected = selectedDoctor.id === doc.id;
+                    const liveStatus = getDoctorLiveStatus(doc);
+                    return (
+                      <div
+                        key={doc.id}
+                        onClick={() => setSelectedDoctor(doc)}
+                        className={`p-5 rounded-2xl bg-white border transition-all cursor-pointer flex flex-col justify-between gap-4 ${
+                          isSelected
+                            ? "border-cyan-500 ring-2 ring-cyan-400/20 shadow-md"
+                            : "border-slate-200/90 hover:border-slate-300 shadow-2xs hover:shadow-xs"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3.5">
                           <img
                             src={doc.avatarUrl}
                             alt={doc.name}
-                            className={`w-14 h-14 rounded-2xl object-cover border transition-all ${
-                              isSelected
-                                ? "border-cyan-400 shadow-sm"
-                                : "border-slate-200 group-hover:border-slate-300"
-                            }`}
+                            className="w-12 h-12 rounded-xl object-cover border border-slate-200 flex-shrink-0"
                           />
-                          <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${liveStatus.dot}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-bold text-slate-950 truncate">{doc.name}</h3>
+                              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${liveStatus.color}`}>
+                                {liveStatus.label}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 truncate mt-0.5">{doc.department}</p>
+                          </div>
                         </div>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
-                          isSelected ? "bg-cyan-50 text-cyan-800 border border-cyan-200 font-extrabold" : "bg-slate-100/90 text-slate-600 border border-slate-200/60"
-                        }`}>
-                          {liveStatus.label}
-                        </span>
-                      </div>
 
-                      <div className="flex flex-col mt-auto">
-                        <span className="text-sm sm:text-base font-bold text-slate-900 leading-tight line-clamp-1">
-                          {doc.name.replace(", MD, FACC", "").replace(", MD, PhD", "").replace(", MD, FAAP", "").replace(", MD, DVD", "").replace(", MD", "")}
-                        </span>
-                        <span className="text-xs text-slate-500 font-medium leading-snug line-clamp-2 mt-0.5">
-                          {doc.department}
-                        </span>
+                        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                          {doc.title}
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startConsultation(doc);
+                          }}
+                          className="w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-slate-50 hover:bg-slate-950 hover:text-white text-slate-800 text-xs font-bold border border-slate-200/90 transition-all cursor-pointer"
+                        >
+                          <span>Consult with {doc.name.split(" ")[1] || doc.name}</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    </button>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          </section>
-        )}
+
+              {/* Technical Trust Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
+                  <div className="text-xs font-bold text-slate-900 font-mono">ZERO AUDIO STORAGE</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Purged post-transcription</div>
+                </div>
+                <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
+                  <div className="text-xs font-bold text-slate-900 font-mono">SUB-120MS VOICE</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Real-time bi-directional</div>
+                </div>
+                <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
+                  <div className="text-xs font-bold text-slate-900 font-mono">HL7 FHIR R4 READY</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Automated EHR Bundles</div>
+                </div>
+                <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
+                  <div className="text-xs font-bold text-slate-900 font-mono">DETERMINISTIC ESI</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Algorithmic safety checks</div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* STATE B: ACTIVE CONSULTATION WORKSPACE                                    */}
+          {/* ========================================================================= */}
+          {sessionMode === "ACTIVE_CONSULTATION" && (
+            <motion.div
+              key="active-consultation"
+              initial={{ opacity: 0, scale: 0.98, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: -16 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="flex flex-col gap-6 w-full"
+            >
+              {/* TOP COMMAND HEADER */}
+              <header className="flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5 rounded-2xl bg-white/85 backdrop-blur-xl border border-slate-200/90 shadow-xs animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={selectedDoctor.avatarUrl}
+                      alt={selectedDoctor.name}
+                      className="w-12 h-12 rounded-xl object-cover border border-cyan-400 shadow-2xs"
+                    />
+                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white animate-pulse" />
+                  </div>
+
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-base sm:text-lg font-black text-slate-950 truncate">
+                        {selectedDoctor.name}
+                      </span>
+                      <span className="text-xs sm:text-sm text-slate-500 font-semibold truncate">
+                        · {selectedDoctor.department}
+                      </span>
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200/90">
+                        Active Session
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                      <span className="font-mono font-bold text-cyan-900 bg-cyan-50 px-2 py-0.5 rounded border border-cyan-200">
+                        ⏱ {formatTimer(callDuration)}
+                      </span>
+                      <span>·</span>
+                      <span className="text-slate-600 truncate">
+                        {audioState === "DOCTOR_SPEAKING"
+                          ? "Doctor speaking response..."
+                          : audioState === "PATIENT_LISTENING"
+                          ? "Listening to patient voice input..."
+                          : "Multi-specialist board listening"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="hidden md:flex items-center gap-2 text-xs font-mono font-semibold text-slate-600 bg-slate-50/80 px-3 py-1.5 rounded-xl border border-slate-200">
+                    <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                    <span>5 Specialists Synchronized</span>
+                  </div>
+
+                  {messages.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSoapModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white border border-slate-200/90 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-cyan-700" />
+                      <span>SOAP Report</span>
+                    </button>
+                  )}
+
+                  {/* Refined, quiet End Consultation button */}
+                  <button
+                    type="button"
+                    onClick={endConsultation}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200/90 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 transition-colors shadow-2xs cursor-pointer group"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5 text-slate-400 group-hover:text-rose-600 transition-colors" />
+                    <span>End Consultation</span>
+                  </button>
+                </div>
+              </header>
+
+              {/* ACTIVE BOARD SPECIALIST HUD */}
+              <section className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/70 backdrop-blur-md border border-slate-200/70 shadow-2xs overflow-x-auto scrollbar-none">
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
+                    Active Board:
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-none">
+                  {DOCTOR_PROFILES.map((doc) => {
+                    const isSelected = selectedDoctor.id === doc.id;
+                    const liveStatus = getDoctorLiveStatus(doc);
+                    return (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDoctor(doc);
+                          speakDoctorResponse(`Switched to ${doc.name}, ${doc.department}. How may I evaluate your symptoms?`);
+                        }}
+                        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex-shrink-0 ${
+                          isSelected
+                            ? "bg-cyan-500 text-white shadow-xs font-bold"
+                            : "bg-white/90 text-slate-700 hover:bg-white border border-slate-200/80"
+                        }`}
+                      >
+                        <img
+                          src={doc.avatarUrl}
+                          alt={doc.name}
+                          className="w-5 h-5 rounded-full object-cover border border-white/40"
+                        />
+                        <span className="truncate max-w-[120px]">
+                          {doc.name.split(" ")[1] || doc.name}
+                        </span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : liveStatus.dot}`} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
 
         {/* CLINICAL WORKSPACE ENCLOSURE SHELL */}
         <section id="workspace" className="p-3 sm:p-6 lg:p-7 rounded-3xl bg-white/75 backdrop-blur-xl border border-slate-200/80 shadow-sm flex flex-col gap-6">
@@ -1288,55 +1482,18 @@ export default function ConsultPage() {
             {/* LEFT PANEL (7 cols): PRIMARY VOICE CONSOLE */}
             <section className="relative lg:col-span-7 flex flex-col gap-5 p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm overflow-hidden">
             
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200/80">
-              <div className="flex items-center gap-3.5">
-                <div className="relative">
-                  <img
-                    src={selectedDoctor.avatarUrl}
-                    alt={selectedDoctor.name}
-                    className="w-12 h-12 rounded-2xl object-cover border border-slate-300 shadow-2xs"
-                  />
-                  <span className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-white ${getDoctorLiveStatus(selectedDoctor).dot}`} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <h2 className="text-lg sm:text-xl font-black text-slate-950 whitespace-nowrap">{selectedDoctor.name}</h2>
-                    <span className="text-xs sm:text-sm text-slate-500 font-medium truncate">· {selectedDoctor.department}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-500 mt-0.5">
-                    <span className="font-mono font-bold text-slate-700">{formatTimer(callDuration)}</span>
-                    <span>·</span>
-                    <span className={audioState === "DOCTOR_SPEAKING" ? "text-emerald-700 font-bold animate-pulse" : "text-slate-500 font-medium"}>
-                      {audioState === "DOCTOR_SPEAKING" ? "Doctor speaking" : audioState === "PATIENT_LISTENING" ? "Listening to your voice..." : "Connected"}
-                    </span>
-                  </div>
-                </div>
+            {/* Conversation Console Header */}
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-200/80">
+              <div className="flex items-center gap-2.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900">
+                  Live Consultation Dialogue
+                </span>
               </div>
-
-              <div className="flex items-center gap-2">
-                {messages.length > 0 && (
-                  <PremiumButton
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setShowSoapModal(true)}
-                    icon={<FileText className="w-3.5 h-3.5 text-cyan-700" />}
-                  >
-                    SOAP Report
-                  </PremiumButton>
-                )}
-
-                <PremiumButton
-                  variant={callActive ? "danger" : "primary"}
-                  size="sm"
-                  onClick={() => {
-                    if (callActive) endConsultation();
-                    else startConsultation();
-                  }}
-                  icon={callActive ? <PhoneOff className="w-3.5 h-3.5" /> : <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />}
-                >
-                  {callActive ? "End Call" : "Start Call"}
-                </PremiumButton>
+              <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
+                <span className={audioState === "DOCTOR_SPEAKING" ? "text-emerald-700 font-bold animate-pulse" : audioState === "PATIENT_LISTENING" ? "text-cyan-700 font-bold" : "text-slate-500"}>
+                  {audioState === "DOCTOR_SPEAKING" ? `● ${selectedDoctor.name.split(" ")[1] || "Doctor"} Speaking` : audioState === "PATIENT_LISTENING" ? "● Listening to Voice" : "● Acoustic Standby"}
+                </span>
               </div>
             </div>
 
@@ -1353,13 +1510,13 @@ export default function ConsultPage() {
                     <Volume2 className="w-4 h-4 text-amber-600" />
                     Doctor is speaking. Speak aloud or click to interrupt:
                   </span>
-                  <PremiumButton
-                    variant="danger"
-                    size="sm"
+                  <button
+                    type="button"
                     onClick={() => triggerBargeIn()}
+                    className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer"
                   >
                     Interrupt
-                  </PremiumButton>
+                  </button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1375,15 +1532,15 @@ export default function ConsultPage() {
             {/* Conversation Feed */}
             <div
               ref={chatScrollRef}
-              className="h-[430px] overflow-y-auto flex flex-col gap-4 pr-2"
+              className="h-[340px] sm:h-[380px] overflow-y-auto flex flex-col gap-4 pr-2"
             >
               {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
-                  <div className="w-12 h-12 rounded-2xl bg-cyan-50 border border-cyan-200/80 flex items-center justify-center mb-3 shadow-2xs">
-                    <Stethoscope className="w-6 h-6 text-cyan-700" />
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 sm:p-10 text-slate-400 gap-3">
+                  <div className="w-14 h-14 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center mb-1 shadow-2xs">
+                    <Stethoscope className="w-7 h-7 text-cyan-700" />
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900">Ready when you are</h3>
-                  <p className="text-sm text-slate-500 mt-1 max-w-xs leading-relaxed font-normal">
+                  <h3 className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight">Ready when you are</h3>
+                  <p className="text-sm sm:text-base text-slate-600 max-w-md leading-relaxed font-normal">
                     Start a voice consultation with Dr. Sarah Chen. You can speak naturally or type your symptoms below.
                   </p>
                 </div>
@@ -1438,25 +1595,25 @@ export default function ConsultPage() {
                 ))
               )}
 
-              {/* LIVE SPEECH RECOGNITION INTERIM DISPLAY */}
-              {audioState === "PATIENT_LISTENING" && (
-                <div className="mt-3 flex items-center gap-2.5 text-sm text-cyan-900 animate-pulse py-2.5 px-4 rounded-xl bg-cyan-50/90 border border-cyan-200/80">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-ping" />
-                  <span className="font-bold text-cyan-950">Hearing:</span>
-                  <span className="italic text-cyan-900 font-semibold truncate">
-                    {transcriptText ? `"${transcriptText}"` : "Listening to your voice... speak now"}
-                  </span>
-                </div>
-              )}
             </div>
 
-            {/* Input & Microphone Bar */}
-            <div className="pt-3 border-t border-slate-200/80 flex items-center gap-3">
-              <button
-                onClick={() => {
+            {/* UNIFIED PHYSICAL VOICE PILL CONTROL */}
+            <div className="pt-3 border-t border-slate-200/80">
+              <VoicePill
+                state={voicePillState}
+                transcriptSnippet={transcriptText}
+                typedValue={typedInput}
+                onTypedChange={setTypedInput}
+                onSubmitText={(text) => {
+                  setTypedInput("");
                   if (audioState === "DOCTOR_SPEAKING") {
-                    triggerBargeIn();
-                  } else if (audioState === "PATIENT_LISTENING") {
+                    triggerBargeIn(text);
+                  } else {
+                    handleUserUtterance(text);
+                  }
+                }}
+                onToggleRecord={() => {
+                  if (audioState === "PATIENT_LISTENING") {
                     setAudioState("IDLE");
                     if (recognitionRef.current) recognitionRef.current.abort();
                   } else {
@@ -1467,57 +1624,25 @@ export default function ConsultPage() {
                     startSpeechRecognitionListening();
                   }
                 }}
-                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
-                  audioState === "PATIENT_LISTENING"
-                    ? "bg-rose-500 text-white animate-pulse shadow-md ring-4 ring-rose-200"
-                    : audioState === "DOCTOR_SPEAKING"
-                    ? "bg-amber-500 text-white hover:bg-amber-600 ring-4 ring-amber-200"
-                    : "bg-slate-950 hover:bg-slate-800 text-white shadow-sm"
-                }`}
-                title={audioState === "DOCTOR_SPEAKING" ? "Interrupt doctor" : "Toggle microphone"}
-              >
-                <Mic className="w-6 h-6" />
-              </button>
-
-              <input
-                type="text"
-                placeholder={
-                  audioState === "DOCTOR_SPEAKING"
-                    ? "Doctor speaking... tap interrupt or type here..."
-                    : audioState === "PATIENT_LISTENING"
-                    ? (transcriptText ? `Hearing: ${transcriptText}` : "Listening... speak now or type...")
-                    : "Type symptoms or click mic to speak..."
-                }
-                value={typedInput}
-                onChange={(e) => setTypedInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && typedInput.trim()) {
-                    const t = typedInput.trim();
-                    setTypedInput("");
-                    if (audioState === "DOCTOR_SPEAKING") triggerBargeIn(t);
-                    else handleUserUtterance(t);
-                  }
-                }}
-                className="flex-1 bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3.5 text-base text-slate-900 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-cyan-500/30 focus:bg-white"
+                onInterrupt={() => triggerBargeIn()}
               />
-
-              <PremiumButton
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  if (typedInput.trim()) {
-                    const t = typedInput.trim();
-                    setTypedInput("");
-                    if (audioState === "DOCTOR_SPEAKING") triggerBargeIn(t);
-                    else handleUserUtterance(t);
-                  }
-                }}
-                icon={<Send className="w-4 h-4" />}
-              >
-                Send
-              </PremiumButton>
             </div>
 
+            {/* Supporting Observable Processing Stages & Vitals Telemetry */}
+            <div className="pt-3 border-t border-slate-200/70 flex flex-col gap-3">
+              <div className="flex items-center justify-between text-xs font-mono text-slate-500 px-1">
+                <span className="font-bold uppercase tracking-wider text-slate-700">Observable Deliberation Pipeline</span>
+                <PulseHeart
+                  bpm={triageData?.triageLevel === "emergency" ? 108 : 84}
+                  status={triageData?.triageLevel === "emergency" ? "elevated" : "stable"}
+                  rhythm={triageData?.triageLevel === "emergency" ? "Sinus Tachycardia" : "Normal Sinus Rhythm"}
+                />
+              </div>
+              <ThoughtLine
+                steps={clinicalThoughtSteps}
+                isComplete={Boolean(triageData?.esiScore && audioState !== "PROCESSING_PATIENT" && audioState !== "PATIENT_LISTENING")}
+              />
+            </div>
           </section>
 
           {/* RIGHT PANEL (5 cols): CLINICAL BOARD HERO + UNIFIED STATUS */}
@@ -1579,13 +1704,13 @@ export default function ConsultPage() {
                 </div>
 
                 {/* React Bits MovingBorder Segmented Tab Navigation */}
-                <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100/90 border border-slate-200/60 text-sm font-semibold">
+                <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100/90 border border-slate-200/70 text-sm font-semibold">
                   <div className="flex-1">
-                    <MovingBorder active={activeRightTab === "board"} borderRadius="10px" duration={3.5}>
+                    <MovingBorder active={activeRightTab === "board"} borderRadius="12px" duration={3.5}>
                       <button
                         type="button"
                         onClick={() => setActiveRightTab("board")}
-                        className={`w-full py-2 px-3.5 rounded-lg transition-all cursor-pointer text-center ${
+                        className={`w-full py-2.5 px-4 rounded-xl transition-all cursor-pointer text-center ${
                           activeRightTab === "board"
                             ? "text-slate-950 font-bold shadow-2xs"
                             : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
@@ -1597,11 +1722,11 @@ export default function ConsultPage() {
                   </div>
 
                   <div className="flex-1">
-                    <MovingBorder active={activeRightTab === "context"} borderRadius="10px" duration={3.5}>
+                    <MovingBorder active={activeRightTab === "context"} borderRadius="12px" duration={3.5}>
                       <button
                         type="button"
                         onClick={() => setActiveRightTab("context")}
-                        className={`w-full py-2 px-3.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        className={`w-full py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
                           activeRightTab === "context"
                             ? "text-slate-950 font-bold shadow-2xs"
                             : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
@@ -1618,11 +1743,11 @@ export default function ConsultPage() {
                   </div>
 
                   <div className="flex-1">
-                    <MovingBorder active={activeRightTab === "care"} borderRadius="10px" duration={3.5}>
+                    <MovingBorder active={activeRightTab === "care"} borderRadius="12px" duration={3.5}>
                       <button
                         type="button"
                         onClick={() => setActiveRightTab("care")}
-                        className={`w-full py-2 px-3.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        className={`w-full py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
                           activeRightTab === "care"
                             ? "text-slate-950 font-bold shadow-2xs"
                             : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
@@ -1641,12 +1766,12 @@ export default function ConsultPage() {
 
                 {/* TAB: DELIBERATION STREAM (HUMAN-SCALE AGENT CARDS + REACT BITS ANIMATION) */}
                 {activeRightTab === "board" && (
-                  <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-5 pt-1">
                     
                     {/* Active Inquiry Specialist Banner (if awaiting response) */}
                     {boardData?.phase === "active_inquiring" && boardData.active_requests && boardData.active_requests.length > 0 && (
                       <AnimatedContent contentKey={boardData.active_requests[0].targetSlot}>
-                        <div className="p-4 rounded-2xl bg-amber-50/90 border border-amber-200 flex flex-col gap-2 shadow-2xs">
+                        <div className="p-4.5 rounded-2xl bg-amber-50/90 border border-amber-200 flex flex-col gap-2.5 shadow-2xs">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-bold text-slate-900">
                               {boardData.active_requests[0].doctorName.replace(", MD, FACC", "").replace(", MD, PhD", "").replace(", MD, FAAP", "").replace(", MD", "")}
@@ -1663,7 +1788,7 @@ export default function ConsultPage() {
                     )}
 
                     {/* Agent Cards Feed with GlowingBorder & Tiny Pulse Motion */}
-                    <div className="flex flex-col gap-3.5">
+                    <div className="flex flex-col gap-4.5">
                       {(() => {
                         if (!boardData?.deliberation_messages || boardData.deliberation_messages.length === 0) {
                           return [
@@ -1779,34 +1904,34 @@ export default function ConsultPage() {
                               active={evt.isLive}
                               glowColor={evt.role === "lead" ? "cyan" : "purple"}
                               intensity="subtle"
-                              className="p-4 sm:p-5 bg-white shadow-2xs flex flex-col gap-3 transition-shadow hover:shadow-xs border"
+                              className="p-5 sm:p-6 rounded-2xl bg-white shadow-2xs flex flex-col gap-3.5 transition-shadow hover:shadow-xs border border-slate-200/90"
                             >
                               {/* Card Header: Doctor Name, Specialty, Status & Timestamp */}
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex flex-col">
+                              <div className="flex flex-wrap items-start justify-between gap-2.5">
+                                <div className="flex flex-col min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className={`w-2.5 h-2.5 rounded-full ${evt.statusColor} ${evt.isLive ? "animate-pulse" : ""}`} />
-                                    <h4 className="text-base font-bold text-slate-900 tracking-tight">
+                                    <h4 className="text-base sm:text-lg font-bold text-slate-950 tracking-tight">
                                       {evt.doctorName}
                                     </h4>
                                   </div>
-                                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                  <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
                                     {evt.specialty}
                                   </p>
                                 </div>
 
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border ${evt.badgeColor}`}>
+                                <div className="flex items-center gap-2.5 shrink-0">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold uppercase tracking-wider border ${evt.badgeColor}`}>
                                     {evt.statusText}
                                   </span>
-                                  <span className="text-xs font-mono text-slate-400 font-medium">
+                                  <span className="text-xs font-mono text-slate-500 font-medium">
                                     {formatTimelineTime(evt.timestamp)}
                                   </span>
                                 </div>
                               </div>
 
                               {/* Card Body: High-Legibility Clinical Summary */}
-                              <p className="text-sm text-slate-700 font-normal leading-relaxed">
+                              <p className="text-sm sm:text-base text-slate-700 font-normal leading-relaxed">
                                 {evt.content}
                               </p>
 
@@ -1863,37 +1988,42 @@ export default function ConsultPage() {
                       <SpotlightCard
                         isActive={Boolean(boardData?.opinions && boardData.opinions.length > 0)}
                         spotlightColor="rgba(6, 182, 212, 0.12)"
-                        className={`p-5 rounded-2xl bg-white border shadow-2xs flex flex-col gap-2.5 transition-all ${
+                        className={`p-6 sm:p-7 rounded-2xl bg-white border shadow-2xs flex flex-col gap-4.5 transition-all ${
                           boardData?.opinions && boardData.opinions.length > 0
                             ? "border-cyan-300/80 shadow-[0_0_20px_-4px_rgba(6,182,212,0.18)]"
                             : "border-slate-200/90"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-800 font-mono">
-                            <span className="text-amber-500 text-base">✦</span>
+                        <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
+                          <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-900 font-mono whitespace-nowrap">
+                            <span className="text-amber-500 text-lg leading-none">✦</span>
                             <span>Board Consensus</span>
                           </div>
-                          <span className="text-xs font-mono text-cyan-800 bg-cyan-50 px-3 py-1 rounded-full border border-cyan-200 font-bold">
-                            {boardData?.opinions && boardData.opinions.length > 0
-                              ? `${boardData.opinions.length} ${boardData.opinions.length > 1 ? "specialists" : "specialist"} aligned`
-                              : (hasContextFacts || messages.length > 1)
-                              ? "Intake in progress"
-                              : "Awaiting clinical evidence"}
+                          <span className="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-semibold text-cyan-950 bg-cyan-50 border border-cyan-200/90 shadow-2xs whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse mr-2" />
+                            <span>
+                              {boardData?.opinions && boardData.opinions.length > 0
+                                ? `${boardData.opinions.length} ${boardData.opinions.length > 1 ? "specialists" : "specialist"} aligned`
+                                : (hasContextFacts || messages.length > 1)
+                                ? "Intake in progress"
+                                : "Awaiting clinical evidence"}
+                            </span>
                           </span>
                         </div>
-                        <h4 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-                          {boardData?.conflicts && boardData.conflicts.length > 0
-                            ? "Dual-activation acute protocol initiated under inter-specialist review."
-                            : (boardData?.opinions?.some(o => o.risk_level === "high") || triageData?.triageLevel === "emergency" || (triageData?.esiScore && triageData.esiScore <= 2))
-                            ? "Emergency evaluation indicated under specialist consensus."
-                            : (!boardData?.opinions || boardData.opinions.length === 0 || triageData?.triageLevel === "gathering_history" || boardData?.phase === "gathering_history" || boardData?.phase === "dormant" || boardData?.phase === "active_inquiring")
-                            ? (boardData?.consensus_summary || (contextKnownFacts.length > 0 ? "Primary care intake gathering clinical evidence before specialist board review." : "The board will form a clinical disposition after sufficient history is gathered."))
-                            : "Presentation evaluated as non-emergent. Outpatient clinical monitoring recommended."}
-                        </h4>
-                        <p className="text-xs sm:text-sm text-slate-600 font-normal leading-relaxed">
-                          Specialist consensus updates dynamically across every turn of the consultation based on acoustic biomarkers and symptom reports.
-                        </p>
+                        <div className="flex flex-col gap-2.5">
+                          <h4 className="text-base sm:text-lg font-bold text-slate-950 leading-snug">
+                            {boardData?.conflicts && boardData.conflicts.length > 0
+                              ? "Dual-activation acute protocol initiated under inter-specialist review."
+                              : (boardData?.opinions?.some(o => o.risk_level === "high") || triageData?.triageLevel === "emergency" || (triageData?.esiScore && triageData.esiScore <= 2))
+                              ? "Emergency evaluation indicated under specialist consensus."
+                              : (!boardData?.opinions || boardData.opinions.length === 0 || triageData?.triageLevel === "gathering_history" || boardData?.phase === "gathering_history" || boardData?.phase === "dormant" || boardData?.phase === "active_inquiring")
+                              ? (boardData?.consensus_summary || (contextKnownFacts.length > 0 ? "Primary care intake gathering clinical evidence before specialist board review." : "The board will form a clinical disposition after sufficient history is gathered."))
+                              : "Presentation evaluated as non-emergent. Outpatient clinical monitoring recommended."}
+                          </h4>
+                          <p className="text-xs sm:text-sm text-slate-600 font-normal leading-relaxed">
+                            Specialist consensus updates dynamically across every turn of the consultation based on acoustic biomarkers and symptom reports.
+                          </p>
+                        </div>
                       </SpotlightCard>
                     </AnimatedContent>
 
@@ -1905,19 +2035,19 @@ export default function ConsultPage() {
                   <div className="flex flex-col gap-4 py-1">
                     <SpotlightCard
                       spotlightColor="rgba(20, 184, 166, 0.12)"
-                      className="p-4 sm:p-5 bg-white border border-slate-200/90 shadow-2xs flex flex-col gap-4"
+                      className="p-5 sm:p-6 bg-white border border-slate-200/90 shadow-2xs flex flex-col gap-5"
                     >
                       
                       {/* Context Header: Eyebrow, Title & Subtitle + Percentage */}
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-teal-700">
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-teal-700">
                             CONTEXT
                           </span>
                           <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
                             {contextTitle}
                           </h3>
-                          <p className="text-xs text-slate-500 font-normal flex items-center gap-1.5">
+                          <p className="text-xs sm:text-sm text-slate-600 font-medium flex items-center gap-1.5">
                             {(audioState === "PATIENT_LISTENING" || audioState === "PROCESSING_PATIENT" || audioState === "PROCESSING_INTERRUPTION") && (
                               <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
                             )}
@@ -1926,14 +2056,14 @@ export default function ConsultPage() {
                         </div>
 
                         <div className="text-right shrink-0">
-                          <span className="text-xl sm:text-2xl font-bold font-mono text-slate-900">
+                          <span className="text-2xl sm:text-3xl font-bold font-mono text-slate-900">
                             <CountUp to={completenessPercent} duration={1.0} />%
                           </span>
                         </div>
                       </div>
 
                       {/* Progress Bar */}
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
+                      <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-200/70">
                         <div
                           className="h-full bg-linear-to-r from-teal-500 via-emerald-500 to-cyan-500 rounded-full transition-all duration-500"
                           style={{
@@ -1943,19 +2073,19 @@ export default function ConsultPage() {
                       </div>
 
                       {/* Section 1: WHAT WE KNOW / CONFIRMED */}
-                      <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+                      <div className="pt-3.5 border-t border-slate-200/70 flex flex-col gap-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
+                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700">
                             WHAT WE KNOW {hasContextFacts ? `(${contextKnownFacts.length})` : ""}
                           </span>
                         </div>
 
                         {!hasContextFacts ? (
-                          <div className="py-2.5 px-3 rounded-xl bg-slate-50/80 border border-slate-200/60 flex flex-col gap-0.5">
-                            <p className="text-xs sm:text-sm text-slate-600 font-medium">
+                          <div className="py-3 px-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col gap-1.5">
+                            <p className="text-xs sm:text-sm text-slate-800 font-semibold">
                               No clinical information captured yet.
                             </p>
-                            <p className="text-[11px] text-slate-400">
+                            <p className="text-xs text-slate-600 font-normal leading-relaxed">
                               Start the consultation to build the patient's clinical context.
                             </p>
                           </div>
@@ -1965,7 +2095,7 @@ export default function ConsultPage() {
                               {contextKnownFacts.map((fact: string, idx: number) => (
                                 <div
                                   key={idx}
-                                  className="flex items-start gap-2.5 p-2 rounded-lg bg-teal-50/40 border border-teal-100/80 text-xs sm:text-sm text-slate-800 font-medium leading-relaxed"
+                                  className="flex items-start gap-2.5 p-2.5 rounded-lg bg-teal-50/50 border border-teal-200/70 text-xs sm:text-sm text-slate-900 font-medium leading-relaxed"
                                 >
                                   <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
                                   <span>{formatClinicalFact(fact)}</span>
@@ -1977,26 +2107,26 @@ export default function ConsultPage() {
                       </div>
 
                       {/* Section 2: WHAT'S STILL NEEDED / STILL NEEDED */}
-                      <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+                      <div className="pt-3.5 border-t border-slate-200/70 flex flex-col gap-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
+                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700">
                             WHAT'S STILL NEEDED {contextMissingDimensions.length > 0 ? `(${contextMissingDimensions.length})` : ""}
                           </span>
                         </div>
 
                         {contextMissingDimensions.length === 0 ? (
-                          <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-emerald-50/80 border border-emerald-200/80 text-xs sm:text-sm text-emerald-800 font-medium">
+                          <div className="flex items-center gap-2.5 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs sm:text-sm text-emerald-900 font-medium">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                             <span>Clinical context sufficient for diagnostic evaluation</span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
+                          <div className="flex flex-col gap-2 max-h-52 overflow-y-auto pr-1">
                             {contextMissingDimensions.map((dim: string, idx: number) => (
                               <div
                                 key={idx}
-                                className="flex items-center gap-2.5 py-1 px-2 text-xs sm:text-sm text-slate-700 font-normal"
+                                className="flex items-center gap-3 py-1.5 px-2.5 rounded-lg bg-slate-50/60 border border-slate-200/50 text-xs sm:text-sm text-slate-800 font-medium"
                               >
-                                <Circle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <Circle className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                                 <span>{dim}</span>
                               </div>
                             ))}
@@ -2005,8 +2135,9 @@ export default function ConsultPage() {
                       </div>
 
                       {/* Footer Guidance Note */}
-                      <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-400 italic">
-                        Context will update automatically as Dr. Sarah Chen learns more.
+                      <div className="pt-3.5 border-t border-slate-200/70 flex items-center gap-2 text-xs text-slate-600 font-medium">
+                        <Info className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span>Context will update automatically as Dr. Sarah Chen learns more.</span>
                       </div>
 
                     </SpotlightCard>
@@ -2015,26 +2146,26 @@ export default function ConsultPage() {
 
                 {/* TAB: CARE OPTIONS & HOSPITAL RAG */}
                 {activeRightTab === "care" && (
-                  <div className="flex flex-col gap-3 py-1">
+                  <div className="flex flex-col gap-4 py-1">
                     {/* Location Permission & Status Banner */}
-                    <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs flex flex-col gap-2">
+                    <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs flex flex-col gap-3">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-800 font-mono">
-                          <MapPin className="w-3.5 h-3.5 text-cyan-600" />
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-900 font-mono">
+                          <MapPin className="w-4 h-4 text-cyan-600" />
                           <span>Emergency Care Network</span>
                         </div>
-                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">
+                        <span className="text-xs font-mono uppercase px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-200">
                           Verified Registry RAG
                         </span>
                       </div>
-                      <p className="text-xs text-slate-600 leading-relaxed">
+                      <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal">
                         Verified emergency departments matched by clinical specialty, verified 24/7 ER status, and strict Haversine distance.
                       </p>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                        <div className="flex items-center gap-2 text-xs text-slate-600">
-                          <span className={`w-2 h-2 rounded-full ${userLocation ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`} />
-                          <span className="font-medium text-[11px]">
+                      <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-700 font-medium">
+                          <span className={`w-2.5 h-2.5 rounded-full ${userLocation ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`} />
+                          <span>
                             {userLocation ? "Location verified (GPS)" : "Default Hub (Andhra Pradesh / Telangana)"}
                           </span>
                         </div>
@@ -2042,9 +2173,9 @@ export default function ConsultPage() {
                           <button
                             type="button"
                             onClick={handleRequestLocation}
-                            className="text-[11px] font-bold text-cyan-700 hover:text-cyan-900 flex items-center gap-1 cursor-pointer bg-cyan-50 px-2.5 py-1 rounded-lg border border-cyan-200 hover:bg-cyan-100 transition-colors"
+                            className="text-xs sm:text-sm font-bold text-cyan-800 hover:text-cyan-950 flex items-center gap-1.5 cursor-pointer bg-cyan-50 px-3 py-1.5 rounded-xl border border-cyan-300 hover:bg-cyan-100 transition-colors"
                           >
-                            <Navigation className="w-3 h-3" />
+                            <Navigation className="w-3.5 h-3.5" />
                             <span>Share Location</span>
                           </button>
                         )}
@@ -2052,7 +2183,7 @@ export default function ConsultPage() {
                     </div>
 
                     {/* Hospital Candidates List */}
-                    <div className="flex flex-col gap-2.5 max-h-[380px] overflow-y-auto pr-1">
+                    <div className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1">
                       {nearbyHospitals && nearbyHospitals.length > 0 ? (
                         nearbyHospitals.map((h: any, idx: number) => {
                           const isGov = h.ownership === "government";
@@ -2068,129 +2199,129 @@ export default function ConsultPage() {
                           return (
                             <div
                               key={h.id || idx}
-                              className={`p-3.5 rounded-xl bg-white border shadow-2xs flex flex-col gap-2 transition-all hover:border-slate-300 ${
+                              className={`p-4 sm:p-5 rounded-2xl bg-white border shadow-2xs flex flex-col gap-3 transition-all hover:border-slate-300 ${
                                 idx === 0 && isVerifiedMatch ? "border-cyan-400/80 ring-1 ring-cyan-200" : "border-slate-200/90"
                               }`}
                             >
                               {/* Header: Name, City, and Travel ETA */}
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex flex-col min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm sm:text-base font-bold text-slate-950 truncate">
                                       {h.name}
                                     </span>
                                     {idx === 0 && isVerifiedMatch && h.estimatedTravelMinutes && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded-full bg-cyan-100 text-cyan-800 font-extrabold tracking-wide">
+                                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-800 font-extrabold tracking-wide">
                                         ⚡ Fastest Reachable
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-[11px] text-slate-500 font-medium truncate">
+                                  <span className="text-xs sm:text-sm text-slate-600 font-medium truncate mt-0.5">
                                     {h.city}, {h.address}
                                   </span>
                                 </div>
 
                                 <div className="flex flex-col items-end shrink-0">
-                                  <span className="font-mono text-xs font-black text-cyan-950 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200">
+                                  <span className="font-mono text-xs sm:text-sm font-black text-cyan-950 bg-cyan-50 px-2.5 py-1 rounded-lg border border-cyan-200">
                                     {h.durationDisplay && h.durationDisplay !== "Driving time unavailable"
                                       ? h.durationDisplay
                                       : h.distanceDisplay || `~${Math.round(h.distanceKm)} km`}
                                   </span>
                                   {h.roadDistanceKm && (
-                                    <span className="text-[10px] font-mono text-slate-400 mt-0.5">
+                                    <span className="text-[11px] font-mono text-slate-500 mt-0.5">
                                       ~{h.roadDistanceKm} km by road
                                     </span>
                                   )}
                                 </div>
                               </div>
 
-                                {/* Badges: Routing Mode, Live Congestion, Clinical Suitability, Ownership */}
-                                <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-mono">
-                                  {/* Routing Mode Badge */}
-                                  {isTrafficAware ? (
-                                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
-                                      🚗 Traffic-Aware ETA
-                                    </span>
-                                  ) : isRoadNetwork ? (
-                                    <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold">
-                                      🚗 Road-Network Estimate
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-                                      📏 Straight-Line Distance
-                                    </span>
-                                  )}
-
-                                  {/* Live Traffic Congestion Telemetry */}
-                                  {h.congestionLevel && h.congestionLevel !== "unknown" && (
-                                    <span className={`px-2 py-0.5 rounded-full font-bold border flex items-center gap-1 ${
-                                      h.congestionLevel === "heavy"
-                                        ? "bg-rose-50 text-rose-800 border-rose-200"
-                                        : h.congestionLevel === "moderate"
-                                        ? "bg-amber-50 text-amber-800 border-amber-200"
-                                        : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                    }`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${
-                                        h.congestionLevel === "heavy"
-                                          ? "bg-rose-500"
-                                          : h.congestionLevel === "moderate"
-                                          ? "bg-amber-500"
-                                          : "bg-emerald-500"
-                                      }`} />
-                                      <span>
-                                        {h.congestionLevel === "heavy" ? "Heavy Traffic" : h.congestionLevel === "moderate" ? "Moderate Traffic" : "Flowing Smoothly"}
-                                        {h.trafficDelayMinutes ? ` (+${h.trafficDelayMinutes}m)` : ""}
-                                      </span>
-                                    </span>
-                                  )}
-
-                                  {/* Clinical Suitability Badge */}
-                                  {isVerifiedMatch ? (
-                                    <span className="px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-900 border border-cyan-300 font-bold">
-                                      ✓ Verified Specialty & ER
-                                    </span>
-                                  ) : isGeneralER ? (
-                                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
-                                      ● 24/7 ER (Specialty Unverified)
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                                      ○ Discovered Facility
-                                    </span>
-                                  )}
-
-                                  {/* Ownership Badge */}
-                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-medium">
-                                    🏛 {ownershipLabel}
+                              {/* Badges: Routing Mode, Live Congestion, Clinical Suitability, Ownership */}
+                              <div className="flex items-center gap-2 flex-wrap text-xs font-mono font-medium">
+                                {/* Routing Mode Badge */}
+                                {isTrafficAware ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                                    🚗 Traffic-Aware ETA
                                   </span>
-                                </div>
-
-                                {/* Typical vs Traffic Delay Sub-bar */}
-                                {isTrafficAware && h.staticDurationMinutes && h.trafficDelayMinutes !== undefined && h.trafficDelayMinutes > 0 && (
-                                  <div className="text-[11px] text-slate-500 flex items-center gap-2 bg-amber-50/60 px-2.5 py-1 rounded-lg border border-amber-100/80">
-                                    <span className="font-semibold text-amber-900">Traffic Impact:</span>
-                                    <span>Typical drive is ~{h.staticDurationMinutes} min · Current congestion adds +{h.trafficDelayMinutes} min</span>
-                                  </div>
+                                ) : isRoadNetwork ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold">
+                                    🚗 Road-Network Estimate
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                    📏 Straight-Line Distance
+                                  </span>
                                 )}
+
+                                {/* Live Traffic Congestion Telemetry */}
+                                {h.congestionLevel && h.congestionLevel !== "unknown" && (
+                                  <span className={`px-2.5 py-0.5 rounded-full font-bold border flex items-center gap-1.5 ${
+                                    h.congestionLevel === "heavy"
+                                      ? "bg-rose-50 text-rose-800 border-rose-200"
+                                      : h.congestionLevel === "moderate"
+                                      ? "bg-amber-50 text-amber-800 border-amber-200"
+                                      : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                  }`}>
+                                    <span className={`w-2 h-2 rounded-full ${
+                                      h.congestionLevel === "heavy"
+                                        ? "bg-rose-500"
+                                        : h.congestionLevel === "moderate"
+                                        ? "bg-amber-500"
+                                        : "bg-emerald-500"
+                                    }`} />
+                                    <span>
+                                      {h.congestionLevel === "heavy" ? "Heavy Traffic" : h.congestionLevel === "moderate" ? "Moderate Traffic" : "Flowing Smoothly"}
+                                      {h.trafficDelayMinutes ? ` (+${h.trafficDelayMinutes}m)` : ""}
+                                    </span>
+                                  </span>
+                                )}
+
+                                {/* Clinical Suitability Badge */}
+                                {isVerifiedMatch ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-cyan-50 text-cyan-950 border border-cyan-300 font-bold">
+                                    ✓ Verified Specialty & ER
+                                  </span>
+                                ) : isGeneralER ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
+                                    ● 24/7 ER (Specialty Unverified)
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                                    ○ Discovered Facility
+                                  </span>
+                                )}
+
+                                {/* Ownership Badge */}
+                                <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200 font-medium">
+                                  🏛 {ownershipLabel}
+                                </span>
+                              </div>
+
+                              {/* Typical vs Traffic Delay Sub-bar */}
+                              {isTrafficAware && h.staticDurationMinutes && h.trafficDelayMinutes !== undefined && h.trafficDelayMinutes > 0 && (
+                                <div className="text-xs text-slate-600 flex items-center gap-2 bg-amber-50/70 px-3 py-1.5 rounded-xl border border-amber-200/80 font-medium">
+                                  <span className="font-bold text-amber-950">Traffic Impact:</span>
+                                  <span>Typical drive is ~{h.staticDurationMinutes} min · Current congestion adds +{h.trafficDelayMinutes} min</span>
+                                </div>
+                              )}
 
                               {/* Affordability Notes (if verified) */}
                               {h.affordabilityNotes && (
-                                <p className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100 leading-relaxed italic">
+                                <p className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 leading-relaxed font-normal">
                                   💡 {h.affordabilityNotes}
                                 </p>
                               )}
 
                               {/* Footer: Provenance & Direct Dial */}
-                              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                                <span className="text-[10px] text-slate-400 font-mono truncate max-w-[170px]" title={`${h.source} · ${h.freshnessLabel || "Calculated just now"}`}>
+                              <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
+                                <span className="text-xs text-slate-500 font-mono truncate max-w-[200px]" title={`${h.source} · ${h.freshnessLabel || "Calculated just now"}`}>
                                   ✓ {h.freshnessLabel || h.source || "Verified Registry"}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => handleInitiateEmergencyCall(h.emergencyPhone || h.phone || "108", h.name)}
-                                  className="text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                                  className="text-xs sm:text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 px-3.5 py-2 rounded-xl flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
                                 >
-                                  <PhoneCall className="w-3 h-3 text-emerald-400" />
+                                  <PhoneCall className="w-3.5 h-3.5 text-emerald-400" />
                                   <span>Call {h.emergencyPhone || "108"}</span>
                                 </button>
                               </div>
@@ -2198,10 +2329,12 @@ export default function ConsultPage() {
                           );
                         })
                       ) : (
-                        <div className="p-6 rounded-xl bg-white border border-slate-200 text-center flex flex-col items-center justify-center text-slate-400 gap-2">
-                          <Building2 className="w-8 h-8 text-slate-300" />
-                          <p className="text-xs font-bold text-slate-700">No constraints triggered yet</p>
-                          <p className="text-[11px] text-slate-500 max-w-xs">
+                        <div className="p-8 sm:p-10 rounded-2xl bg-white border border-slate-200/90 text-center flex flex-col items-center justify-center text-slate-400 gap-3.5 shadow-2xs">
+                          <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 shadow-2xs">
+                            <Building2 className="w-7 h-7 text-slate-600" />
+                          </div>
+                          <h4 className="text-base sm:text-lg font-bold text-slate-950">No care network barriers triggered yet</h4>
+                          <p className="text-xs sm:text-sm text-slate-600 max-w-sm leading-relaxed font-normal">
                             Care Network routing engages when financial constraints, remote outskirts, or transportation barriers are expressed by the patient.
                           </p>
                         </div>
@@ -2209,25 +2342,31 @@ export default function ConsultPage() {
                     </div>
 
                     {/* National Emergency Protocols Box */}
-                    <div className="mt-2 p-3.5 rounded-xl bg-red-50/80 border border-red-200 flex flex-col gap-2">
-                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-red-800">
-                        Emergency Dispatch (India)
-                      </span>
-                      <div className="grid grid-cols-2 gap-2">
+                    <div className="mt-2 p-4 sm:p-5 rounded-2xl bg-rose-50/90 border border-rose-200/90 flex flex-col gap-3 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-rose-950 flex items-center gap-2">
+                          <PhoneCall className="w-4 h-4 text-rose-600" />
+                          <span>Emergency Dispatch (India)</span>
+                        </span>
+                        <span className="text-xs font-mono font-bold text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full border border-rose-200">
+                          24/7 Priority
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
                         <button
                           type="button"
                           onClick={() => handleInitiateEmergencyCall("108", "Ambulance")}
-                          className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors cursor-pointer"
+                          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-bold transition-all shadow-xs cursor-pointer"
                         >
-                          <PhoneCall className="w-3.5 h-3.5" />
+                          <PhoneCall className="w-4 h-4" />
                           <span>Call 108 (Ambulance)</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleInitiateEmergencyCall("112", "National Emergency")}
-                          className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer"
+                          className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-bold transition-all shadow-xs cursor-pointer"
                         >
-                          <PhoneCall className="w-3.5 h-3.5" />
+                          <PhoneCall className="w-4 h-4" />
                           <span>Call 112 (National)</span>
                         </button>
                       </div>
@@ -2243,32 +2382,32 @@ export default function ConsultPage() {
               active={true}
               glowColor="emerald"
               intensity="subtle"
-              className="p-5 sm:p-6 bg-white border border-slate-200/90 shadow-sm flex flex-col gap-4"
+              className="p-6 sm:p-7 bg-white border border-slate-200/90 shadow-sm flex flex-col gap-5"
             >
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-200/80">
                 <div className="flex items-center gap-2.5">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-900 font-mono">
+                  <ShieldCheck className="w-6 h-6 text-emerald-600" />
+                  <span className="text-base font-bold uppercase tracking-wider text-slate-950 font-mono">
                     Clinical Safety
                   </span>
                 </div>
-                <span className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 font-bold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="inline-flex items-center gap-2 text-xs sm:text-sm font-mono text-emerald-800 bg-emerald-50 px-3.5 py-1.5 rounded-full border border-emerald-200 font-bold">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span>ACTIVE</span>
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="grid grid-cols-1 gap-4 pt-1">
                 
                 {/* Left Card: Live Triage */}
-                <div className="rounded-xl border border-slate-200/90 bg-slate-50/60 p-4 flex flex-col justify-between gap-3">
+                <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-5 flex flex-col justify-between gap-4 shadow-2xs">
                   <div>
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-200/60">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700 font-mono">
                         Live Triage
                       </span>
                       {triageData ? (
-                        <span className={`text-[11px] font-mono font-bold uppercase px-2 py-0.5 rounded-full border ${
+                        <span className={`text-xs font-mono font-bold uppercase px-2.5 py-1 rounded-full border ${
                           triageData.triageLevel === "emergency"
                             ? "bg-rose-50 text-rose-700 border-rose-200 font-extrabold"
                             : triageData.triageLevel === "priority"
@@ -2280,59 +2419,61 @@ export default function ConsultPage() {
                           {triageData.triageLevel === "gathering_history" ? "Intake Active" : triageData.triageLevel}
                         </span>
                       ) : (
-                        <span className="text-[11px] font-mono text-slate-400">Standby</span>
+                        <span className="text-xs font-mono font-semibold text-slate-500 bg-slate-200/60 px-2.5 py-0.5 rounded-full">
+                          Standby
+                        </span>
                       )}
                     </div>
 
-                    <div className="mt-3">
+                    <div className="mt-3.5">
                       {triageData ? (
                         <AnimatedContent contentKey={`${triageData.esiScore}-${triageData.triageLevel}`}>
                           <div className="flex flex-col">
-                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                            <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500">
                               ESI Acuity Index
                             </span>
                             {triageData.esiScore !== null && triageData.esiScore !== undefined ? (
-                              <span className={`text-3xl font-black font-mono leading-tight mt-0.5 ${
+                              <span className={`text-3xl sm:text-4xl font-black font-mono leading-tight mt-0.5 ${
                                 triageData.triageLevel === "emergency" ? "text-rose-600" : "text-slate-900"
                               }`}>
                                 Level {triageData.esiScore}
                               </span>
                             ) : (
-                              <span className="text-3xl font-black font-mono leading-tight text-slate-300 mt-0.5">
+                              <span className="text-3xl sm:text-4xl font-black font-mono leading-tight text-slate-300 mt-0.5">
                                 —
                               </span>
                             )}
-                            <h4 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug mt-1">
+                            <h4 className="text-sm sm:text-base font-bold text-slate-950 leading-snug mt-1.5">
                               {triageData.triageTitle.replace(/^ESI LEVEL \d+:\s*(EMERGENT|URGENT|ROUTINE)?\s*—?\s*/i, "") || "Clinical History Gathering"}
                             </h4>
-                            <p className="text-xs text-slate-600 line-clamp-2 mt-1 leading-relaxed">
+                            <p className="text-xs sm:text-sm text-slate-600 line-clamp-2 mt-1 leading-relaxed font-normal">
                               {triageData.recommendedAction}
                             </p>
                           </div>
                         </AnimatedContent>
                       ) : (
-                        <div className="py-1 flex flex-col gap-1">
-                          <p className="text-sm font-semibold text-slate-700">Awaiting symptoms</p>
-                          <p className="text-xs text-slate-500 leading-relaxed">
-                            Your consultation is being assessed as you provide more information.
+                        <div className="py-1 flex flex-col gap-1.5">
+                          <h4 className="text-base sm:text-lg font-bold text-slate-950">Awaiting symptoms</h4>
+                          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal">
+                            Your consultation is continuously assessed in real time as you provide more information.
                           </p>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-200/60">
+                  <div className="pt-2.5 border-t border-slate-200/60">
                     {triageData?.triageLevel === "emergency" ? (
                       <Link
                         href="/emergency"
-                        className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-2xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                        className="w-full py-2.5 px-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-2xs flex items-center justify-center gap-2 transition-all cursor-pointer"
                       >
-                        <Building2 className="w-3.5 h-3.5" />
+                        <Building2 className="w-4 h-4" />
                         <span>Hospital Dispatch →</span>
                       </Link>
                     ) : (
-                      <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1.5 py-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                      <div className="text-xs font-mono text-slate-500 font-medium flex items-center gap-2 py-0.5">
+                        <span className="w-2 h-2 rounded-full bg-slate-400" />
                         <span>Emergency dispatch standby</span>
                       </div>
                     )}
@@ -2340,33 +2481,34 @@ export default function ConsultPage() {
                 </div>
 
                 {/* Right Card: Safety Guard */}
-                <div className="rounded-xl border border-slate-200/90 bg-slate-50/60 p-4 flex flex-col justify-between gap-3">
+                <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-5 flex flex-col justify-between gap-4 shadow-2xs">
                   <div>
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-200/60">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700 font-mono">
                         Safety Guard
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-700 font-bold bg-emerald-50/80 px-2 py-0.5 rounded-full border border-emerald-200/80">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-800 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                         <span>Protected</span>
                       </span>
                     </div>
 
-                    <div className="mt-3">
-                      <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-normal">
-                        Emergency safety rules remain active throughout the consultation.
+                    <div className="mt-3.5 flex flex-col gap-1.5">
+                      <h4 className="text-base sm:text-lg font-bold text-slate-950">Continuous Invariant Check</h4>
+                      <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal">
+                        Deterministic emergency safety rules remain active throughout the consultation.
                       </p>
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-200/60">
+                  <div className="pt-2.5 border-t border-slate-200/60">
                     <button
                       type="button"
                       onClick={() => setShowTechnicalTrace(!showTechnicalTrace)}
-                      className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 flex items-center gap-1 cursor-pointer transition-colors"
+                      className="text-xs sm:text-sm font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1.5 cursor-pointer transition-colors"
                     >
                       <span>Safety details</span>
-                      {showTechnicalTrace ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                      {showTechnicalTrace ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
@@ -2375,12 +2517,12 @@ export default function ConsultPage() {
 
               {/* Patient-Facing Safety Details Drawer */}
               {showTechnicalTrace && (
-                <div className="p-3.5 rounded-xl bg-emerald-50/50 border border-emerald-200/70 text-xs text-slate-700 leading-relaxed animate-in fade-in duration-200 flex flex-col gap-1.5">
-                  <div className="flex items-center gap-1.5 font-bold text-emerald-900 font-mono text-[11px] uppercase tracking-wider">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <div className="p-4 sm:p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 text-xs sm:text-sm text-slate-700 leading-relaxed animate-in fade-in duration-200 flex flex-col gap-2">
+                  <div className="flex items-center gap-2 font-bold text-emerald-950 font-mono text-xs sm:text-sm uppercase tracking-wider">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
                     <span>Consultation Safety Policy</span>
                   </div>
-                  <p className="text-slate-600 text-xs leading-relaxed">
+                  <p className="text-slate-700 text-xs sm:text-sm leading-relaxed font-normal">
                     Safety protection is active. MedVoice continuously checks for critical symptoms during the consultation. If an emergency concern is detected, the consultation will prioritize urgent care guidance.
                   </p>
                 </div>
@@ -2391,65 +2533,97 @@ export default function ConsultPage() {
 
         </div>
         </section>
+            </motion.div>
+          )}
 
-        {/* HOW MEDVOICE THINKS — DELIBERATION ARCHITECTURE GALLERY */}
-        <section className="mt-12 sm:mt-16 flex flex-col gap-6">
-          <div className="flex flex-col gap-2.5">
-            <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-cyan-800 font-bold">
-              <Zap className="w-3.5 h-3.5 text-cyan-600" />
-              <span>How MedVoice Thinks</span>
-            </div>
-            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-tight">
-              Autonomous Multidisciplinary Deliberation Architecture
-            </h2>
-            <p className="text-base sm:text-lg text-slate-600 max-w-3xl leading-relaxed">
-              A deterministic multi-agent framework where specialists evaluate acoustic biomarkers, cross-examine differential diagnoses, and enforce ESI v4 safety invariants.
-            </p>
-          </div>
-
-          <div className="w-full p-2 sm:p-2.5 rounded-2xl bg-white/75 backdrop-blur-xs border border-slate-200/80 shadow-xs">
-            <AccordionGallery
-              items={METHODOLOGY_STAGES}
-              height={500}
-              accentColor="#06B6D4"
-              expandRatio={0.65}
-            />
-          </div>
-        </section>
-
-        {/* HEROIC FINAL CTA — OPEN UNBOXED FINALE SITTING DIRECTLY ON ATMOSPHERIC AURORA */}
-        <section className="py-16 sm:py-20 text-center flex flex-col items-center gap-5 relative z-10">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-100/90 border border-cyan-300/80 text-xs font-bold text-cyan-950 tracking-wider uppercase shadow-2xs">
-            <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
-            <span>Autonomous Voice Consultation</span>
-          </div>
-
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight max-w-2xl leading-[1.15]">
-            Ready to initiate patient intake?
-          </h2>
-
-          <p className="text-base sm:text-lg text-slate-600 max-w-xl leading-relaxed font-normal">
-            Begin hands-free consultation with Dr. Sarah Chen while specialist agents analyze symptoms concurrently.
-          </p>
-
-          <div className="pt-2">
-            <PremiumButton
-              size="lg"
-              variant="primary"
-              onClick={() => {
-                if (!callActive) startConsultation();
-                const el = document.getElementById("workspace");
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth" });
-                } else {
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }
-              }}
+          {/* ========================================================================= */}
+          {/* STATE C: CONSULT COMPLETE (SOAP READY & RETURN TO LOBBY EXPERIENCE)       */}
+          {/* ========================================================================= */}
+          {sessionMode === "CONSULT_COMPLETE" && (
+            <motion.div
+              key="consult-complete"
+              initial={{ opacity: 0, scale: 0.97, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              className="flex flex-col gap-6 max-w-4xl mx-auto w-full pt-4 sm:pt-6"
             >
-              ✦ Start Voice Consultation
-            </PremiumButton>
-          </div>
-        </section>
+              {/* Completion Banner */}
+              <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs flex flex-col items-center text-center space-y-4">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 tracking-wider uppercase font-mono shadow-2xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>CONSULTATION COMPLETE · ENCOUNTER RECORD SEALED</span>
+                </div>
+
+                <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-950 tracking-tight">
+                  Consultation complete with {selectedDoctor.name}
+                </h1>
+                <p className="text-sm sm:text-base text-slate-600 max-w-xl font-normal leading-relaxed">
+                  Clinical history recorded, symptoms cross-examined against ESI protocols, and SOAP encounter documentation generated with cryptographic SHA-256 integrity.
+                </p>
+
+                {/* Clinical Takeaways Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-2xl pt-2">
+                  {/* Triage Level */}
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 text-left">
+                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Triage Assessment</div>
+                    <div className="text-base font-extrabold text-slate-900 mt-1">
+                      {triageData?.triageLevel ? `ESI Level ${triageData.esiScore} (${triageData.triageLevel.toUpperCase()})` : "ESI Level 2 (Emergent)"}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">Deterministic Safety Verified</div>
+                  </div>
+
+                  {/* Duration */}
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 text-left">
+                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Encounter Duration</div>
+                    <div className="text-base font-extrabold text-slate-900 mt-1 font-mono">
+                      {formatTimer(callDuration)}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">{messages.length} Utterances Processed</div>
+                  </div>
+
+                  {/* ICD-10 Coding */}
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 text-left">
+                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Diagnostic Coding</div>
+                    <div className="text-base font-extrabold text-cyan-900 mt-1 font-mono">
+                      {(triageData?.icdCodes && triageData.icdCodes[0]) || "ICD-10 R07.9"}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">HL7 FHIR Encoded</div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 pt-4 w-full">
+                  <button
+                    type="button"
+                    onClick={() => setShowSoapModal(true)}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>View Full SOAP Clinical Report</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={startNewConsultation}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white text-sm font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
+                  >
+                    <ArrowRight className="w-4 h-4 text-cyan-400" />
+                    <span>Start New Consultation</span>
+                  </button>
+
+                  <Link
+                    href="/care"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 text-sm font-semibold border border-slate-200/90 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Building2 className="w-4 h-4 text-slate-500" />
+                    <span>Hospital Care Options →</span>
+                  </Link>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* CLINICAL ENCOUNTER SOAP REVIEW & FINALIZATION MODAL */}
         <SoapReportModal
@@ -2550,6 +2724,43 @@ export default function ConsultPage() {
             </div>
           </div>
         )}
+
+        {/* POST-CONSULTATION CLINICAL FEEDBACK (PEEK RATING) */}
+        {showRatingModal && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+            onClick={() => setShowRatingModal(false)}
+          >
+            <div
+              className="max-w-md w-full animate-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <PeekRating
+                onSubmit={(r, tags) => {
+                  console.log("Clinical review logged:", r, tags);
+                  setTimeout(() => setShowRatingModal(false), 1200);
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* TRANSIENT CLINICAL EVENT TOASTS (SWIPE TOAST) */}
+        <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+          {clinicalToasts.map((toast) => (
+            <div key={toast.id} className="pointer-events-auto">
+              <SwipeToast
+                id={toast.id}
+                type={toast.type}
+                title={toast.title}
+                description={toast.description}
+                onDismiss={(id) => setClinicalToasts((prev) => prev.filter((t) => t.id !== id))}
+              />
+            </div>
+          ))}
+        </div>
 
       </main>
 

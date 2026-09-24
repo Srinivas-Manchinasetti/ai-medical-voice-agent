@@ -20,10 +20,8 @@ export function StrandsBackground({
 }: StrandsBackgroundProps) {
   const pathname = usePathname();
 
-  // Exclude Home page ("/")
-  if (pathname === '/') {
-    return null;
-  }
+  // Keep background atmosphere subtle and clinical across all pages
+  const effectiveOpacity = pathname === '/' ? 0.20 : opacity;
 
   // Global ambient atmosphere covering entire viewport/page seamlessly
   return (
@@ -35,7 +33,7 @@ export function StrandsBackground({
         colorStops={colors}
         blend={0.5}
         amplitude={1.1}
-        opacity={opacity}
+        opacity={effectiveOpacity}
         speed={speed}
         className="w-full h-full"
       />

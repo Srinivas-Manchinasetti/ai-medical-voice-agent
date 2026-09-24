@@ -37,20 +37,23 @@ export function Footer({ showPayoffBanner = false }: { showPayoffBanner?: boolea
               LISTEN · UNDERSTAND · ACT
             </span>
             <h2 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
-              Give every patient conversation a next step.
+              Start a Voice Consultation
             </h2>
+            <p className="text-base sm:text-lg text-slate-300 max-w-xl mx-auto font-normal leading-relaxed">
+              Experience instant medical voice triage, continuous ICD-10 extraction, and automated SOAP clinical documentation.
+            </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
               <a
-                href="/demo"
+                href="/consult"
                 className="pointer-events-auto inline-flex items-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white px-7 py-3.5 text-sm font-bold shadow-lg transition-all cursor-pointer"
               >
-                <span>Book a Demo →</span>
+                <span>Launch Voice Consult Room →</span>
               </a>
               <a
-                href="/product"
+                href="/care"
                 className="pointer-events-auto inline-flex items-center gap-2 text-slate-300 hover:text-white px-5 py-3 text-sm font-semibold transition-all cursor-pointer"
               >
-                <span>See MedVoice in action</span>
+                <span>Explore Care Network</span>
               </a>
             </div>
           </div>

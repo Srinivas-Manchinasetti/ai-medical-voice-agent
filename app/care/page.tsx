@@ -23,6 +23,17 @@ import {
 import { Navbar } from "../_components/Navbar";
 import { AppFooter } from "../_components/AppFooter";
 import { HospitalItem } from "../_components/InteractiveRouteMap";
+import { CardNav, RegionCardItem } from "@/components/navigation/CardNav";
+import { MovingBorder } from "@/components/motion/MovingBorder";
+import { OptionWheel, OptionWheelItem } from "@/components/navigation/OptionWheel";
+
+const SPECIALTY_WHEEL_OPTIONS: OptionWheelItem[] = [
+  { id: "all", label: "Emergency & Trauma", category: "Comprehensive 24/7 ED", badge: "24/7 Emergency", badgeStyle: "bg-rose-50 text-rose-700 border-rose-200" },
+  { id: "cardiology", label: "Interventional Cardiology", category: "Cath Lab / Door-to-Balloon", badge: "Door-to-Balloon", badgeStyle: "bg-rose-50 text-rose-700 border-rose-200" },
+  { id: "neurology", label: "Comprehensive Stroke", category: "Thrombolysis & Neuro ICU", badge: "BE-FAST Unit", badgeStyle: "bg-purple-50 text-purple-700 border-purple-200" },
+  { id: "pediatrics", label: "Pediatric Emergency", category: "PICU / NICU Level-3", badge: "Pediatric Resuscitation", badgeStyle: "bg-teal-50 text-teal-700 border-teal-200" },
+  { id: "cancer", label: "Surgical Oncology", category: "Tumor Board & Infusion", badge: "Oncology Care", badgeStyle: "bg-amber-50 text-amber-700 border-amber-200" },
+];
 
 // Leaflet map dynamically imported with SSR disabled
 const InteractiveRouteMap = dynamic(
@@ -54,6 +65,15 @@ const REGION_PRESETS: Array<{ name: string; lat: number; lng: number; label: str
   { name: "Bengaluru", lat: 12.9716, lng: 77.5946, label: "Bengaluru, Karnataka" },
   { name: "Mumbai", lat: 19.0760, lng: 72.8777, label: "Mumbai, Maharashtra" },
   { name: "Delhi NCR", lat: 28.6139, lng: 77.2090, label: "New Delhi, Delhi" },
+];
+
+const CARD_NAV_REGIONS: RegionCardItem[] = [
+  { id: "Vijayawada", name: "Vijayawada", state: "Andhra Pradesh", lat: 16.5062, lng: 80.6480, traumaLevel: "Level-1", facilitiesCount: 14, avgEtaMinutes: 14, specialties: ["Cardiology", "Trauma", "Stroke"] },
+  { id: "Guntur", name: "Guntur", state: "Andhra Pradesh", lat: 16.3067, lng: 80.4365, traumaLevel: "Emergency Hub", facilitiesCount: 12, avgEtaMinutes: 11, specialties: ["Cardiology", "Stroke"] },
+  { id: "Hyderabad", name: "Hyderabad", state: "Telangana", lat: 17.4326, lng: 78.4071, traumaLevel: "Comprehensive", facilitiesCount: 28, avgEtaMinutes: 18, specialties: ["Burn", "Trauma", "Pediatric"] },
+  { id: "Bengaluru", name: "Bengaluru", state: "Karnataka", lat: 12.9716, lng: 77.5946, traumaLevel: "Level-1", facilitiesCount: 32, avgEtaMinutes: 22, specialties: ["Cardiology", "Trauma"] },
+  { id: "Mumbai", name: "Mumbai", state: "Maharashtra", lat: 19.0760, lng: 72.8777, traumaLevel: "Level-1", facilitiesCount: 26, avgEtaMinutes: 24, specialties: ["Trauma", "Cardiac"] },
+  { id: "Delhi NCR", name: "Delhi NCR", state: "Delhi", lat: 28.6139, lng: 77.2090, traumaLevel: "Comprehensive", facilitiesCount: 34, avgEtaMinutes: 19, specialties: ["All Specialties"] },
 ];
 
 const DEFAULT_ORIGIN: CareOrigin = {
@@ -414,8 +434,8 @@ export default function CarePage() {
           </div>
         </header>
 
-        {/* UNIFIED SEARCH & LOCATION HUD */}
-        <div className="p-4 sm:p-5 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/60 shadow-xs flex flex-col gap-3.5">
+        {/* 1. UNIFIED SEARCH & LOCATION TOOLBAR */}
+        <div className="p-4 sm:p-5 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/60 shadow-xs flex flex-col gap-3">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             
             {/* Autocomplete Input */}
@@ -476,41 +496,125 @@ export default function CarePage() {
               </button>
             </div>
           </div>
-
-          {/* Quick Region Presets */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-            <span className="text-[11px] font-mono text-slate-400 shrink-0 font-semibold mr-1">
-              REGIONS:
-            </span>
-            {REGION_PRESETS.map((preset) => (
-              <button
-                key={preset.name}
-                onClick={() => handleSelectPreset(preset)}
-                className={`px-3 py-1 rounded-xl text-xs font-medium shrink-0 transition-all cursor-pointer ${
-                  origin.label.includes(preset.name)
-                    ? "bg-cyan-600 text-white shadow-2xs"
-                    : "bg-white hover:bg-slate-100 text-slate-600 border border-slate-200/80"
-                }`}
-              >
-                {preset.name}
-              </button>
-            ))}
-          </div>
         </div>
 
-        {/* PROMINENT INTERACTIVE MAP HUD */}
-        <div className="relative rounded-3xl overflow-hidden shadow-sm border border-slate-200/80">
-          <InteractiveRouteMap
-            patientCoords={{ lat: origin.lat, lng: origin.lng }}
-            patientLocationName={origin.label}
-            selectedHospital={selectedHospital}
-            allHospitals={filteredAndSortedHospitals.slice(0, 15)}
-            isManualPicking={isManualPicking}
-            onSelectHospital={(hosp) => setSelectedHospital(hosp)}
-            onConfirmManualLocation={handleConfirmManualLocation}
-            onCancelManualPicking={() => setIsManualPicking(false)}
-            onRouteCalculated={(stats) => setLiveRoadStats(stats)}
+        {/* 2. REGIONAL TRAUMA NETWORKS - Dedicated Clean Surface */}
+        <div className="p-4 sm:p-5 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/60 shadow-xs flex flex-col gap-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-mono text-slate-400 block font-bold uppercase tracking-wider">
+              REGIONAL TRAUMA NETWORKS:
+            </span>
+            <span className="text-[10px] font-mono text-cyan-700 font-bold hidden sm:inline">
+              Verified Emergency Hub Routing
+            </span>
+          </div>
+          <CardNav
+            regions={CARD_NAV_REGIONS}
+            selectedId={CARD_NAV_REGIONS.find((r) => origin.label.includes(r.name))?.id || "Vijayawada"}
+            onSelect={(reg) => {
+              const preset = REGION_PRESETS.find((p) => p.name === reg.name) || REGION_PRESETS[0];
+              handleSelectPreset(preset);
+            }}
           />
+        </div>
+
+        {/* 3. DENSE WORKSPACE: LIVE MAP (DOMINANT VISUAL ANCHOR) + SPECIALTY / ROUTE PANEL */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          
+          {/* LEFT: Dominant Live Route Map */}
+          <div className="lg:col-span-8 rounded-3xl overflow-hidden shadow-sm border border-slate-200/80 bg-white">
+            <InteractiveRouteMap
+              patientCoords={{ lat: origin.lat, lng: origin.lng }}
+              patientLocationName={origin.label}
+              selectedHospital={selectedHospital}
+              allHospitals={filteredAndSortedHospitals.slice(0, 15)}
+              isManualPicking={isManualPicking}
+              onSelectHospital={(hosp) => setSelectedHospital(hosp)}
+              onConfirmManualLocation={handleConfirmManualLocation}
+              onCancelManualPicking={() => setIsManualPicking(false)}
+              onRouteCalculated={(stats) => setLiveRoadStats(stats)}
+            />
+          </div>
+
+          {/* RIGHT: Specialty Rotary Focus & Active Route Telemetry */}
+          <div className="lg:col-span-4 flex flex-col gap-4">
+            
+            {/* Specialty Rotary Filter Card */}
+            <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col gap-3">
+              <div>
+                <span className="text-[11px] font-mono text-cyan-800 font-bold uppercase tracking-wider block">
+                  CLINICAL SPECIALTY FOCUS
+                </span>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Route destination centers by verified sub-specialty readiness.
+                </p>
+              </div>
+
+              <OptionWheel
+                options={SPECIALTY_WHEEL_OPTIONS}
+                selectedId={specialtyFilter}
+                onChange={(opt) => {
+                  setSpecialtyFilter(opt.id);
+                  setCurrentPage(1);
+                }}
+                className="w-full"
+              />
+            </div>
+
+            {/* Active Selected Destination / Telemetry Card */}
+            {selectedHospital && (
+              <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-cyan-500/30 p-4 sm:p-5 shadow-xs flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200">
+                    Active Destination Route
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-900">
+                    ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min ETA
+                  </span>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-black text-slate-950 truncate">
+                    {selectedHospital.name}
+                  </h4>
+                  <p className="text-xs text-slate-500 truncate mt-0.5">
+                    {selectedHospital.address}
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-600">
+                    Distance: ~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km
+                  </span>
+                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Verified ED
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <a
+                    href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                  >
+                    <PhoneCall className="w-3.5 h-3.5" />
+                    <span>Call ED</span>
+                  </a>
+                  <a
+                    href={currentGoogleMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                  >
+                    <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Directions</span>
+                  </a>
+                </div>
+              </div>
+            )}
+
+          </div>
+
         </div>
 
         {/* CLINICAL CAPABILITY FILTERS & STATUS BAR */}
@@ -609,15 +713,15 @@ export default function CarePage() {
               // ==========================================
               if (currentPage === 1 && pIdx === 0) {
                 return (
-                  <div
-                    key={hosp.id}
-                    onClick={() => setSelectedHospital(hosp)}
-                    className={`p-5 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer flex flex-col gap-4 shadow-md ${
-                      isSelected
-                        ? "bg-white border-cyan-400 ring-4 ring-cyan-100"
-                        : "bg-white hover:bg-slate-50/80 border-slate-300"
-                    }`}
-                  >
+                  <MovingBorder key={hosp.id} active={isSelected} borderRadius="24px" className="w-full">
+                    <div
+                      onClick={() => setSelectedHospital(hosp)}
+                      className={`p-5 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer flex flex-col gap-4 shadow-md ${
+                        isSelected
+                          ? "bg-white border-cyan-400"
+                          : "bg-white hover:bg-slate-50/80 border-slate-300"
+                      }`}
+                    >
                     {/* Top Row: Name, Fastest Badge, Distance & Travel Time */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex flex-col min-w-0">
@@ -696,7 +800,8 @@ export default function CarePage() {
                         </a>
                       </div>
                     </div>
-                  </div>
+                    </div>
+                  </MovingBorder>
                 );
               }
 
