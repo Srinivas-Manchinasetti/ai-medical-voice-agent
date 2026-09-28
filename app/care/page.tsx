@@ -159,30 +159,44 @@ export default function CarePage() {
     setCurrentPage(1);
   };
 
-  // 1. Restore saved location on mount
+  // Unified hospital selection handler: updates selection, resets/syncs road stats, and triggers map route
+  const handleSelectHospital = (hosp: HospitalItem) => {
+    setSelectedHospital(hosp);
+    setLiveRoadStats({
+      roadDistanceKm: hosp.distanceKm,
+      etaMinutes: hosp.etaMinutes || Math.max(3, Math.round(hosp.distanceKm * 1.5)),
+    });
+  };
+
+  // 1. Check saved location or auto-detect user's live location on mount
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = sessionStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed?.userLocation && parsed?.searchRegion) {
-            setUserLocation(parsed.userLocation);
-            setSearchRegion(parsed.searchRegion);
-            setIsOriginInitialized(true);
-            return;
-          } else if (parsed?.lat && parsed?.lng) {
-            setUserLocation(parsed);
-            setSearchRegion(parsed);
-            setIsOriginInitialized(true);
-            return;
-          }
+    if (typeof window === "undefined") return;
+
+    let restored = false;
+    try {
+      const saved = sessionStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.userLocation && parsed?.searchRegion) {
+          setUserLocation(parsed.userLocation);
+          setSearchRegion(parsed.searchRegion);
+          setIsOriginInitialized(true);
+          restored = true;
+        } else if (parsed?.lat && parsed?.lng) {
+          setUserLocation(parsed);
+          setSearchRegion(parsed);
+          setIsOriginInitialized(true);
+          restored = true;
         }
-      } catch (e) {
-        console.warn("Could not restore saved search origin:", e);
       }
+    } catch (e) {
+      console.warn("Could not restore saved search origin:", e);
     }
-    setIsOriginInitialized(true);
+
+    // If no previous location was saved, automatically detect live location from user
+    if (!restored) {
+      handleDetectLiveLocation(true);
+    }
   }, []);
 
   // 2. Fetch facilities based on target region and user departure location
@@ -205,10 +219,18 @@ export default function CarePage() {
         if (data.hospitals && data.hospitals.length > 0) {
           const list: HospitalItem[] = data.hospitals;
           setHospitals(list);
-          setSelectedHospital(list[0] || null);
+          const first = list[0] || null;
+          setSelectedHospital(first);
+          if (first) {
+            setLiveRoadStats({
+              roadDistanceKm: first.distanceKm,
+              etaMinutes: first.etaMinutes || Math.max(3, Math.round(first.distanceKm * 1.5)),
+            });
+          }
         } else {
           setHospitals([]);
           setSelectedHospital(null);
+          setLiveRoadStats(null);
         }
       }
       setSearchRegion(targetRegion);
@@ -223,7 +245,7 @@ export default function CarePage() {
             STORAGE_KEY,
             JSON.stringify({ userLocation: departure, searchRegion: targetRegion })
           );
-        } catch {}
+        } catch { }
       }
     } catch (e) {
       console.warn("Failed to load facilities:", e);
@@ -239,53 +261,79 @@ export default function CarePage() {
     }
   }, [isOriginInitialized, specialtyFilter]);
 
-  // Handle GPS detection
-  const handleDetectLiveLocation = () => {
-    if (typeof window !== "undefined" && "geolocation" in navigator) {
-      setIsDetectingGps(true);
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude, longitude } = pos.coords;
-          let label = "Your Current Location";
-          try {
-            const revRes = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,
-              { signal: AbortSignal.timeout(2500) }
-            );
-            if (revRes.ok) {
-              const revData = await revRes.json();
-              if (revData.address) {
-                const area =
-                  revData.address.suburb ||
-                  revData.address.neighbourhood ||
-                  revData.address.residential ||
-                  revData.address.road ||
-                  revData.address.city ||
-                  "Current Location";
-                const city = revData.address.city || revData.address.state_district || revData.address.state || "";
-                label = `Near ${area}${city ? `, ${city}` : ""}`;
-              }
-            }
-          } catch {}
+  // Handle GPS detection with high-to-low accuracy automatic fallback
+  const handleDetectLiveLocation = (isAutoInit = false) => {
+    if (typeof window === "undefined") return;
 
-          const newGpsOrigin: CareOrigin = {
-            lat: latitude,
-            lng: longitude,
-            label,
-            source: "gps",
-          };
-          loadFacilities(newGpsOrigin, newGpsOrigin);
-          setIsDetectingGps(false);
-          setSearchQuery("");
-        },
-        (err) => {
-          console.warn("GPS error:", err.message);
-          setIsDetectingGps(false);
-          alert("Could not detect precise location. You can select a city or use 'Map Pin' to set manually.");
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
+    if (!("geolocation" in navigator)) {
+      if (isAutoInit) setIsOriginInitialized(true);
+      return;
     }
+
+    setIsDetectingGps(true);
+
+    const onLocationSuccess = async (pos: GeolocationPosition) => {
+      const { latitude, longitude } = pos.coords;
+      let label = "Your Live Location";
+      try {
+        const revRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,
+          { signal: AbortSignal.timeout(2500) }
+        );
+        if (revRes.ok) {
+          const revData = await revRes.json();
+          if (revData.address) {
+            const area =
+              revData.address.suburb ||
+              revData.address.neighbourhood ||
+              revData.address.residential ||
+              revData.address.road ||
+              revData.address.city ||
+              "Current Location";
+            const city = revData.address.city || revData.address.state_district || revData.address.state || "";
+            label = `Near ${area}${city ? `, ${city}` : ""}`;
+          }
+        }
+      } catch { }
+
+      const newGpsOrigin: CareOrigin = {
+        lat: latitude,
+        lng: longitude,
+        label,
+        source: "gps",
+      };
+
+      setUserLocation(newGpsOrigin);
+      setSearchRegion(newGpsOrigin);
+      setIsOriginInitialized(true);
+      setIsDetectingGps(false);
+      setSearchQuery("");
+      loadFacilities(newGpsOrigin, newGpsOrigin);
+    };
+
+    const onLocationError = (err: GeolocationPositionError) => {
+      console.warn("[CarePage] High-accuracy GPS failed, trying Wi-Fi/IP location fallback:", err.message);
+      // Fallback with low accuracy (ideal for desktop/laptops without GPS chips)
+      navigator.geolocation.getCurrentPosition(
+        onLocationSuccess,
+        (fallbackErr) => {
+          console.warn("[CarePage] Geolocation unavailable:", fallbackErr.message);
+          setIsDetectingGps(false);
+          if (isAutoInit) {
+            setIsOriginInitialized(true);
+          } else {
+            alert("Could not detect precise location. You can select a city preset or use 'Map Pin' to set manually.");
+          }
+        },
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 600000 }
+      );
+    };
+
+    navigator.geolocation.getCurrentPosition(onLocationSuccess, onLocationError, {
+      enableHighAccuracy: true,
+      timeout: 4500,
+      maximumAge: 180000,
+    });
   };
 
   // Handle preset city selection (Explores hospitals in target city from userLocation)
@@ -376,7 +424,7 @@ export default function CarePage() {
           label = `Near ${area}${city ? `, ${city}` : ""}`;
         }
       }
-    } catch {}
+    } catch { }
 
     const newOrigin: CareOrigin = {
       lat,
@@ -479,7 +527,7 @@ export default function CarePage() {
       <Navbar />
 
       <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-16 flex flex-col gap-6">
-        
+
         {/* COMPACT TOOL HEADER */}
         <header className="flex flex-col gap-2 pt-1 pb-1">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -501,18 +549,37 @@ export default function CarePage() {
             {/* Departure Origin & Target Region Status Badges */}
             <div className="flex items-center gap-2 flex-wrap text-xs font-mono font-semibold">
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs">
-                {userLocation.source === "gps" ? (
+                {isDetectingGps ? (
+                  <div className="flex items-center gap-2 text-cyan-700">
+                    <span className="w-2.5 h-2.5 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin" />
+                    <span className="font-bold">Accessing your live GPS...</span>
+                  </div>
+                ) : userLocation.source === "gps" ? (
                   <>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-emerald-700 font-bold">GPS Location:</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-emerald-700 font-bold">📍 Live GPS:</span>
+                    <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
+                    <button
+                      onClick={() => handleDetectLiveLocation(false)}
+                      title="Refresh current GPS location"
+                      className="ml-1 text-[10.5px] text-cyan-700 hover:text-cyan-900 underline font-bold cursor-pointer"
+                    >
+                      Refresh
+                    </button>
                   </>
                 ) : (
                   <>
-                    <span className="w-2 h-2 rounded-full bg-cyan-500" />
-                    <span className="text-cyan-700 font-bold">Your Location:</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
+                    <span className="text-cyan-700 font-bold">📍 Your Location:</span>
+                    <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
+                    <button
+                      onClick={() => handleDetectLiveLocation(false)}
+                      className="ml-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-cyan-600 text-white hover:bg-cyan-700 transition-colors shadow-2xs cursor-pointer"
+                    >
+                      Use My GPS
+                    </button>
                   </>
                 )}
-                <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
               </div>
 
               {searchRegion.label !== userLocation.label && (
@@ -553,11 +620,10 @@ export default function CarePage() {
           <div className="flex items-center gap-1.5 p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 shrink-0">
             <button
               onClick={() => handleSelectViewMode("all")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                viewMode === "all"
-                  ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
-                  : "text-slate-600 hover:text-slate-950"
-              }`}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${viewMode === "all"
+                ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
+                : "text-slate-600 hover:text-slate-950"
+                }`}
             >
               <span className="text-sm">🏥</span>
               <span>Show All Hospitals</span>
@@ -565,11 +631,10 @@ export default function CarePage() {
 
             <button
               onClick={() => handleSelectViewMode("issues")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                viewMode === "issues"
-                  ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
-                  : "text-slate-600 hover:text-slate-950"
-              }`}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${viewMode === "issues"
+                ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
+                : "text-slate-600 hover:text-slate-950"
+                }`}
             >
               <span className="text-sm">🎯</span>
               <span>Based on Health Issues</span>
@@ -579,7 +644,7 @@ export default function CarePage() {
 
         {/* 2-STEP CLINICAL CARE & LOCATION FINDER */}
         <div className="p-5 sm:p-6 rounded-3xl bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs flex flex-col gap-6">
-          
+
           {/* ============================================================ */}
           {/* STEP 1: Medical Issue / Clinical Specialty */}
           {/* ============================================================ */}
@@ -657,11 +722,10 @@ export default function CarePage() {
                     <button
                       key={item.id}
                       onClick={() => handleSelectSpecialty(item.id, item.label)}
-                      className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${
-                        isActive
-                          ? "bg-cyan-50 text-cyan-950 border-cyan-300 shadow-2xs ring-2 ring-cyan-200/80 font-bold"
-                          : "bg-white hover:bg-slate-50 text-slate-800 border-slate-200/90 shadow-2xs"
-                      }`}
+                      className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${isActive
+                        ? "bg-cyan-50 text-cyan-950 border-cyan-300 shadow-2xs ring-2 ring-cyan-200/80 font-bold"
+                        : "bg-white hover:bg-slate-50 text-slate-800 border-slate-200/90 shadow-2xs"
+                        }`}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-base shrink-0">{item.icon}</span>
@@ -741,7 +805,7 @@ export default function CarePage() {
               {/* Action Buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={handleDetectLiveLocation}
+                  onClick={() => handleDetectLiveLocation(false)}
                   disabled={isDetectingGps}
                   className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
                 >
@@ -751,11 +815,10 @@ export default function CarePage() {
 
                 <button
                   onClick={() => setIsManualPicking(!isManualPicking)}
-                  className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
-                    isManualPicking
-                      ? "bg-cyan-600 text-white border-cyan-600 shadow-xs ring-2 ring-cyan-200"
-                      : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
-                  }`}
+                  className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${isManualPicking
+                    ? "bg-cyan-600 text-white border-cyan-600 shadow-xs ring-2 ring-cyan-200"
+                    : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
+                    }`}
                 >
                   <Compass className="w-3.5 h-3.5 text-cyan-600" />
                   <span>{isManualPicking ? "Placing Pin..." : "Pick on Map"}</span>
@@ -777,11 +840,10 @@ export default function CarePage() {
                 <button
                   key={zone.id}
                   onClick={() => setSelectedZone(zone.id)}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
-                    selectedZone === zone.id
-                      ? "bg-slate-950 text-white shadow-2xs"
-                      : "bg-white hover:bg-slate-50 text-slate-600 border border-slate-200/80 shadow-2xs"
-                  }`}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${selectedZone === zone.id
+                    ? "bg-slate-950 text-white shadow-2xs"
+                    : "bg-white hover:bg-slate-50 text-slate-600 border border-slate-200/80 shadow-2xs"
+                    }`}
                 >
                   {zone.label}
                 </button>
@@ -800,11 +862,10 @@ export default function CarePage() {
                   <button
                     key={preset.name}
                     onClick={() => handleSelectPreset(preset)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                      isActive
-                        ? "bg-cyan-50 text-cyan-800 border-cyan-300 shadow-2xs font-extrabold ring-1 ring-cyan-200"
-                        : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${isActive
+                      ? "bg-cyan-50 text-cyan-800 border-cyan-300 shadow-2xs font-extrabold ring-1 ring-cyan-200"
+                      : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
+                      }`}
                   >
                     {preset.name}
                   </button>
@@ -816,7 +877,7 @@ export default function CarePage() {
 
         {/* 3. DENSE WORKSPACE: LIVE MAP (DOMINANT VISUAL ANCHOR) + SPECIALTY / ROUTE PANEL */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          
+
           {/* LEFT: Dominant Live Route Map */}
           <div className="lg:col-span-8 rounded-3xl overflow-hidden shadow-sm border border-slate-200/80 bg-white">
             <InteractiveRouteMap
@@ -825,7 +886,7 @@ export default function CarePage() {
               selectedHospital={selectedHospital}
               allHospitals={filteredAndSortedHospitals.slice(0, 60)}
               isManualPicking={isManualPicking}
-              onSelectHospital={(hosp) => setSelectedHospital(hosp)}
+              onSelectHospital={handleSelectHospital}
               onConfirmManualLocation={handleConfirmManualLocation}
               onCancelManualPicking={() => setIsManualPicking(false)}
               onRouteCalculated={(stats) => setLiveRoadStats(stats)}
@@ -834,7 +895,7 @@ export default function CarePage() {
 
           {/* RIGHT: Specialty Rotary Focus & Active Route Telemetry */}
           <div className="lg:col-span-4 flex flex-col gap-4">
-            
+
             {/* Specialty Rotary Filter Card */}
             <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col gap-3">
               <div>
@@ -1070,98 +1131,97 @@ export default function CarePage() {
                     {generalDivider}
                     <MovingBorder active={isSelected} borderRadius="24px" className="w-full">
                       <div
-                        onClick={() => setSelectedHospital(hosp)}
-                        className={`p-5 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer flex flex-col gap-4 shadow-md ${
-                          isSelected
-                            ? "bg-white border-cyan-400"
-                            : "bg-white hover:bg-slate-50/80 border-slate-300"
-                        }`}
+                        onClick={() => handleSelectHospital(hosp)}
+                        className={`p-5 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer flex flex-col gap-4 shadow-md ${isSelected
+                          ? "bg-white border-cyan-400"
+                          : "bg-white hover:bg-slate-50/80 border-slate-300"
+                          }`}
                       >
-                      {/* Top Row: Name, Fastest Badge, Distance & Travel Time */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex flex-col min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-base sm:text-lg font-black text-slate-950 truncate">
-                              {hosp.name}
-                            </span>
-                            <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-300 tracking-wider shadow-2xs">
-                              ⭐ Famous for: {hosp.famousFor || getHospitalFamousFor(hosp)}
-                            </span>
-                            {isSpecMatch && (
-                              <span className="text-[10px] font-mono font-black uppercase px-2.5 py-0.5 rounded-full bg-cyan-600 text-white tracking-wider shadow-2xs">
-                                Verified {specialtyFilter.toUpperCase()}
+                        {/* Top Row: Name, Fastest Badge, Distance & Travel Time */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-base sm:text-lg font-black text-slate-950 truncate">
+                                {hosp.name}
                               </span>
-                            )}
+                              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-300 tracking-wider shadow-2xs">
+                                ⭐ Famous for: {hosp.famousFor || getHospitalFamousFor(hosp)}
+                              </span>
+                              {isSpecMatch && (
+                                <span className="text-[10px] font-mono font-black uppercase px-2.5 py-0.5 rounded-full bg-cyan-600 text-white tracking-wider shadow-2xs">
+                                  Verified {specialtyFilter.toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="truncate">{hosp.address}</span>
+                            </span>
                           </div>
-                          <span className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="truncate">{hosp.address}</span>
+
+                          <div className="flex flex-col items-end shrink-0">
+                            <span className="font-mono text-sm sm:text-base font-black text-cyan-950 bg-cyan-50 px-3 py-1 rounded-xl border border-cyan-200">
+                              ~{durationNum} min
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-500 mt-0.5">
+                              ~{distanceNum.toFixed(1)} km by road
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Middle Row: Capabilities & Badges */}
+                        <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono">
+                          <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>✓ 24/7 Verified Emergency</span>
+                          </span>
+
+                          {hosp.acceptsPublicInsurance && (
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
+                              ✓ Ayushman Bharat / Aarogyasri
+                            </span>
+                          )}
+
+                          {hosp.specialty && hosp.specialty.slice(0, 3).map((s, sIdx) => (
+                            <span key={sIdx} className="px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-900 border border-cyan-200 font-medium">
+                              ✓ {s}
+                            </span>
+                          ))}
+
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                            🏛 {isGovernment ? "Government / Subsidized" : "Private Multi-Specialty"}
                           </span>
                         </div>
 
-                        <div className="flex flex-col items-end shrink-0">
-                          <span className="font-mono text-sm sm:text-base font-black text-cyan-950 bg-cyan-50 px-3 py-1 rounded-xl border border-cyan-200">
-                            ~{durationNum} min
-                          </span>
-                          <span className="text-[11px] font-mono text-slate-500 mt-0.5">
-                            ~{distanceNum.toFixed(1)} km by road
-                          </span>
+                        {/* Bottom Row: Direct Emergency Actions */}
+                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                          <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                            <Car className="w-3.5 h-3.5 text-cyan-600" />
+                            <span>Live road-network route active on map</span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`tel:${hosp.emergencyPhone || hosp.phone}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                            >
+                              <PhoneCall className="w-3.5 h-3.5" />
+                              <span>Call Emergency ({hosp.emergencyPhone || "108"})</span>
+                            </a>
+
+                            <a
+                              href={currentGoogleMapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Directions</span>
+                            </a>
+                          </div>
                         </div>
-                      </div>
-
-                      {/* Middle Row: Capabilities & Badges */}
-                      <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono">
-                        <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          <span>✓ 24/7 Verified Emergency</span>
-                        </span>
-
-                        {hosp.acceptsPublicInsurance && (
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
-                            ✓ Ayushman Bharat / Aarogyasri
-                          </span>
-                        )}
-
-                        {hosp.specialty && hosp.specialty.slice(0, 3).map((s, sIdx) => (
-                          <span key={sIdx} className="px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-900 border border-cyan-200 font-medium">
-                            ✓ {s}
-                          </span>
-                        ))}
-
-                        <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-medium">
-                          🏛 {isGovernment ? "Government / Subsidized" : "Private Multi-Specialty"}
-                        </span>
-                      </div>
-
-                      {/* Bottom Row: Direct Emergency Actions */}
-                      <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                        <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                          <Car className="w-3.5 h-3.5 text-cyan-600" />
-                          <span>Live road-network route active on map</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={`tel:${hosp.emergencyPhone || hosp.phone}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-                          >
-                            <PhoneCall className="w-3.5 h-3.5" />
-                            <span>Call Emergency ({hosp.emergencyPhone || "108"})</span>
-                          </a>
-
-                          <a
-                            href={currentGoogleMapsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Directions</span>
-                          </a>
-                        </div>
-                      </div>
                       </div>
                     </MovingBorder>
                   </React.Fragment>
@@ -1176,12 +1236,11 @@ export default function CarePage() {
                   <React.Fragment key={hosp.id}>
                     {generalDivider}
                     <div
-                      onClick={() => setSelectedHospital(hosp)}
-                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2.5 ${
-                        isSelected
-                          ? "bg-white border-cyan-400 shadow-md ring-2 ring-cyan-200"
-                          : "bg-white/85 hover:bg-white border-slate-200/90 hover:border-slate-300 shadow-2xs"
-                      }`}
+                      onClick={() => handleSelectHospital(hosp)}
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2.5 ${isSelected
+                        ? "bg-white border-cyan-400 shadow-md ring-2 ring-cyan-200"
+                        : "bg-white/85 hover:bg-white border-slate-200/90 hover:border-slate-300 shadow-2xs"
+                        }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex flex-col min-w-0">
@@ -1232,7 +1291,7 @@ export default function CarePage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedHospital(hosp);
+                              handleSelectHospital(hosp);
                             }}
                             className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold text-cyan-700 hover:text-cyan-900 bg-cyan-50 hover:bg-cyan-100 transition-colors cursor-pointer"
                           >
@@ -1262,12 +1321,11 @@ export default function CarePage() {
                 <React.Fragment key={hosp.id}>
                   {generalDivider}
                   <div
-                    onClick={() => setSelectedHospital(hosp)}
-                    className={`px-4 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                      isSelected
-                        ? "bg-white border-cyan-400 shadow-xs ring-1 ring-cyan-200"
-                        : "bg-white/60 hover:bg-white border-slate-200/80 hover:border-slate-300"
-                    }`}
+                    onClick={() => handleSelectHospital(hosp)}
+                    className={`px-4 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${isSelected
+                      ? "bg-white border-cyan-400 shadow-xs ring-1 ring-cyan-200"
+                      : "bg-white/60 hover:bg-white border-slate-200/80 hover:border-slate-300"
+                      }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span className="text-xs font-mono text-slate-400 font-bold w-5 shrink-0">
@@ -1299,7 +1357,7 @@ export default function CarePage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedHospital(hosp);
+                          handleSelectHospital(hosp);
                         }}
                         className="px-2.5 py-1 rounded text-[11px] font-mono font-bold text-cyan-700 hover:text-cyan-900 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 transition-colors cursor-pointer"
                       >
@@ -1339,11 +1397,10 @@ export default function CarePage() {
                   <button
                     key={p}
                     onClick={() => setCurrentPage(p)}
-                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                      currentPage === p
-                        ? "bg-cyan-600 text-white shadow-2xs"
-                        : "bg-white hover:bg-slate-50 border border-slate-200 text-slate-700"
-                    }`}
+                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${currentPage === p
+                      ? "bg-cyan-600 text-white shadow-2xs"
+                      : "bg-white hover:bg-slate-50 border border-slate-200 text-slate-700"
+                      }`}
                   >
                     {p}
                   </button>
