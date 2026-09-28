@@ -552,6 +552,13 @@ export default function ConsultPage() {
   const preferredMaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Natural conversational voice intake refs
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const accumulatedTranscriptRef = useRef<string>("");
+  const transcriptTextRef = useRef<string>("");
+  const startSpeechRecognitionListeningRef = useRef<() => void>(() => {});
+  const handleUserUtteranceRef = useRef<(userText: string, isBargeIn?: boolean) => void>(() => {});
+
   // Initialize and pin deterministic voice identities on mount
   useEffect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -619,6 +626,48 @@ export default function ConsultPage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Cleanly stops active microphone and removes all event listeners to prevent hardware / thread locks
+  const stopSpeechRecognitionListening = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      rec.onstart = null;
+      try {
+        rec.stop();
+      } catch {
+        try {
+          rec.abort();
+        } catch {}
+      }
+    }
+  }, []);
+
+  // Commits transcribed speech to the clinical pipeline
+  const commitSpokenText = useCallback((forceText?: string) => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    const textToCommit = (forceText ?? transcriptTextRef.current ?? accumulatedTranscriptRef.current).trim();
+    if (!textToCommit) return;
+
+    console.log("🎤 Finalized patient utterance:", textToCommit);
+    accumulatedTranscriptRef.current = "";
+    transcriptTextRef.current = "";
+    setTranscriptText("");
+
+    stopSpeechRecognitionListening();
+    handleUserUtteranceRef.current?.(textToCommit);
+  }, [stopSpeechRecognitionListening]);
+
   // Immediate Barge-In: cleanly halts doctor TTS and starts listening
   const triggerBargeIn = useCallback((customPhrase?: string) => {
     console.log("⚡ Interrupting doctor speech immediately.");
@@ -630,7 +679,7 @@ export default function ConsultPage() {
       } catch {}
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      try { window.speechSynthesis.cancel(); } catch {}
     }
 
     setAudioState("BARGE_IN_DETECTED");
@@ -648,12 +697,11 @@ export default function ConsultPage() {
     });
 
     if (customPhrase) {
-      handleUserUtterance(customPhrase, true);
+      handleUserUtteranceRef.current?.(customPhrase, true);
     } else {
       setTimeout(() => {
-        setAudioState("PATIENT_LISTENING");
-        startSpeechRecognitionListening();
-      }, 80);
+        startSpeechRecognitionListeningRef.current?.();
+      }, 100);
     }
   }, []);
 
@@ -662,7 +710,9 @@ export default function ConsultPage() {
     const cleanText = text.replace(/[*_#`\[\]()]/g, "").trim();
     if (!cleanText) return;
 
-    // 1. Halt any ongoing audio immediately
+    // 1. Halt any ongoing audio and speech intake immediately
+    stopSpeechRecognitionListening();
+
     if (activeAudioRef.current) {
       try {
         activeAudioRef.current.pause();
@@ -671,34 +721,28 @@ export default function ConsultPage() {
       } catch {}
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      try { window.speechSynthesis.cancel(); } catch {}
     }
 
     lastDoctorSpeechRef.current = cleanText.toLowerCase();
     lastDoctorSpeechTimeRef.current = Date.now();
     setAudioState("DOCTOR_SPEAKING");
 
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch {}
-    }
-
     const handleSpeechEnd = () => {
-      if (audioStateRef.current === "DOCTOR_SPEAKING") {
-        setAudioState("IDLE");
-        // Audio Guard: 400ms buffer and verify audio is truly silent before re-arming mic
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        try { window.speechSynthesis.cancel(); } catch {}
+      }
+      activeAudioRef.current = null;
+
+      if (callActiveRef.current) {
+        // Safe 300ms buffer so room acoustic decay completes before re-arming patient mic
         setTimeout(() => {
-          if (
-            callActiveRef.current &&
-            audioStateRef.current === "IDLE" &&
-            (!activeAudioRef.current || activeAudioRef.current.paused) &&
-            typeof window !== "undefined" &&
-            !("speechSynthesis" in window && window.speechSynthesis.speaking)
-          ) {
-            startSpeechRecognitionListening();
+          if (callActiveRef.current) {
+            startSpeechRecognitionListeningRef.current?.();
           }
-        }, 400);
+        }, 300);
+      } else {
+        setAudioState("IDLE");
       }
     };
 
@@ -791,9 +835,9 @@ export default function ConsultPage() {
       console.warn("[MedVoice Audio] Kokoro synthesis route error. Triggering browser fallback:", err.message);
       playBrowserFallback();
     }
-  }, [selectedDoctor]);
+  }, [selectedDoctor, stopSpeechRecognitionListening]);
 
-  // Speech Recognition (Robust Web Speech API without audio hardware conflicts)
+  // Speech Recognition with Continuous Intake & Natural Silence Detection
   const startSpeechRecognitionListening = useCallback(() => {
     if (typeof window === "undefined") return;
     const SpeechRecognition =
@@ -804,15 +848,17 @@ export default function ConsultPage() {
       return;
     }
 
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {}
-      }
+    // Stop and cleanly detach any previous recognition instance
+    stopSpeechRecognitionListening();
 
+    accumulatedTranscriptRef.current = "";
+    transcriptTextRef.current = "";
+    setTranscriptText("");
+
+    try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
+      // Continuous = true ensures the engine does not prematurely abort when the user pauses
+      recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = "en-US";
 
@@ -823,46 +869,37 @@ export default function ConsultPage() {
 
       recognition.onresult = (event: any) => {
         let currentInterim = "";
-        let finalChunk = "";
+        let newFinal = "";
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const res = event.results[i];
           if (res.isFinal) {
-            finalChunk += res[0].transcript;
+            newFinal += res[0].transcript + " ";
           } else {
             currentInterim += res[0].transcript;
           }
         }
 
-        if (currentInterim) {
-          setTranscriptText(currentInterim);
+        if (newFinal) {
+          accumulatedTranscriptRef.current = (accumulatedTranscriptRef.current + " " + newFinal).replace(/\s+/g, " ").trim();
         }
 
-        if (finalChunk.trim()) {
-          const spoken = finalChunk.trim();
+        const fullDisplay = (accumulatedTranscriptRef.current + " " + currentInterim).replace(/\s+/g, " ").trim();
+        transcriptTextRef.current = fullDisplay;
+        setTranscriptText(fullDisplay);
 
-          // Audio Guard: Acoustic Self-Echo Rejection (drop if Jaccard similarity > 0.50 within 4s of doctor speech)
-          const timeSinceDoctorSpeech = Date.now() - lastDoctorSpeechTimeRef.current;
-          if (lastDoctorSpeechRef.current && timeSinceDoctorSpeech < 4000) {
-            const userWords = new Set(spoken.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
-            const doctorWords = new Set(lastDoctorSpeechRef.current.split(/\s+/).filter((w) => w.length > 2));
-            if (userWords.size > 0 && doctorWords.size > 0) {
-              let overlap = 0;
-              for (const w of userWords) {
-                if (doctorWords.has(w)) overlap++;
-              }
-              const union = new Set([...userWords, ...doctorWords]).size;
-              const jaccard = union > 0 ? overlap / union : 0;
-              if (jaccard > 0.50) {
-                console.warn("🛡️ Audio Guard: Dropped doctor acoustic self-echo (Jaccard: " + jaccard.toFixed(2) + "):", spoken);
-                setTranscriptText("");
-                return;
-              }
-            }
+        // Reset silence timer on speech activity. Gives the user 1.8s of silence to pause without cut-off.
+        if (fullDisplay.length > 0) {
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
           }
-
-          setTranscriptText("");
-          handleUserUtterance(spoken);
+          silenceTimerRef.current = setTimeout(() => {
+            const currentTotal = transcriptTextRef.current.trim();
+            if (currentTotal.length > 0 && audioStateRef.current === "PATIENT_LISTENING") {
+              console.log("⏱️ Natural 1.8s silence pause detected. Committing speech:", currentTotal);
+              commitSpokenText(currentTotal);
+            }
+          }, 1800);
         }
       };
 
@@ -870,21 +907,23 @@ export default function ConsultPage() {
         console.warn("Speech recognition notice:", e.error);
         if (e.error === "not-allowed") {
           setMicPermissionError("Microphone access denied. Please click the camera/mic icon in your browser address bar to allow.");
-        }
-        if (audioStateRef.current === "PATIENT_LISTENING" && callActiveRef.current) {
-          setTimeout(() => {
-            if (audioStateRef.current === "PATIENT_LISTENING" && callActiveRef.current) {
-              try { recognition.start(); } catch {}
-            }
-          }, 600);
+          setAudioState("IDLE");
+          stopSpeechRecognitionListening();
         }
       };
 
       recognition.onend = () => {
-        if (audioStateRef.current === "PATIENT_LISTENING" && callActiveRef.current) {
-          try {
-            recognition.start();
-          } catch {}
+        // Continuous listening watchdog: if browser times out stream while still in listening state, restart cleanly
+        if (callActiveRef.current && audioStateRef.current === "PATIENT_LISTENING") {
+          setTimeout(() => {
+            if (callActiveRef.current && audioStateRef.current === "PATIENT_LISTENING") {
+              try {
+                recognition.start();
+              } catch {
+                startSpeechRecognitionListening();
+              }
+            }
+          }, 200);
         }
       };
 
@@ -892,10 +931,19 @@ export default function ConsultPage() {
       recognition.start();
       setAudioState("PATIENT_LISTENING");
     } catch (err: any) {
-      console.warn("Speech recognition start error:", err);
-      setMicPermissionError("Could not engage microphone: " + (err.message || "Unknown error"));
+      console.warn("Speech recognition start notice:", err);
+      if (err?.message?.includes("already started")) {
+        setAudioState("PATIENT_LISTENING");
+      } else {
+        setMicPermissionError("Could not engage microphone: " + (err.message || "Unknown error"));
+      }
     }
-  }, []);
+  }, [stopSpeechRecognitionListening, commitSpokenText]);
+
+  // Synchronize dynamic refs
+  useEffect(() => {
+    startSpeechRecognitionListeningRef.current = startSpeechRecognitionListening;
+  }, [startSpeechRecognitionListening]);
 
   // Start consultation session
   const startConsultation = async (doc?: DoctorProfile) => {
@@ -925,6 +973,8 @@ export default function ConsultPage() {
     callActiveRef.current = false;
     setAudioState("IDLE");
     setTranscriptText("");
+    transcriptTextRef.current = "";
+    accumulatedTranscriptRef.current = "";
     setInterviewState(null);
     if (activeAudioRef.current) {
       try {
@@ -934,13 +984,9 @@ export default function ConsultPage() {
       } catch {}
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      try { window.speechSynthesis.cancel(); } catch {}
     }
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch {}
-    }
+    stopSpeechRecognitionListening();
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
@@ -949,11 +995,14 @@ export default function ConsultPage() {
 
   // Return to lobby and start new consultation
   const startNewConsultation = () => {
+    stopSpeechRecognitionListening();
     setMessages([]);
     setTriageData(null);
     setBoardData(null);
     setCallDuration(0);
     setTranscriptText("");
+    transcriptTextRef.current = "";
+    accumulatedTranscriptRef.current = "";
     setTypedInput("");
     setInterviewState(null);
     setAudioState("IDLE");
@@ -962,7 +1011,11 @@ export default function ConsultPage() {
 
   // Process User Utterance (Preserves exact spoken text without artificial tag prefixes)
   const handleUserUtterance = async (userText: string, isBargeIn: boolean = false) => {
-    if (!userText.trim()) return;
+    const cleanUserText = userText.trim();
+    if (!cleanUserText) return;
+
+    // Cleanly stop microphone while backend deliberates
+    stopSpeechRecognitionListening();
 
     if (!callActive) {
       callActiveRef.current = true;
@@ -971,12 +1024,14 @@ export default function ConsultPage() {
 
     setAudioState(isBargeIn ? "PROCESSING_INTERRUPTION" : "PROCESSING_PATIENT");
     setTranscriptText("");
+    transcriptTextRef.current = "";
+    accumulatedTranscriptRef.current = "";
 
     // Exact patient words — no "URGENT BARGE-IN" text injection!
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "patient",
-      text: userText,
+      text: cleanUserText,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       isBargeIn
     };
@@ -989,7 +1044,7 @@ export default function ConsultPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           doctorId: selectedDoctor.id,
-          message: userText,
+          message: cleanUserText,
           conversationHistory: [...messages, userMessage],
           patientName: patientDisplayName,
           userId: user?.id,
@@ -1071,6 +1126,10 @@ export default function ConsultPage() {
       setAudioState("IDLE");
     }
   };
+
+  useEffect(() => {
+    handleUserUtteranceRef.current = handleUserUtterance;
+  });
 
   // Helper for Doctor Status
   const getDoctorLiveStatus = (doc: DoctorProfile) => {
@@ -1614,8 +1673,12 @@ export default function ConsultPage() {
                 }}
                 onToggleRecord={() => {
                   if (audioState === "PATIENT_LISTENING") {
-                    setAudioState("IDLE");
-                    if (recognitionRef.current) recognitionRef.current.abort();
+                    if (transcriptTextRef.current.trim() || accumulatedTranscriptRef.current.trim()) {
+                      commitSpokenText();
+                    } else {
+                      setAudioState("IDLE");
+                      stopSpeechRecognitionListening();
+                    }
                   } else {
                     if (!callActive) {
                       callActiveRef.current = true;
