@@ -1,10 +1,16 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { PhoneCall, ExternalLink, Navigation, Search, MapPin, LocateFixed, Compass } from "lucide-react";
+import { PhoneCall, ExternalLink, Navigation, Search, MapPin, LocateFixed, Compass, Sparkles } from "lucide-react";
 import dynamic from "next/dynamic";
 import { HospitalItem } from "./InteractiveRouteMap";
 import CountUp from "@/components/CountUp";
+import {
+  ALL_REGION_PRESETS,
+  RegionPresetItem,
+  MEDICAL_ISSUE_OPTIONS,
+  getHospitalFamousFor,
+} from "@/lib/hospitals-india-data";
 
 // Dynamically import Leaflet map with SSR disabled
 const InteractiveRouteMap = dynamic(
@@ -20,26 +26,21 @@ const InteractiveRouteMap = dynamic(
   }
 );
 
-const REGION_PRESETS = [
-  { name: "Guntur", lat: 16.3067, lng: 80.4365, label: "Guntur, Andhra Pradesh" },
-  { name: "Vijayawada", lat: 16.5062, lng: 80.6480, label: "Vijayawada, Andhra Pradesh" },
-  { name: "Hyderabad", lat: 17.4326, lng: 78.4071, label: "Hyderabad, Telangana" },
-  { name: "Bengaluru", lat: 12.9716, lng: 77.5946, label: "Bengaluru, Karnataka" },
-  { name: "Mumbai", lat: 19.0760, lng: 72.8777, label: "Mumbai, Maharashtra" },
-  { name: "Delhi NCR", lat: 28.6139, lng: 77.2090, label: "New Delhi, Delhi" },
-];
-
 export function CareNetworkSection() {
   const [hospitals, setHospitals] = useState<HospitalItem[]>([]);
   const [selectedHospital, setSelectedHospital] = useState<HospitalItem | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>({
-    lat: REGION_PRESETS[0].lat,
-    lng: REGION_PRESETS[0].lng,
+    lat: ALL_REGION_PRESETS[0].lat,
+    lng: ALL_REGION_PRESETS[0].lng,
   });
-  const [locationName, setLocationName] = useState<string>("Guntur, Andhra Pradesh");
+  const [locationName, setLocationName] = useState<string>("Amaravati, Andhra Pradesh");
   const [isDetectingGps, setIsDetectingGps] = useState<boolean>(false);
   const [isManualPicking, setIsManualPicking] = useState<boolean>(false);
+
+  // Choice mode: "all" (Show All Hospitals) vs "issues" (Based on Health Issues)
+  const [viewMode, setViewMode] = useState<"all" | "issues">("all");
+  const [specialtyFilter, setSpecialtyFilter] = useState<string>("all");
 
   // Live canonical road stats from OSRM
   const [liveRoadStats, setLiveRoadStats] = useState<{ roadDistanceKm: number; etaMinutes: number } | null>(null);
@@ -51,16 +52,26 @@ export function CareNetworkSection() {
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch hospitals based on coordinates
-  const loadHospitalsForLocation = async (lat: number, lng: number, locLabel: string) => {
+  // Fetch hospitals based on coordinates and optional specialty
+  const loadHospitalsForLocation = async (
+    lat: number,
+    lng: number,
+    locLabel: string,
+    targetSpecialty?: string
+  ) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/hospitals?lat=${lat}&lng=${lng}&specialty=cardiology`);
+      const activeSpec = targetSpecialty !== undefined ? targetSpecialty : specialtyFilter;
+      const specParam = activeSpec && activeSpec !== "all" ? `&specialty=${encodeURIComponent(activeSpec)}` : "";
+      const res = await fetch(`/api/hospitals?lat=${lat}&lng=${lng}${specParam}`);
       if (res.ok) {
         const data = await res.json();
         if (data.hospitals && data.hospitals.length > 0) {
-          setHospitals(data.hospitals.slice(0, 4));
+          setHospitals(data.hospitals.slice(0, 8));
           setSelectedHospital(data.hospitals[0]);
+        } else {
+          setHospitals([]);
+          setSelectedHospital(null);
         }
       }
       setLocationName(locLabel);
@@ -125,13 +136,13 @@ export function CareNetworkSection() {
               console.log("IP fallback unavailable, using preset");
             }
             // 3. Fallback to default preset
-            loadHospitalsForLocation(REGION_PRESETS[0].lat, REGION_PRESETS[0].lng, REGION_PRESETS[0].label);
+            loadHospitalsForLocation(ALL_REGION_PRESETS[0].lat, ALL_REGION_PRESETS[0].lng, ALL_REGION_PRESETS[0].label);
             setIsDetectingGps(false);
           },
           { enableHighAccuracy: true, timeout: 7000 }
         );
       } else {
-        loadHospitalsForLocation(REGION_PRESETS[0].lat, REGION_PRESETS[0].lng, REGION_PRESETS[0].label);
+        loadHospitalsForLocation(ALL_REGION_PRESETS[0].lat, ALL_REGION_PRESETS[0].lng, ALL_REGION_PRESETS[0].label);
         setIsDetectingGps(false);
       }
     }
@@ -339,10 +350,99 @@ export function CareNetworkSection() {
           </div>
         </div>
 
+        {/* DISCOVERY MODE CHOICE: Show All Hospitals vs Filter by Health Issues */}
+        <div className="p-4 sm:p-5 rounded-3xl bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700 border border-cyan-200/80 text-xs">
+                <Sparkles className="w-3.5 h-3.5" />
+              </span>
+              <span className="text-xs font-mono font-bold uppercase tracking-[0.1em] text-cyan-800">
+                Hospital Discovery Mode
+              </span>
+            </div>
+            <h3 className="text-sm font-bold text-slate-950">
+              How would you like to explore hospitals?
+            </h3>
+            <p className="text-xs text-slate-600">
+              Choose whether to view all emergency hospitals or filter centers specializing in your medical issue.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 shrink-0">
+            <button
+              onClick={() => {
+                setViewMode("all");
+                setSpecialtyFilter("all");
+                loadHospitalsForLocation(userCoords.lat, userCoords.lng, locationName, "all");
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                viewMode === "all"
+                  ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
+                  : "text-slate-600 hover:text-slate-950"
+              }`}
+            >
+              <span>🏥</span>
+              <span>All Hospitals</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("issues");
+                const defaultSpec = specialtyFilter === "all" ? "cardiology" : specialtyFilter;
+                setSpecialtyFilter(defaultSpec);
+                loadHospitalsForLocation(userCoords.lat, userCoords.lng, locationName, defaultSpec);
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                viewMode === "issues"
+                  ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
+                  : "text-slate-600 hover:text-slate-950"
+              }`}
+            >
+              <span>🎯</span>
+              <span>By Health Issue</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ISSUE QUICK SELECT PILLS (When in "issues" mode) */}
+        {viewMode === "issues" && (
+          <div className="space-y-1.5 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between text-xs text-slate-600 font-bold px-1">
+              <span>Filter by Medical Condition / Specialty:</span>
+              <span className="text-[11px] font-mono font-bold text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200 uppercase">
+                Active: {specialtyFilter}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {MEDICAL_ISSUE_OPTIONS.slice(0, 10).map((opt) => {
+                const isActive = specialtyFilter === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      setSpecialtyFilter(opt.id);
+                      loadHospitalsForLocation(userCoords.lat, userCoords.lng, locationName, opt.id);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                      isActive
+                        ? "bg-cyan-50 text-cyan-950 border-cyan-300 shadow-2xs ring-1 ring-cyan-200 font-bold"
+                        : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
+                    }`}
+                  >
+                    <span>{opt.icon}</span>
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* REGION QUICK PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-500 font-bold mr-1">Quick Select:</span>
-          {REGION_PRESETS.map((preset) => {
+          <span className="text-slate-500 font-bold mr-1">Quick Select Region:</span>
+          {ALL_REGION_PRESETS.slice(0, 15).map((preset) => {
             const isCurrent = Math.abs(userCoords.lat - preset.lat) < 0.05 && Math.abs(userCoords.lng - preset.lng) < 0.05;
             return (
               <button
@@ -352,10 +452,10 @@ export function CareNetworkSection() {
                   setIsManualPicking(false);
                   loadHospitalsForLocation(preset.lat, preset.lng, preset.label);
                 }}
-                className={`px-3 py-1 rounded-full border text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                   isCurrent
-                    ? "bg-slate-900 text-white border-slate-900"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-400"
+                    ? "bg-cyan-50 text-cyan-800 border-cyan-300 shadow-2xs font-extrabold ring-1 ring-cyan-200"
+                    : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
                 }`}
               >
                 {preset.name}
@@ -381,14 +481,14 @@ export function CareNetworkSection() {
           {/* NEARBY HOSPITALS LIST */}
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs font-bold text-slate-700 px-1">
-              <span>Nearest Emergency Facilities ({hospitals.length})</span>
+              <span>Emergency & Specialized Facilities ({hospitals.length})</span>
               <span className="text-slate-500 font-normal">Click a hospital to preview driving route</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {loading ? (
                 <div className="col-span-full py-8 text-center text-xs text-slate-400 animate-pulse">
-                  Locating nearest emergency hospitals...
+                  Locating emergency hospitals...
                 </div>
               ) : (
                 hospitals.map((hosp) => {
@@ -416,6 +516,14 @@ export function CareNetworkSection() {
                             <CountUp to={displayDist} duration={1} /> km
                           </span>
                         </div>
+
+                        {/* Famous For Badge */}
+                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-block ${
+                          isSelected ? "bg-amber-400/20 text-amber-300 border border-amber-400/30" : "bg-amber-50 text-amber-900 border border-amber-200"
+                        }`}>
+                          ⭐ {hosp.famousFor || getHospitalFamousFor(hosp)}
+                        </div>
+
                         <p className={`text-[11px] line-clamp-1 ${isSelected ? "text-slate-400" : "text-slate-500"}`}>
                           {hosp.address}
                         </p>
@@ -440,6 +548,9 @@ export function CareNetworkSection() {
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-extrabold text-base sm:text-lg text-slate-950">{selectedHospital.name}</h3>
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-900 font-bold text-xs">
+                    ⭐ Famous for: {selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}
+                  </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-800 font-bold text-xs">
                     24/7 Emergency Care
                   </span>

@@ -21,6 +21,84 @@ export interface Hospital {
   cancerSpecialistsAvailable?: boolean;
   capabilities?: string[];
   emergencyLevel?: "Level-1 Tertiary" | "Secondary ER" | "Primary Care";
+  famousFor?: string;
+}
+
+/**
+ * Intelligent detector for what a hospital is famous for / its primary medical expertise
+ */
+export function getHospitalFamousFor(hospital: {
+  name: string;
+  specialty?: string[];
+  capabilities?: string[];
+  famousFor?: string;
+}): string {
+  if (hospital.famousFor && hospital.famousFor.trim().length > 0) {
+    return hospital.famousFor;
+  }
+
+  const name = hospital.name.toLowerCase();
+  const specs = (hospital.specialty || []).map((s) => s.toLowerCase()).join(" ");
+
+  if (name.includes("ayurved") || specs.includes("ayurved")) {
+    return "Ayurvedic Care & Holistic Healing";
+  }
+  if (name.includes("homeo") || specs.includes("homeo")) {
+    return "Homeopathy & Natural Medicine";
+  }
+  if (name.includes("cancer") || name.includes("oncol") || specs.includes("oncol") || specs.includes("cancer")) {
+    return "Cancer Care & Surgical Oncology";
+  }
+  if (name.includes("heart") || name.includes("cardio") || specs.includes("cardio")) {
+    return "Cardiology & Cardiac Care";
+  }
+  if (name.includes("neuro") || name.includes("brain") || name.includes("stroke") || name.includes("nimhans") || specs.includes("neuro")) {
+    return "Neurology, Stroke & Brain Care";
+  }
+  if (name.includes("eye") || name.includes("netra") || name.includes("ophthal") || name.includes("lvpei") || specs.includes("ophthal")) {
+    return "Eye Care & Vision Surgery";
+  }
+  if (name.includes("dental") || specs.includes("dental") || name.includes("tooth")) {
+    return "Dental & Maxillofacial Care";
+  }
+  if (name.includes("ortho") || name.includes("bone") || name.includes("joint") || specs.includes("ortho")) {
+    return "Orthopedics & Joint Replacement";
+  }
+  if (name.includes("kidney") || name.includes("nephro") || name.includes("dialysis") || name.includes("renal") || specs.includes("nephro")) {
+    return "Kidney Care & Dialysis Unit";
+  }
+  if (name.includes("child") || name.includes("pediatric") || name.includes("rainbow") || name.includes("ankura") || specs.includes("pediatric")) {
+    return "Pediatrics, Child Care & NICU";
+  }
+  if (name.includes("matern") || name.includes("women") || name.includes("gynec") || specs.includes("matern") || specs.includes("gynec")) {
+    return "Maternity & Women's Health";
+  }
+  if (name.includes("lung") || name.includes("pulmo") || name.includes("chest") || specs.includes("pulmo")) {
+    return "Pulmonology & Respiratory Care";
+  }
+  if (name.includes("gastro") || name.includes("liver") || name.includes("digestive") || specs.includes("gastro")) {
+    return "Gastroenterology & Liver Sciences";
+  }
+  if (name.includes("ent") || specs.includes("ent")) {
+    return "ENT (Ear, Nose & Throat)";
+  }
+  if (name.includes("skin") || name.includes("derma") || specs.includes("derma")) {
+    return "Dermatology & Skin Care";
+  }
+  if (name.includes("trauma") || name.includes("emergency") || specs.includes("trauma") || specs.includes("emergency")) {
+    return "24/7 Emergency & Trauma";
+  }
+  if (name.includes("aiims") || name.includes("medical college") || name.includes("general hospital") || name.includes("ggh") || name.includes("apollo") || name.includes("manipal") || name.includes("fortis") || name.includes("max")) {
+    return "Multi-Specialty & Critical Care";
+  }
+
+  if (hospital.specialty && hospital.specialty.length > 0) {
+    const valid = hospital.specialty.filter((s) => s !== "Emergency & Trauma" && s !== "General Medicine");
+    if (valid.length > 0) return valid.slice(0, 2).join(" & ");
+    return hospital.specialty[0];
+  }
+
+  return "General & Emergency Care";
 }
 
 /**
@@ -548,7 +626,7 @@ export const INDIAN_HOSPITALS_DATASET: Hospital[] = [
   {
     id: "hosp-pune-01",
     name: "Ruby Hall Clinic & Cancer Center",
-    specialty: ["Oncology / Cancer", "Cardiology", "Emergency & Trauma"],
+    specialty: ["Oncology / Cancer", "Cardiology", "Emergency & Trauma", "Neurology"],
     city: "Pune",
     state: "Maharashtra",
     address: "40, Sassoon Road, Sangamvadi, Pune, Maharashtra 411001",
@@ -558,13 +636,575 @@ export const INDIAN_HOSPITALS_DATASET: Hospital[] = [
     longitude: 73.8744,
     isEmergency24x7: true,
     rating: 4.7,
-    accreditation: ["NABH"],
+    accreditation: ["NABH", "NABL"],
     ownership: "private",
     acceptsPublicInsurance: true,
     affordabilityNotes: "Private tertiary care facility; standard emergency tariffs apply.",
-    source: "AP/TS Directorate of Medical Education & Verified Hospital Directory",
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- VISAKHAPATNAM (ANDHRA PRADESH) ---
+  {
+    id: "hosp-vizag-01",
+    name: "King George Hospital (GGH Visakhapatnam)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Visakhapatnam",
+    state: "Andhra Pradesh",
+    address: "Maharanipeta, Visakhapatnam, Andhra Pradesh 530002",
+    phone: "+91 891 256 4891",
+    emergencyPhone: "108",
+    latitude: 17.7088,
+    longitude: 83.3056,
+    isEmergency24x7: true,
+    rating: 4.6,
+    accreditation: ["Govt Center of Excellence", "DME"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Apex government tertiary hospital; full Aarogyasri / PM-JAY coverage.",
+    source: "AP Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-vizag-02",
+    name: "Apollo Hospitals Ramnagar",
+    specialty: ["Cardiology", "Emergency & Trauma", "Neurology", "Oncology / Cancer"],
+    city: "Visakhapatnam",
+    state: "Andhra Pradesh",
+    address: "Waltair Main Road, Ram Nagar, Visakhapatnam, Andhra Pradesh 530002",
+    phone: "+91 891 272 7272",
+    emergencyPhone: "1066",
+    latitude: 17.7214,
+    longitude: 83.3155,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["JCI", "NABH"],
+    ownership: "private",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Super-specialty facility with 24/7 Cath Lab and Stroke unit.",
+    source: "AP Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-vizag-03",
+    name: "Care Hospitals - Health City Arilova",
+    specialty: ["Cardiology", "Emergency & Trauma", "Pediatrics", "Neurology"],
+    city: "Visakhapatnam",
+    state: "Andhra Pradesh",
+    address: "Plot No 8, AS Raja Complex, Health City, Chinagadili, Visakhapatnam, Andhra Pradesh 530040",
+    phone: "+91 891 304 1444",
+    emergencyPhone: "105711",
+    latitude: 17.7656,
+    longitude: 83.3298,
+    isEmergency24x7: true,
+    rating: 4.7,
+    accreditation: ["NABH"],
+    ownership: "private",
+    acceptsPublicInsurance: true,
+    source: "AP Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+  },
+
+  // --- TIRUPATI (ANDHRA PRADESH) ---
+  {
+    id: "hosp-tpt-01",
+    name: "SVIMS (Sri Venkateswara Institute of Medical Sciences)",
+    specialty: ["Cardiology", "Emergency & Trauma", "Neurology", "Oncology / Cancer", "Nephrology"],
+    city: "Tirupati",
+    state: "Andhra Pradesh",
+    address: "Alipiri Road, Tirupati, Andhra Pradesh 517507",
+    phone: "+91 877 228 7777",
+    emergencyPhone: "108",
+    latitude: 13.6373,
+    longitude: 79.4055,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["Autonomous Govt Institute", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Apex state university hospital; completely free emergency stabilization under Aarogyasri.",
+    source: "AP Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-tpt-02",
+    name: "Aster Narayanadri Hospital",
+    specialty: ["Cardiology", "Emergency & Trauma", "Neurology", "Pediatrics"],
+    city: "Tirupati",
+    state: "Andhra Pradesh",
+    address: "Renigunta Road, Korlagunta, Tirupati, Andhra Pradesh 517501",
+    phone: "+91 877 668 8888",
+    emergencyPhone: "+91 877 668 8888",
+    latitude: 13.6264,
+    longitude: 79.4312,
+    isEmergency24x7: true,
+    rating: 4.7,
+    accreditation: ["NABH"],
+    ownership: "private",
+    acceptsPublicInsurance: true,
+    source: "AP Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+  },
+
+  // --- KURNOOL (ANDHRA PRADESH) ---
+  {
+    id: "hosp-knl-01",
+    name: "Government General Hospital & Kurnool Medical College",
+    specialty: ["Emergency & Trauma", "Cardiology", "Pediatrics", "Neurology"],
+    city: "Kurnool",
+    state: "Andhra Pradesh",
+    address: "Budhawara Peta, Kurnool, Andhra Pradesh 518002",
+    phone: "+91 8518 255 100",
+    emergencyPhone: "108",
+    latitude: 15.8281,
+    longitude: 78.0373,
+    isEmergency24x7: true,
+    rating: 4.5,
+    accreditation: ["Govt Hospital", "DME"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    source: "AP Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+  },
+
+  // --- WARANGAL (TELANGANA) ---
+  {
+    id: "hosp-wgl-01",
+    name: "MGM Hospital & Kakatiya Medical College",
+    specialty: ["Emergency & Trauma", "Pediatrics", "Cardiology", "Neurology"],
+    city: "Warangal",
+    state: "Telangana",
+    address: "MG Road, Warangal, Telangana 506007",
+    phone: "+91 870 244 5500",
+    emergencyPhone: "108",
+    latitude: 17.9784,
+    longitude: 79.5941,
+    isEmergency24x7: true,
+    rating: 4.5,
+    accreditation: ["Govt General Hospital"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    source: "Telangana Health Registry",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+  },
+
+  // --- CHENNAI (TAMIL NADU) ---
+  {
+    id: "hosp-chn-01",
+    name: "Apollo Main Hospital, Greams Road",
+    specialty: ["Cardiology", "Emergency & Trauma", "Neurology", "Oncology / Cancer"],
+    city: "Chennai",
+    state: "Tamil Nadu",
+    address: "21 Greams Lane, Thousand Lights, Chennai, Tamil Nadu 600006",
+    phone: "+91 44 2829 0200",
+    emergencyPhone: "1066",
+    latitude: 13.0596,
+    longitude: 80.2520,
+    isEmergency24x7: true,
+    rating: 4.9,
+    accreditation: ["JCI", "NABH"],
+    ownership: "private",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Flagship tertiary facility with dedicated 24/7 chest pain and stroke centers.",
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+  {
+    id: "hosp-chn-02",
+    name: "Rajiv Gandhi Government General Hospital (MMC)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Chennai",
+    state: "Tamil Nadu",
+    address: "EVR Periyar Salai, Park Town, Chennai, Tamil Nadu 600003",
+    phone: "+91 44 2530 5000",
+    emergencyPhone: "108",
+    latitude: 13.0827,
+    longitude: 80.2785,
+    isEmergency24x7: true,
+    rating: 4.7,
+    accreditation: ["Govt Center of Excellence", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Historic premier government institution; 100% free emergency medical stabilization.",
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- KOCHI (KERALA) ---
+  {
+    id: "hosp-koc-01",
+    name: "Aster Medcity",
+    specialty: ["Cardiology", "Emergency & Trauma", "Neurology", "Oncology / Cancer", "Pediatrics"],
+    city: "Kochi",
+    state: "Kerala",
+    address: "Kuttisahib Road, Cheranalloor, South Chittoor, Kochi, Kerala 682027",
+    phone: "+91 484 669 9999",
+    emergencyPhone: "+91 484 669 9999",
+    latitude: 10.0526,
+    longitude: 76.2758,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["JCI", "NABH"],
+    ownership: "private",
+    acceptsPublicInsurance: true,
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- AHMEDABAD (GUJARAT) ---
+  {
+    id: "hosp-ahm-01",
+    name: "Civil Hospital Ahmedabad (Asarwa)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Ahmedabad",
+    state: "Gujarat",
+    address: "Asarwa, Ahmedabad, Gujarat 380016",
+    phone: "+91 79 2268 3721",
+    emergencyPhone: "108",
+    latitude: 23.0525,
+    longitude: 72.6033,
+    isEmergency24x7: true,
+    rating: 4.7,
+    accreditation: ["Govt Apex Hospital", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Asia's largest hospital campus; full public health scheme coverage.",
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- JAIPUR (RAJASTHAN) ---
+  {
+    id: "hosp-jai-01",
+    name: "Sawai Man Singh Hospital (SMS)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Jaipur",
+    state: "Rajasthan",
+    address: "JLN Marg, Ashok Nagar, Jaipur, Rajasthan 302004",
+    phone: "+91 141 251 8224",
+    emergencyPhone: "108",
+    latitude: 26.9038,
+    longitude: 75.8166,
+    isEmergency24x7: true,
+    rating: 4.7,
+    accreditation: ["Govt Apex Hospital", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- LUCKNOW (UTTAR PRADESH) ---
+  {
+    id: "hosp-lko-01",
+    name: "King George's Medical University (KGMU)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Lucknow",
+    state: "Uttar Pradesh",
+    address: "Shah Mina Road, Chowk, Lucknow, Uttar Pradesh 226003",
+    phone: "+91 522 225 7450",
+    emergencyPhone: "108",
+    latitude: 26.8697,
+    longitude: 80.9167,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["Autonomous Govt University", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- CHANDIGARH ---
+  {
+    id: "hosp-chd-01",
+    name: "Postgraduate Institute of Medical Education & Research (PGIMER)",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Chandigarh",
+    state: "Chandigarh",
+    address: "Madhya Marg, Sector 12, Chandigarh 160012",
+    phone: "+91 172 274 7585",
+    emergencyPhone: "108",
+    latitude: 30.7656,
+    longitude: 76.7744,
+    isEmergency24x7: true,
+    rating: 4.9,
+    accreditation: ["Institute of National Importance", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    affordabilityNotes: "Apex premier national tertiary hospital; full emergency trauma facilities.",
+    source: "Verified Hospital Directory",
+    sourceType: "official_registry",
+    lastVerified: "2026-03-01",
+    cancerSpecialistsAvailable: true,
+  },
+
+  // --- BHUBANESWAR (ODISHA) ---
+  {
+    id: "hosp-bbsr-01",
+    name: "AIIMS Bhubaneswar",
+    specialty: ["Emergency & Trauma", "Cardiology", "Neurology", "Pediatrics", "Oncology / Cancer"],
+    city: "Bhubaneswar",
+    state: "Odisha",
+    address: "Sijua, Patrapada, Bhubaneswar, Odisha 751019",
+    phone: "+91 674 247 6789",
+    emergencyPhone: "108",
+    latitude: 20.2312,
+    longitude: 85.7725,
+    isEmergency24x7: true,
+    rating: 4.8,
+    accreditation: ["Institute of National Importance", "NABH"],
+    ownership: "government",
+    acceptsPublicInsurance: true,
+    source: "Verified Hospital Directory",
     sourceType: "official_registry",
     lastVerified: "2026-03-01",
     cancerSpecialistsAvailable: true,
   },
 ];
+
+export interface RegionPresetItem {
+  name: string;
+  lat: number;
+  lng: number;
+  label: string;
+  zone: "ap_tg" | "south" | "west" | "north" | "east_central";
+  zoneLabel: string;
+}
+
+export const ALL_REGION_PRESETS: RegionPresetItem[] = [
+  // --- Andhra Pradesh & Telangana ---
+  { name: "Amaravati", lat: 16.5131, lng: 80.5165, label: "Amaravati, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Guntur", lat: 16.3067, lng: 80.4365, label: "Guntur, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Vijayawada", lat: 16.5062, lng: 80.6480, label: "Vijayawada, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Visakhapatnam", lat: 17.6868, lng: 83.2185, label: "Visakhapatnam, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Tirupati", lat: 13.6288, lng: 79.4192, label: "Tirupati, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Rajahmundry", lat: 17.0005, lng: 81.8040, label: "Rajahmundry, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Kakinada", lat: 16.9891, lng: 82.2475, label: "Kakinada, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Nellore", lat: 14.4426, lng: 79.9865, label: "Nellore, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Kurnool", lat: 15.8281, lng: 78.0373, label: "Kurnool, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Anantapur", lat: 14.6819, lng: 77.6006, label: "Anantapur, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Kadapa", lat: 14.4673, lng: 78.8242, label: "Kadapa, Andhra Pradesh", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Hyderabad", lat: 17.4326, lng: 78.4071, label: "Hyderabad, Telangana", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Warangal", lat: 17.9689, lng: 79.5941, label: "Warangal, Telangana", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Karimnagar", lat: 18.4386, lng: 79.1288, label: "Karimnagar, Telangana", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+  { name: "Nizamabad", lat: 18.6725, lng: 78.0941, label: "Nizamabad, Telangana", zone: "ap_tg", zoneLabel: "AP & Telangana" },
+
+  // --- South (KA, TN, KL) ---
+  { name: "Bengaluru", lat: 12.9716, lng: 77.5946, label: "Bengaluru, Karnataka", zone: "south", zoneLabel: "South" },
+  { name: "Mysuru", lat: 12.2958, lng: 76.6394, label: "Mysuru, Karnataka", zone: "south", zoneLabel: "South" },
+  { name: "Mangaluru", lat: 12.9141, lng: 74.8560, label: "Mangaluru, Karnataka", zone: "south", zoneLabel: "South" },
+  { name: "Hubballi", lat: 15.3647, lng: 75.1240, label: "Hubballi, Karnataka", zone: "south", zoneLabel: "South" },
+  { name: "Chennai", lat: 13.0827, lng: 80.2707, label: "Chennai, Tamil Nadu", zone: "south", zoneLabel: "South" },
+  { name: "Coimbatore", lat: 11.0168, lng: 76.9558, label: "Coimbatore, Tamil Nadu", zone: "south", zoneLabel: "South" },
+  { name: "Madurai", lat: 9.9252, lng: 78.1198, label: "Madurai, Tamil Nadu", zone: "south", zoneLabel: "South" },
+  { name: "Trichy", lat: 10.7905, lng: 78.7047, label: "Tiruchirappalli, Tamil Nadu", zone: "south", zoneLabel: "South" },
+  { name: "Kochi", lat: 9.9312, lng: 76.2673, label: "Kochi, Kerala", zone: "south", zoneLabel: "South" },
+  { name: "Thiruvananthapuram", lat: 8.5241, lng: 76.9366, label: "Thiruvananthapuram, Kerala", zone: "south", zoneLabel: "South" },
+  { name: "Kozhikode", lat: 11.2588, lng: 75.7804, label: "Kozhikode, Kerala", zone: "south", zoneLabel: "South" },
+
+  // --- West (MH, GJ, GA) ---
+  { name: "Mumbai", lat: 19.0760, lng: 72.8777, label: "Mumbai, Maharashtra", zone: "west", zoneLabel: "West" },
+  { name: "Pune", lat: 18.5204, lng: 73.8567, label: "Pune, Maharashtra", zone: "west", zoneLabel: "West" },
+  { name: "Nagpur", lat: 21.1458, lng: 79.0882, label: "Nagpur, Maharashtra", zone: "west", zoneLabel: "West" },
+  { name: "Nashik", lat: 19.9975, lng: 73.7898, label: "Nashik, Maharashtra", zone: "west", zoneLabel: "West" },
+  { name: "Ahmedabad", lat: 23.0225, lng: 72.5714, label: "Ahmedabad, Gujarat", zone: "west", zoneLabel: "West" },
+  { name: "Surat", lat: 21.1702, lng: 72.8311, label: "Surat, Gujarat", zone: "west", zoneLabel: "West" },
+  { name: "Vadodara", lat: 22.3072, lng: 73.1812, label: "Vadodara, Gujarat", zone: "west", zoneLabel: "West" },
+  { name: "Goa (Panaji)", lat: 15.4909, lng: 73.8278, label: "Panaji, Goa", zone: "west", zoneLabel: "West" },
+
+  // --- North (DL, NCR, UP, RJ, PB) ---
+  { name: "Delhi NCR", lat: 28.6139, lng: 77.2090, label: "New Delhi, Delhi", zone: "north", zoneLabel: "North" },
+  { name: "Noida", lat: 28.5355, lng: 77.3910, label: "Noida, Uttar Pradesh", zone: "north", zoneLabel: "North" },
+  { name: "Gurugram", lat: 28.4595, lng: 77.0266, label: "Gurugram, Haryana", zone: "north", zoneLabel: "North" },
+  { name: "Jaipur", lat: 26.9124, lng: 75.7873, label: "Jaipur, Rajasthan", zone: "north", zoneLabel: "North" },
+  { name: "Lucknow", lat: 26.8467, lng: 80.9462, label: "Lucknow, Uttar Pradesh", zone: "north", zoneLabel: "North" },
+  { name: "Kanpur", lat: 26.4499, lng: 80.3319, label: "Kanpur, Uttar Pradesh", zone: "north", zoneLabel: "North" },
+  { name: "Varanasi", lat: 25.3176, lng: 82.9739, label: "Varanasi, Uttar Pradesh", zone: "north", zoneLabel: "North" },
+  { name: "Agra", lat: 27.1767, lng: 78.0081, label: "Agra, Uttar Pradesh", zone: "north", zoneLabel: "North" },
+  { name: "Chandigarh", lat: 30.7333, lng: 76.7794, label: "Chandigarh, UT", zone: "north", zoneLabel: "North" },
+  { name: "Amritsar", lat: 31.6340, lng: 74.8723, label: "Amritsar, Punjab", zone: "north", zoneLabel: "North" },
+
+  // --- East & Central (WB, OD, BH, MP, NE) ---
+  { name: "Kolkata", lat: 22.5726, lng: 88.3639, label: "Kolkata, West Bengal", zone: "east_central", zoneLabel: "East & Central" },
+  { name: "Bhubaneswar", lat: 20.2961, lng: 85.8245, label: "Bhubaneswar, Odisha", zone: "east_central", zoneLabel: "East & Central" },
+  { name: "Patna", lat: 25.5941, lng: 85.1376, label: "Patna, Bihar", zone: "east_central", zoneLabel: "East & Central" },
+  { name: "Ranchi", lat: 23.3441, lng: 85.3096, label: "Ranchi, Jharkhand", zone: "east_central", zoneLabel: "East & Central" },
+  { name: "Bhopal", lat: 23.2599, lng: 77.4126, label: "Bhopal, Madhya Pradesh", zone: "east_central", zoneLabel: "East & Central" },
+  { name: "Indore", lat: 22.7196, lng: 75.8577, label: "Indore, Madhya Pradesh", zone: "east_central", zoneLabel: "East & Central" },
+  { name: "Guwahati", lat: 26.1445, lng: 91.7362, label: "Guwahati, Assam", zone: "east_central", zoneLabel: "East & Central" },
+];
+
+export interface MedicalIssueOption {
+  id: string;
+  label: string;
+  icon: string;
+  description: string;
+  famousFor: string;
+  keywords: string[];
+}
+
+export const MEDICAL_ISSUE_OPTIONS: MedicalIssueOption[] = [
+  {
+    id: "all",
+    label: "All Hospitals",
+    icon: "🏥",
+    description: "Explore all nearby 24/7 hospitals and medical centers",
+    famousFor: "Emergency & Multi-Specialty Care",
+    keywords: ["all", "hospital", "general", "emergency", "any"],
+  },
+  {
+    id: "ayurveda",
+    label: "Ayurveda & Traditional",
+    icon: "🌿",
+    description: "Ayurvedic treatments, Panchakarma, herbal medicine & wellness",
+    famousFor: "Ayurvedic Care & Holistic Healing",
+    keywords: ["ayurveda", "ayurvedic", "panchakarma", "herbal", "naturopathy", "homeopathy", "ayush"],
+  },
+  {
+    id: "cardiology",
+    label: "Heart & Cardiology",
+    icon: "🫀",
+    description: "Heart attack, chest pain, angioplasty, ECG, arrhythmia",
+    famousFor: "Cardiology & Cardiac Care",
+    keywords: ["heart", "cardio", "cardiac", "chest pain", "angioplasty", "bypass", "ecg", "heart attack"],
+  },
+  {
+    id: "neurology",
+    label: "Brain & Stroke",
+    icon: "🧠",
+    description: "Stroke, paralysis, brain injury, seizures, migraine, neuro ICU",
+    famousFor: "Neurology, Stroke & Brain Care",
+    keywords: ["brain", "stroke", "neuro", "paralysis", "seizure", "epilepsy", "spine", "migraine", "head injury"],
+  },
+  {
+    id: "cancer",
+    label: "Cancer & Oncology",
+    icon: "🎗️",
+    description: "Tumor diagnosis, chemotherapy, surgical oncology, radiation",
+    famousFor: "Cancer Care & Surgical Oncology",
+    keywords: ["cancer", "oncol", "tumor", "chemo", "chemotherapy", "radiation", "biopsy", "leukemia"],
+  },
+  {
+    id: "orthopedics",
+    label: "Bone, Joints & Trauma",
+    icon: "🦴",
+    description: "Fractures, accidental injuries, knee/hip replacement, spine",
+    famousFor: "Orthopedics & Joint Replacement",
+    keywords: ["bone", "ortho", "fracture", "joint", "knee", "spine", "hip", "accident", "trauma"],
+  },
+  {
+    id: "pediatrics",
+    label: "Child & Pediatrics",
+    icon: "👶",
+    description: "Newborn care, NICU Level-3, PICU, child fever, pediatric surgery",
+    famousFor: "Pediatrics, Child Care & NICU",
+    keywords: ["child", "pediatric", "baby", "infant", "nicu", "picu", "newborn", "children"],
+  },
+  {
+    id: "maternity",
+    label: "Maternity & Pregnancy",
+    icon: "🤰",
+    description: "Normal delivery, C-section, high-risk pregnancy, gynecology",
+    famousFor: "Maternity & Women's Health",
+    keywords: ["maternity", "pregnancy", "pregnant", "women", "gynec", "obstetrics", "delivery", "c-section", "labor"],
+  },
+  {
+    id: "kidney",
+    label: "Kidney & Dialysis",
+    icon: "🩸",
+    description: "Renal failure, hemodialysis, kidney stones, urology",
+    famousFor: "Kidney Care & Dialysis Unit",
+    keywords: ["kidney", "renal", "dialysis", "nephro", "urology", "stone", "creatinine"],
+  },
+  {
+    id: "pulmonology",
+    label: "Lungs & Pulmonology",
+    icon: "🫁",
+    description: "Severe asthma, breathing difficulty, pneumonia, COPD, oxygen",
+    famousFor: "Pulmonology & Respiratory Care",
+    keywords: ["lung", "lungs", "pulmo", "respiratory", "asthma", "breathing", "copd", "pneumonia", "chest"],
+  },
+  {
+    id: "eye",
+    label: "Eye & Ophthalmology",
+    icon: "👁️",
+    description: "Cataract surgery, retina treatment, glaucoma, corneal trauma",
+    famousFor: "Eye Care & Vision Surgery",
+    keywords: ["eye", "ophthal", "cataract", "retina", "glaucoma", "vision", "lasik", "netra"],
+  },
+  {
+    id: "emergency",
+    label: "Emergency & Critical Care",
+    icon: "🚨",
+    description: "Immediate life-saving resuscitation, acute trauma, ICU",
+    famousFor: "24/7 Emergency & Trauma",
+    keywords: ["emergency", "trauma", "er", "resuscitation", "icu", "critical", "casualty", "108"],
+  },
+  {
+    id: "gastroenterology",
+    label: "Gastro & Liver",
+    icon: "🔬",
+    description: "Severe abdominal pain, endoscopy, liver disease, jaundice",
+    famousFor: "Gastroenterology & Liver Sciences",
+    keywords: ["gastro", "liver", "stomach", "endoscopy", "digestive", "jaundice", "cirrhosis", "abdominal"],
+  },
+  {
+    id: "ent",
+    label: "ENT (Ear, Nose & Throat)",
+    icon: "👂",
+    description: "Sinus surgery, ear infection, hearing loss, throat disorders",
+    famousFor: "ENT & Head-Neck Surgery",
+    keywords: ["ent", "ear", "nose", "throat", "sinus", "tonsils", "hearing"],
+  },
+  {
+    id: "dermatology",
+    label: "Skin & Burns",
+    icon: "🩹",
+    description: "Severe skin burns, acute allergies, dermatology procedures",
+    famousFor: "Dermatology & Skin Care",
+    keywords: ["skin", "derma", "burn", "burns", "allergy", "rash", "dermatology"],
+  },
+  {
+    id: "diabetes",
+    label: "Diabetes & Endocrinology",
+    icon: "💉",
+    description: "High blood sugar emergency, diabetic foot, thyroid disease",
+    famousFor: "Diabetes & Endocrinology",
+    keywords: ["diabetes", "sugar", "insulin", "thyroid", "endocrine", "hormone"],
+  },
+  {
+    id: "dental",
+    label: "Dental & Maxillofacial",
+    icon: "🦷",
+    description: "Dental emergency, tooth extraction, facial trauma surgery",
+    famousFor: "Dental & Maxillofacial Care",
+    keywords: ["dental", "tooth", "teeth", "jaw", "oral", "maxillofacial"],
+  },
+];
+
+

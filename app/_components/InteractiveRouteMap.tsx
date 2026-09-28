@@ -2,11 +2,13 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Navigation, ExternalLink, Plus, Minus, Locate, Check, X, MapPin } from "lucide-react";
+import { getHospitalFamousFor } from "@/lib/hospitals-india-data";
 
 export interface HospitalItem {
   id: string;
   name: string;
   specialty: string[];
+  famousFor?: string;
   city: string;
   address: string;
   phone: string;
@@ -20,6 +22,9 @@ export interface HospitalItem {
   rating?: number;
   isEmergency24x7?: boolean;
   etaMinutes?: number;
+  isEligible?: boolean;
+  acceptsPublicInsurance?: boolean;
+  ownership?: string;
 }
 
 export function calculateCalibratedDriveTime(distanceKm: number, rawOsrmSeconds?: number): number {
@@ -210,35 +215,67 @@ export function InteractiveRouteMap({
       if (!hLat || !hLng) return;
 
       const isSelected = selectedHospital?.id === hosp.id;
+      const isEligible = Boolean(hosp.isEligible);
       bounds.push([hLat, hLng]);
+
+      const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
+      const shortName = hosp.name.split("-")[0].split("(")[0].trim();
+
+      const pinBg = isSelected ? "#e11d48" : isEligible ? "#0284c7" : "#0f172a";
+      const pinColor = "#ffffff";
+      const pinBorder = isSelected ? "#ffffff" : isEligible ? "#38bdf8" : "#94a3b8";
 
       const hospIcon = L.divIcon({
         className: "custom-hospital-marker",
         html: `
-          <div style="position:relative; width:${isSelected ? "44px" : "32px"}; height:${isSelected ? "44px" : "32px"}; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-            ${isSelected ? `<div style="position:absolute; width:40px; height:40px; border-radius:50%; background:rgba(225,29,72,0.25); animation:pulse 2s infinite;"></div>` : ""}
-            <div style="position:relative; width:${isSelected ? "32px" : "26px"}; height:${isSelected ? "32px" : "26px"}; border-radius:${isSelected ? "10px" : "8px"}; background:${isSelected ? "#e11d48" : "#ffffff"}; border:2px solid ${isSelected ? "#ffffff" : "#cbd5e1"}; box-shadow:0 3px 10px rgba(0,0,0,0.25); display:flex; align-items:center; justify-content:center; color:${isSelected ? "#ffffff" : "#e11d48"};">
-              <svg width="${isSelected ? "16" : "13"}" height="${isSelected ? "16" : "13"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          <div style="position:relative; width:${isSelected ? "48px" : "32px"}; height:${isSelected ? "48px" : "32px"}; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+            ${isSelected ? `<div style="position:absolute; width:44px; height:44px; border-radius:50%; background:rgba(225,29,72,0.3); animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
+            <div style="position:relative; width:${isSelected ? "34px" : "26px"}; height:${isSelected ? "34px" : "26px"}; border-radius:${isSelected ? "11px" : "8px"}; background:${pinBg}; border:2px solid ${pinBorder}; box-shadow:0 3px 12px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; color:${pinColor};">
+              ${isEligible && !isSelected ? `<span style="font-size:12px;">⭐</span>` : `<svg width="${isSelected ? "18" : "13"}" height="${isSelected ? "18" : "13"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`}
             </div>
             ${
               isSelected
-                ? `<div style="position:absolute; bottom:-22px; white-space:nowrap; background:#0f172a; color:#ffffff; font-family:sans-serif; font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.25);">
-                    ${hosp.name.split("-")[0].trim()} (${hosp.distanceKm} km)
+                ? `<div style="position:absolute; bottom:-52px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#0f172a; font-family:var(--font-jakarta),-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:5px 10px; border-radius:10px; box-shadow:0 8px 24px -4px rgba(15,23,42,0.18), 0 2px 6px -1px rgba(15,23,42,0.08); z-index:9999; border:1.5px solid #0284c7; pointer-events:none;">
+                    <div style="font-size:11px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:4px; line-height:1.2;">
+                      <span>🏥</span> ${shortName} <span style="font-family:var(--font-jetbrains),monospace; color:#0284c7; font-weight:700;">(${hosp.distanceKm} km)</span>
+                    </div>
+                    <div style="font-size:9.5px; font-weight:700; color:#92400e; background:#fef3c7; border:1px solid #fde68a; padding:1px 6px; border-radius:5px; margin-top:3px; line-height:1.2; display:inline-block;">
+                      ⭐ Famous for: ${famousFor}
+                    </div>
                   </div>`
                 : ""
             }
           </div>
         `,
-        iconSize: [isSelected ? 44 : 32, isSelected ? 44 : 32],
-        iconAnchor: [isSelected ? 22 : 16, isSelected ? 22 : 16],
+        iconSize: [isSelected ? 48 : 32, isSelected ? 48 : 32],
+        iconAnchor: [isSelected ? 24 : 16, isSelected ? 24 : 16],
       });
 
       const marker = L.marker([hLat, hLng], { icon: hospIcon });
+
+      // Clean, rich hover tooltip showing Hospital Name & What it's famous for
+      marker.bindTooltip(`
+        <div style="font-family:var(--font-jakarta),-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:2px 4px; line-height:1.35; max-width:240px;">
+          <b style="color:#0f172a; font-size:11px; display:block;">${hosp.name}</b>
+          <div style="margin:2px 0; display:inline-block; background:#fef3c7; color:#92400e; border:1px solid #fde68a; font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:4px;">
+            ⭐ Famous for: ${famousFor}
+          </div><br/>
+          <span style="color:#64748b; font-size:9.5px; font-family:var(--font-jetbrains),monospace;">${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 ER Verified" : "Medical Care Center"}</span>
+        </div>
+      `, { direction: "top", offset: [0, -16], opacity: 0.96 });
+
+      // Click Popup with complete information and route action
       marker.bindPopup(`
-        <div style="font-family:sans-serif; padding:4px; line-height:1.4;">
-          <b style="color:#0f172a; font-size:12px;">${hosp.name}</b><br/>
-          <span style="color:#e11d48; font-size:11px; font-weight:bold;">${hosp.distanceKm} km away • 24/7 ER</span><br/>
-          <span style="color:#64748b; font-size:10px;">${hosp.address}</span>
+        <div style="font-family:var(--font-jakarta),-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:6px; line-height:1.4; max-width:260px;">
+          <b style="color:#0f172a; font-size:12px; display:block; margin-bottom:4px;">${hosp.name}</b>
+          <div style="display:inline-block; margin-bottom:5px; background:#fef3c7; color:#92400e; border:1px solid #fde68a; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px;">
+            ⭐ Famous for: ${famousFor}
+          </div>
+          <div style="color:#e11d48; font-size:11px; font-weight:bold; margin-bottom:3px; font-family:var(--font-jetbrains),monospace;">
+            ${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 ER" : "Daycare Center"}
+          </div>
+          <div style="color:#64748b; font-size:10px; line-height:1.3; margin-bottom:6px;">${hosp.address}</div>
+          <div style="font-size:10px; font-weight:700; color:#0284c7;">Click to select and view live driving route</div>
         </div>
       `);
 
@@ -256,32 +293,47 @@ export function InteractiveRouteMap({
       setIsRouting(true);
 
       try {
-        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`;
-        const res = await fetch(osrmUrl, { signal: AbortSignal.timeout(3500) });
+        // Multi-tier Highway Routing: Tier 1: OSM.de Routed-Car (High bandwidth), Tier 2: OSRM Project
+        const routingEndpoints = [
+          `https://routing.openstreetmap.de/routed-car/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`,
+          `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`,
+        ];
 
         let polylinePoints: [number, number][] = [];
         let dist = selectedHospital.distanceKm;
         let dur = calculateCalibratedDriveTime(dist);
         let roadSuccess = false;
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.routes && data.routes[0]) {
-            const geom = data.routes[0].geometry.coordinates;
-            polylinePoints = geom.map((coord: [number, number]) => [coord[1], coord[0]]);
-            dist = parseFloat((data.routes[0].distance / 1000).toFixed(1)) || dist;
-            dur = calculateCalibratedDriveTime(dist, data.routes[0].duration);
-            roadSuccess = true;
+        for (const endpoint of routingEndpoints) {
+          try {
+            const res = await fetch(endpoint, { signal: AbortSignal.timeout(9000) });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.routes && data.routes[0] && data.routes[0].geometry?.coordinates?.length > 1) {
+                const geom = data.routes[0].geometry.coordinates;
+                polylinePoints = geom.map((coord: [number, number]) => [coord[1], coord[0]]);
+                dist = parseFloat((data.routes[0].distance / 1000).toFixed(1)) || dist;
+                dur = calculateCalibratedDriveTime(dist, data.routes[0].duration);
+                roadSuccess = true;
+                break; // Successfully obtained full highway road curves
+              }
+            }
+          } catch {
+            // Fallthrough to next tier
           }
         }
 
+        // Fallback natural spline if remote servers are offline (avoids blunt straight line)
         if (polylinePoints.length === 0) {
-          polylinePoints = [
-            [origin.lat, origin.lng],
-            [(origin.lat * 2 + destination.lat) / 3, (origin.lng * 2 + destination.lng) / 3],
-            [(origin.lat + destination.lat * 2) / 3, (origin.lng + destination.lng * 2) / 3],
-            [destination.lat, destination.lng],
-          ];
+          const steps = 12;
+          polylinePoints = [];
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            // Generate subtle curve using quadratic offset
+            const lat = origin.lat + (destination.lat - origin.lat) * t + Math.sin(t * Math.PI) * 0.015;
+            const lng = origin.lng + (destination.lng - origin.lng) * t - Math.sin(t * Math.PI) * 0.012;
+            polylinePoints.push([lat, lng]);
+          }
         }
 
         // Base route glow
@@ -315,25 +367,16 @@ export function InteractiveRouteMap({
         if (onRouteCalculated) {
           onRouteCalculated({ roadDistanceKm: dist, etaMinutes: dur });
         }
+
+        // Auto-frame map to show both the patient and destination hospital along the highway corridor
+        if (polylinePoints.length > 1) {
+          const routeBounds = L.latLngBounds(polylinePoints);
+          map.fitBounds(routeBounds, { padding: [70, 70], maxZoom: 15 });
+        }
       } catch (err) {
-        const polylinePoints: [number, number][] = [
-          [origin.lat, origin.lng],
-          [destination.lat, destination.lng],
-        ];
-        const line = L.polyline(polylinePoints, {
-          color: "#0284c7",
-          weight: 4,
-          opacity: 0.9,
-          dashArray: "6, 6",
-        });
-        routeLayerRef.current.addLayer(line);
+        console.warn("Routing error:", err);
       } finally {
         setIsRouting(false);
-      }
-
-      // ONLY fit bounds if explicitly needed (new location or hospital selected)
-      if (shouldFitBounds && bounds.length > 1) {
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
       }
     }
   };
