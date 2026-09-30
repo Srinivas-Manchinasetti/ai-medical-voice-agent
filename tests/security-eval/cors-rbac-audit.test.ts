@@ -16,6 +16,10 @@ import {
   authorizeRequest,
 } from "../../lib/auth/rbac";
 import { evaluateSafetyArbiter } from "../../lib/triage/safety-arbiter";
+import { GET as getConsultationById } from "../../app/api/consultations/[id]/route";
+import { GET as getConsultationFhir } from "../../app/api/consultations/[id]/fhir/route";
+import { GET as getEmergencyDispatches, POST as postEmergencyDispatch } from "../../app/api/emergency/pre-arrival/route";
+import { memoryConsultations } from "../../app/api/consultations/route";
 
 // Ensure test environment is explicitly set for test runner
 (process.env as Record<string, string | undefined>).NODE_ENV = "test";
@@ -260,6 +264,153 @@ async function runSecurityAndAuditTestSuite() {
       const fallbackVoice = resolveAuthoritativeVoice("invalid-manipulated-doctor-id");
       assert(fallbackVoice === "af_sarah", "Unknown doctor ID defaults safely to lead clinician voice (af_sarah), preventing arbitrary synthesis");
     }
+  }
+
+  // TEST 6: Sensitive API Endpoint Ownership & IDOR Protection Invariants
+  console.log("\n[Test Suite 6] Sensitive API Endpoint Ownership & IDOR Protection Invariants");
+  {
+    const testConsultationId = "MED-TEST-OWNER-991";
+    memoryConsultations.push({
+      id: testConsultationId,
+      userId: "patient-alice-123",
+      patientName: "Alice Wonderland",
+      patientAge: "35",
+      patientGender: "female",
+      doctorId: "dr-sarah-chen",
+      doctorName: "Dr. Sarah Chen, MD",
+      specialty: "Internal Medicine",
+      chiefComplaint: "Acute throat pain and difficulty swallowing",
+      triageLevel: "routine",
+      triageTitle: "ESI LEVEL 4: ROUTINE",
+      detectedSymptoms: ["Sore Throat"],
+      soapSubjective: "Patient Alice reports 2 days of throat pain.",
+      createdAt: new Date().toISOString(),
+    });
+
+    // 1. Unauthenticated Consultation Access (Production Simulation)
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+      const anonConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`);
+      const anonConsultRes = await getConsultationById(anonConsultReq, {
+        params: Promise.resolve({ id: testConsultationId }),
+      });
+      assert(anonConsultRes.status === 401, "Unauthenticated request to read consultation returns 401 Unauthorized");
+
+      const anonFhirReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}/fhir`);
+      const anonFhirRes = await getConsultationFhir(anonFhirReq, {
+        params: Promise.resolve({ id: testConsultationId }),
+      });
+      assert(anonFhirRes.status === 401, "Unauthenticated request to export FHIR bundle returns 401 Unauthorized");
+
+      const anonTelemetryReq = new Request("https://medvoice.org/api/emergency/pre-arrival");
+      const anonTelemetryRes = await getEmergencyDispatches(anonTelemetryReq);
+      assert(anonTelemetryRes.status === 401, "Unauthenticated request to query telemetry board returns 401 Unauthorized");
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+    }
+
+    // 2. IDOR Prevention: Patient Bob attempts to read Patient Alice's consultation
+    const bobConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`, {
+      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-bob-456" },
+    });
+    const bobConsultRes = await getConsultationById(bobConsultReq, {
+      params: Promise.resolve({ id: testConsultationId }),
+    });
+    assert(bobConsultRes.status === 403, "IDOR attempt: Patient Bob cannot read Patient Alice's consultation (403 Forbidden)");
+
+    // 3. IDOR Prevention: Patient Bob attempts to export Patient Alice's FHIR bundle
+    const bobFhirReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}/fhir`, {
+      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-bob-456" },
+    });
+    const bobFhirRes = await getConsultationFhir(bobFhirReq, {
+      params: Promise.resolve({ id: testConsultationId }),
+    });
+    assert(bobFhirRes.status === 403, "IDOR attempt: Patient Bob cannot export Patient Alice's FHIR records (403 Forbidden)");
+
+    // 4. Legitimate Patient Owner Access: Alice reads and exports her own consultation
+    const aliceConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`, {
+      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123" },
+    });
+    const aliceConsultRes = await getConsultationById(aliceConsultReq, {
+      params: Promise.resolve({ id: testConsultationId }),
+    });
+    assert(aliceConsultRes.status === 200, "Patient Alice can read her own consultation (200 OK)");
+
+    const aliceFhirReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}/fhir`, {
+      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123" },
+    });
+    const aliceFhirRes = await getConsultationFhir(aliceFhirReq, {
+      params: Promise.resolve({ id: testConsultationId }),
+    });
+    assert(aliceFhirRes.status === 200, "Patient Alice can export her own FHIR R4 Bundle (200 OK)");
+
+    // 5. Administrator Oversight: Admin can inspect consultation for compliance
+    const adminConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`, {
+      headers: { "x-mock-role": "admin", "x-mock-user-id": "admin-super" },
+    });
+    const adminConsultRes = await getConsultationById(adminConsultReq, {
+      params: Promise.resolve({ id: testConsultationId }),
+    });
+    assert(adminConsultRes.status === 200, "Administrator can inspect consultation records (200 OK)");
+
+    // 6. Emergency Pre-Arrival RBAC
+    // Admin role CANNOT initiate patient clinical emergency ambulance dispatch
+    const adminDispatchReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
+      method: "POST",
+      headers: { "x-mock-role": "admin", "x-mock-user-id": "admin-super", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        consultationId: testConsultationId,
+        patientId: "patient-alice-123",
+        timestamp: new Date().toISOString(),
+        esiScore: 2,
+        triageLevel: "emergency",
+        triageTitle: "ESI LEVEL 2: EMERGENT",
+        icd10Codes: ["I20.9"],
+        chiefComplaint: "Crushing chest pressure",
+        targetHospitalName: "Apollo Emergency Center",
+        etaMinutes: 12,
+        redFlagsTriggered: ["ACS_CHEST_PAIN"],
+      }),
+    });
+    const adminDispatchRes = await postEmergencyDispatch(adminDispatchReq);
+    assert(adminDispatchRes.status === 403, "Admin cannot trigger clinical emergency dispatch (403 Forbidden)");
+
+    // Patient CAN initiate emergency ambulance dispatch
+    const patientDispatchReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
+      method: "POST",
+      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        consultationId: testConsultationId,
+        patientId: "patient-alice-123",
+        timestamp: new Date().toISOString(),
+        esiScore: 2,
+        triageLevel: "emergency",
+        triageTitle: "ESI LEVEL 2: EMERGENT",
+        icd10Codes: ["I20.9"],
+        chiefComplaint: "Crushing chest pressure",
+        targetHospitalName: "Apollo Emergency Center",
+        etaMinutes: 12,
+        redFlagsTriggered: ["ACS_CHEST_PAIN"],
+      }),
+    });
+    const patientDispatchRes = await postEmergencyDispatch(patientDispatchReq);
+    assert(patientDispatchRes.status === 200, "Patient can trigger emergency ambulance dispatch (200 OK)");
+
+    // 7. Hospital ED Telemetry Board Access
+    // Patient CANNOT dump all hospital telemetry dispatches
+    const patientBoardReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
+      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123" },
+    });
+    const patientBoardRes = await getEmergencyDispatches(patientBoardReq);
+    assert(patientBoardRes.status === 403, "Patient cannot dump hospital emergency telemetry board (403 Forbidden)");
+
+    // Admin CAN inspect hospital telemetry board
+    const adminBoardReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
+      headers: { "x-mock-role": "admin", "x-mock-user-id": "admin-super" },
+    });
+    const adminBoardRes = await getEmergencyDispatches(adminBoardReq);
+    assert(adminBoardRes.status === 200, "Administrator can inspect hospital emergency telemetry board (200 OK)");
   }
 
   console.log("\n========================================================");

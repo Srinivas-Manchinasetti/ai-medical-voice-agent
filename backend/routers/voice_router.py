@@ -26,7 +26,7 @@ async def process_triage(request: TriageRequest):
     if not request.transcript or not request.transcript.strip():
         raise HTTPException(status_code=400, detail="Transcript text cannot be empty.")
     
-    logger.info(f"Processing triage for patient '{request.patient_id}': {request.transcript[:60]}...")
+    logger.info(f"Processing triage for patient '{request.patient_id}' ({len(request.transcript)} characters) [PHI masked]")
     result = await analyze_patient_transcript(
         transcript=request.transcript,
         openai_api_key=settings.OPENAI_API_KEY

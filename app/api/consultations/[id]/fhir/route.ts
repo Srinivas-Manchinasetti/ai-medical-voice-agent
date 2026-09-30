@@ -4,15 +4,52 @@ import { consultationsTable } from "@/config/schema";
 import { eq } from "drizzle-orm";
 import { generateFHIRBundle, ConsultationRecordFHIR } from "@/lib/fhir/bundle";
 import { memoryConsultations } from "../../route";
+import { getAuthContext, hasPermission } from "@/lib/auth/rbac";
+import { logAuditEventAsync } from "@/lib/audit/audit-logger";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await getAuthContext(request);
     const { id } = await params;
 
-    let record: ConsultationRecordFHIR | null = null;
+    // 1. Enforce Authentication (401 for unauthenticated requests unless in test/demo mode)
+    if (auth.userId === "unauthenticated" && !auth.isDemoMode) {
+      await logAuditEventAsync({
+        actorId: "unauthenticated",
+        actorRole: "patient",
+        action: "ACCESS_DENIED",
+        resourceType: "consultation",
+        resourceId: id,
+        status: "DENIED",
+        metadata: { reason: "Unauthenticated request attempted to export FHIR bundle", format: "fhir_r4_bundle" },
+      });
+
+      return NextResponse.json(
+        {
+          resourceType: "OperationOutcome",
+          issue: [
+            {
+              severity: "error",
+              code: "login",
+              diagnostics: "Unauthorized: Authentication required to export clinical FHIR R4 documents.",
+            },
+          ],
+        },
+        {
+          status: 401,
+          headers: {
+            "Content-Type": "application/fhir+json; charset=utf-8",
+            "X-FHIR-Version": "4.0.1",
+          },
+        }
+      );
+    }
+
+    // 2. Fetch record from Neon DB or memory store
+    let record: any = null;
 
     const dbClient = getDb();
     if (dbClient) {
@@ -24,7 +61,7 @@ export async function GET(
           .limit(1);
 
         if (records.length > 0) {
-          record = records[0] as any;
+          record = records[0];
         }
       } catch (err) {
         console.warn("DB lookup error for FHIR export:", err);
@@ -34,12 +71,11 @@ export async function GET(
     if (!record) {
       const mem = memoryConsultations.find((c) => c.id === id);
       if (mem) {
-        record = mem as any;
+        record = mem;
       }
     }
 
     if (!record) {
-      // Return 404 if record doesn't exist
       return NextResponse.json(
         {
           resourceType: "OperationOutcome",
@@ -61,8 +97,68 @@ export async function GET(
       );
     }
 
-    // Generate valid HL7 FHIR R4 Bundle
+    // 3. Ownership & IDOR Protection:
+    // Patients can only export their own health records (record.userId === auth.userId).
+    // Platform administrators have authority to inspect/export records for governance.
+    const isOwner = record.userId === auth.userId || (auth.isDemoMode && (record.userId === "anon-user" || record.userId === auth.userId));
+    const isAdmin = auth.role === "admin";
+
+    if (!isOwner && !isAdmin) {
+      await logAuditEventAsync({
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: "ACCESS_DENIED",
+        resourceType: "consultation",
+        resourceId: id,
+        status: "DENIED",
+        metadata: {
+          reason: "IDOR prevention: Patient attempted to export another patient's FHIR record",
+          recordOwnerId: record.userId,
+          attemptedBy: auth.userId,
+          format: "fhir_r4_bundle",
+        },
+      });
+
+      return NextResponse.json(
+        {
+          resourceType: "OperationOutcome",
+          issue: [
+            {
+              severity: "error",
+              code: "forbidden",
+              diagnostics: "Forbidden: You are only authorized to export your own clinical records.",
+            },
+          ],
+        },
+        {
+          status: 403,
+          headers: {
+            "Content-Type": "application/fhir+json; charset=utf-8",
+            "X-FHIR-Version": "4.0.1",
+          },
+        }
+      );
+    }
+
+    // 4. Generate valid HL7 FHIR R4 Bundle
     const bundle = generateFHIRBundle(record);
+
+    // 5. Durably log PHI export event in tamper-evident SHA-256 audit ledger
+    await logAuditEventAsync({
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: "CONSULTATION_ACCESSED",
+      resourceType: "consultation",
+      resourceId: id,
+      status: "SUCCESS",
+      metadata: {
+        format: "fhir_r4_bundle",
+        bundleId: bundle.id,
+        patientName: record.patientName,
+        triageLevel: record.triageLevel,
+        totalEntries: bundle.entry?.length || 0,
+      },
+    });
 
     return new Response(JSON.stringify(bundle, null, 2), {
       status: 200,
@@ -94,3 +190,4 @@ export async function GET(
     );
   }
 }
+

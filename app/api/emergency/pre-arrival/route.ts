@@ -6,13 +6,41 @@ import {
   EmergencyDispatchReceipt,
 } from "@/lib/emergency/dispatch";
 import { logAuditEventAsync } from "@/lib/audit/audit-logger";
-import { getAuthContext } from "@/lib/auth/rbac";
+import { getAuthContext, hasPermission } from "@/lib/auth/rbac";
 
 // Simulated receiving hospital in-memory pre-arrival telemetry board
 const activeDispatches: EmergencyDispatchReceipt[] = [];
 
 export async function POST(request: Request) {
   try {
+    const auth = await getAuthContext(request);
+
+    // Enforce permission: role must possess "emergency:dispatch"
+    if (!hasPermission(auth.role, "emergency:dispatch")) {
+      await logAuditEventAsync({
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: "ACCESS_DENIED",
+        resourceType: "dispatch",
+        resourceId: "new_dispatch",
+        status: "DENIED",
+        metadata: {
+          reason: "Role not authorized to trigger emergency ambulance dispatch",
+          requiredPermission: "emergency:dispatch",
+          userRole: auth.role,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Forbidden: Role not authorized to trigger emergency hospital pre-arrival dispatch.",
+          code: "FORBIDDEN",
+        },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const parsed = EmergencyDispatchPayloadSchema.safeParse(body);
 
@@ -66,7 +94,6 @@ export async function POST(request: Request) {
     activeDispatches.unshift(receipt);
     if (activeDispatches.length > 50) activeDispatches.pop();
 
-    const auth = await getAuthContext(request);
     await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role,
@@ -97,12 +124,74 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const auth = await getAuthContext(request);
     const { searchParams } = new URL(request.url);
     const consultationId = searchParams.get("consultationId");
 
+    // 1. Single encounter dispatch status lookup
     if (consultationId) {
       const match = activeDispatches.find((d) => d.consultationId === consultationId);
-      return NextResponse.json({ success: true, dispatch: match || null });
+      if (!match) {
+        return NextResponse.json({ success: true, dispatch: null });
+      }
+
+      // Check access boundary
+      if (auth.userId === "unauthenticated" && !auth.isDemoMode) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Unauthorized: Authentication required to query pre-arrival telemetry.",
+            code: "UNAUTHORIZED",
+          },
+          { status: 401 }
+        );
+      }
+
+      return NextResponse.json({ success: true, dispatch: match });
+    }
+
+    // 2. Querying all active emergency dispatches (Hospital ED Telemetry Board)
+    // Administrative oversight: requires system:read or analytics:read
+    if (auth.userId === "unauthenticated" && !auth.isDemoMode) {
+      await logAuditEventAsync({
+        actorId: "unauthenticated",
+        actorRole: "patient",
+        action: "ACCESS_DENIED",
+        resourceType: "dispatch",
+        resourceId: "telemetry_board",
+        status: "DENIED",
+        metadata: { reason: "Unauthenticated request attempted to query hospital telemetry board" },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unauthorized: Hospital administration credentials required.",
+          code: "UNAUTHORIZED",
+        },
+        { status: 401 }
+      );
+    }
+
+    if (!hasPermission(auth.role, "system:read") && !hasPermission(auth.role, "analytics:read")) {
+      await logAuditEventAsync({
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: "ACCESS_DENIED",
+        resourceType: "dispatch",
+        resourceId: "telemetry_board",
+        status: "DENIED",
+        metadata: { attemptedRole: auth.role, requiredPermission: "system:read" },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Forbidden: Insufficient privileges to view hospital emergency dispatch telemetry board.",
+          code: "FORBIDDEN",
+        },
+        { status: 403 }
+      );
     }
 
     return NextResponse.json({
@@ -117,3 +206,4 @@ export async function GET(request: Request) {
     );
   }
 }
+

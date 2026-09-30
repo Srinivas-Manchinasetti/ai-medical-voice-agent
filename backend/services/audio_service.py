@@ -77,7 +77,7 @@ def transcribe_audio_bytes(
             result = model.transcribe(temp_path, fp16=False, language="en")
             transcript_text = result.get("text", "").strip()
             
-            logger.info(f"Local Whisper ASR successfully transcribed {len(audio_bytes)} bytes -> '{transcript_text[:60]}...'")
+            logger.info(f"Local Whisper ASR successfully transcribed {len(audio_bytes)} bytes ({len(transcript_text)} characters) [PHI masked]")
             return transcript_text
         except Exception as local_err:
             logger.warning(f"Local Whisper transcription failed: {local_err}")
@@ -94,7 +94,7 @@ def transcribe_audio_bytes(
                             language="en"
                         )
                     cloud_text = cloud_res.text.strip()
-                    logger.info(f"Cloud Whisper API succeeded -> '{cloud_text[:60]}...'")
+                    logger.info(f"Cloud Whisper API succeeded ({len(cloud_text)} characters) [PHI masked]")
                     return cloud_text
                 except Exception as cloud_err:
                     logger.error(f"Cloud Whisper API fallback also failed: {cloud_err}")
