@@ -1068,13 +1068,7 @@ export default function ConsultPage() {
 
     // Active consultation speaker handover
     // 1. Halt existing audio and intake immediately
-    if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.src = "";
-        activeAudioRef.current = null;
-      } catch {}
-    }
+    stopAndClearActiveAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch {}
     }
@@ -1310,13 +1304,7 @@ export default function ConsultPage() {
     transcriptTextRef.current = "";
     accumulatedTranscriptRef.current = "";
     setInterviewState(null);
-    if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.src = "";
-        activeAudioRef.current = null;
-      } catch {}
-    }
+    stopAndClearActiveAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch {}
     }
