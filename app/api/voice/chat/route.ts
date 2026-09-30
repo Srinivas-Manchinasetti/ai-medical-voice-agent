@@ -47,8 +47,7 @@ export async function POST(request: Request) {
         "dr-marcus-vance": "Hello, I'm Dr. Marcus Vance, Senior Cardiologist. I'm listening closely. Please describe any chest discomfort, palpitations, or symptoms you're feeling.",
         "dr-elena-rostova": "Hello! I'm Dr. Elena Rostova, Consultant Pediatrician. How can I assist you or your family today?",
         "dr-arthur-pendelton": "Good day, I'm Dr. Arthur Pendelton in Neurology. How are you feeling today, and what symptoms would you like us to evaluate?",
-        "dr-anna-bennett": "Hello, I'm Dr. Anna Bennett, Consultant Dermatologist. Please tell me about any symptoms, skin changes, or reactions you're experiencing.",
-        "dr-priya-patel": "Hello, I'm Dr. Anna Bennett, Consultant Dermatologist. Please tell me about any symptoms, skin changes, or reactions you're experiencing."
+        "dr-anna-bennett": "Hello, I'm Dr. Anna Bennett, Consultant Dermatologist. Please tell me about any symptoms, skin changes, or reactions you're experiencing."
       };
       const doctorGreeting = greetingReplies[doctor.id] || `Hello! I'm ${doctor.name}. I'm here and ready to help. What symptoms are you experiencing?`;
 

@@ -10,7 +10,6 @@ export const DOCTOR_KOKORO_VOICES: Record<string, string> = {
   "dr-elena-rostova": "bf_emma", // Gentle, compassionate British female pediatrician
   "dr-arthur-pendelton": "bm_george", // Methodical, analytical British male neurologist
   "dr-anna-bennett": "af_nicole", // Warm, compassionate American female dermatologist
-  "dr-priya-patel": "af_nicole", // Backward compatibility alias
 };
 
 export function resolveAuthoritativeVoice(doctorId?: string): string {
@@ -27,7 +26,6 @@ export function resolveAuthoritativeSpeed(doctorId?: string): number {
     "dr-elena-rostova": 0.97,
     "dr-arthur-pendelton": 0.90,
     "dr-anna-bennett": 0.98,
-    "dr-priya-patel": 0.98,
   };
   if (doctorId && SPEED_MAP[doctorId]) {
     return SPEED_MAP[doctorId];

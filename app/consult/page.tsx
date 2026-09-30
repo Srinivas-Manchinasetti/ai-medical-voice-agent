@@ -436,7 +436,7 @@ export default function ConsultPage() {
   } else if (audioState === "PROCESSING_PATIENT" || audioState === "PROCESSING_INTERRUPTION") {
     contextSubtitle = "Updating context...";
   } else if (audioState === "DOCTOR_SPEAKING") {
-    contextSubtitle = "Dr. Sarah speaking...";
+    contextSubtitle = `${activeSpeaker?.name ? activeSpeaker.name.split(",")[0] : "Doctor"} speaking...`;
   } else if (hasContextFacts) {
     contextSubtitle = "Context updated";
   } else {
@@ -525,7 +525,7 @@ export default function ConsultPage() {
     {
       id: "step-response",
       label: "Consensus response ready & clinical guidance",
-      detail: audioState === "DOCTOR_SPEAKING" ? "Dr. Sarah Chen audio synthesis streaming" : (messages.length > 0 ? "SOAP encounter note compiled" : "Standby for response synthesis"),
+      detail: audioState === "DOCTOR_SPEAKING" ? `${activeSpeaker?.name ? activeSpeaker.name.split(",")[0] : "Doctor"} audio synthesis streaming` : (messages.length > 0 ? "SOAP encounter note compiled" : "Standby for response synthesis"),
       status: audioState === "DOCTOR_SPEAKING" || messages.some(m => m.role === "doctor") ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
     }
   ];
@@ -837,7 +837,7 @@ export default function ConsultPage() {
       // Regional accent matching
       let candidateVoices = englishVoices;
       if (isIndian) {
-        const indianVoices = englishVoices.filter((v) => v.lang.includes("IN") || /India|Heera|Veena|Kavya|Priya|Hindi/i.test(v.name));
+        const indianVoices = englishVoices.filter((v) => v.lang.includes("IN") || /India|Heera|Veena|Kavya|Hindi/i.test(v.name));
         if (indianVoices.length > 0) candidateVoices = indianVoices;
       } else if (isBritish) {
         const britishVoices = englishVoices.filter((v) => v.lang.includes("GB") || /UK|British|George|Hazel|Oliver|Victoria/i.test(v.name));
@@ -854,7 +854,6 @@ export default function ConsultPage() {
         "dr-elena-rostova": /Hazel|Victoria|Emma|Libby|Female/i,
         "dr-arthur-pendelton": /George|Oliver|Daniel|Male/i,
         "dr-anna-bennett": /Nicole|Samantha|Victoria|Zira|Jenny|Female/i,
-        "dr-priya-patel": /Nicole|Samantha|Victoria|Zira|Jenny|Female/i,
       };
 
       const pattern = DOCTOR_FALLBACK_PATTERNS[targetDoctor.id];
@@ -1365,7 +1364,14 @@ export default function ConsultPage() {
         }
         if (data.board) {
           setBoardData(data.board);
-          if (data.board.phase === "dormant" || data.board.phase === "gathering_history") {
+          const isHistoryGathering =
+            data.board.phase === "dormant" ||
+            data.board.phase === "gathering_history" ||
+            data.board.phase === "active_inquiring" ||
+            data.triage?.triageLevel === "gathering_history" ||
+            data.interviewState?.informationState === "insufficient";
+
+          if (isHistoryGathering) {
             setActiveRightTab("context");
           } else {
             setActiveRightTab("board");
@@ -1850,7 +1856,7 @@ export default function ConsultPage() {
                   </div>
                   <h3 className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight">Ready when you are</h3>
                   <p className="text-sm sm:text-base text-slate-600 max-w-md leading-relaxed font-normal">
-                    Start a voice consultation with Dr. Sarah Chen. You can speak naturally or type your symptoms below.
+                    Start a voice consultation with {selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "your physician"}. You can speak naturally or type your symptoms below.
                   </p>
                 </div>
               ) : (
@@ -2141,8 +2147,8 @@ export default function ConsultPage() {
                           return [
                             {
                               id: "intake-lead",
-                              doctorName: "Dr. Sarah Chen",
-                              specialty: "Primary Care & Clinical Triage Lead",
+                              doctorName: selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "Lead Clinician",
+                              specialty: selectedDoctor?.title || "Primary Care & Clinical Triage Lead",
                               role: "lead",
                               statusText: callActive ? "LIVE" : "STANDBY",
                               statusColor: "bg-cyan-500",
@@ -2150,8 +2156,8 @@ export default function ConsultPage() {
                               badgeColor: "text-cyan-800 bg-cyan-50 border-cyan-200",
                               isLive: callActive,
                               content: callActive
-                                ? "Active clinical intake in progress. Specialist agents monitor incoming acoustic biomarkers and symptom reports."
-                                : "Primary care lead ready on standby. Initiate voice consultation to evaluate symptoms.",
+                                ? `Active clinical intake in progress with ${selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "lead clinician"}. Specialist agents monitor incoming acoustic biomarkers and symptom reports.`
+                                : `${selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "Lead clinician"} ready on standby. Initiate voice consultation to evaluate symptoms.`,
                               timestamp: "Live",
                               evidence: [] as Array<{ name: string; value: string }>
                             }
