@@ -177,7 +177,7 @@ Your primary goals:
     specialty: "Dermatology",
     department: "Dermatology & Skin Pathology",
     experience: "10+ Years Clinical Dermatology",
-    avatarUrl: "https://images.unsplash.com/photo-1594824813589-9831b143ec68?auto=format&fit=crop&w=400&q=80",
+    avatarUrl: "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
     voiceId: DOCTOR_VOICE_PROFILES["dr-anna-bennett"].voiceId,
     voiceProfile: DOCTOR_VOICE_PROFILES["dr-anna-bennett"],
