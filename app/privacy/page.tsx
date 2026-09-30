@@ -12,66 +12,66 @@ const EXPAND_SAFEGUARDS: ExpandItem[] = [
   {
     id: "retention",
     num: "01",
-    tag: "ZERO RETENTION",
-    title: "Zero Voice Audio Retention Policy",
-    headline: "Spoken patient audio streams are processed in ephemeral memory for real-time ICD-10 extraction and SOAP note generation, then immediately purged.",
-    complianceBadge: "HIPAA 45 CFR § 164.312",
+    tag: "EPHEMERAL VOICE",
+    title: "Ephemeral Voice Audio Lifecycle",
+    headline: "Spoken patient audio is processed locally for Whisper transcription and clinical synthesis, with temporary files scrubbed immediately.",
+    complianceBadge: "Data Minimization Safeguard",
     pipelineFlow: [
-      { label: "Microphone Audio", sub: "16kHz PCM Stream" },
-      { label: "RAM Ring Buffer", sub: "Ephemeral In-Memory" },
-      { label: "Entity Extraction", sub: "ICD-10 & Symptoms" },
-      { label: "SOAP Compiled", sub: "FHIR R4 Ingestion" },
-      { label: "Audio Purged", sub: "0 Bytes Persisted" },
+      { label: "Microphone Audio", sub: "MediaRecorder Audio Blob" },
+      { label: "Next.js Bridge", sub: "In-Memory FormData" },
+      { label: "FastAPI Engine", sub: "Local Whisper base.en" },
+      { label: "Temp Scrub", sub: "Deleted in finally: block" },
+      { label: "Persisted Data", sub: "Structured Text Only" },
     ],
-    summary: "Voice recordings are never saved to disk, backup volumes, or used for model training without explicit institutional consent.",
+    summary: "Voice recordings are not saved to disk or persistent storage by the application.",
   },
   {
     id: "encryption",
     num: "02",
-    tag: "CRYPTOGRAPHY",
-    title: "End-to-End TLS 1.3 & AES-256 Encryption",
-    headline: "All voice telemetry and clinical consultation data are encrypted using TLS 1.3 in transit and AES-256 at rest within isolated Neon PostgreSQL storage.",
-    complianceBadge: "FIPS 140-2 Validated",
+    tag: "TRANSMISSION",
+    title: "Secure Transport & HSTS Directives",
+    headline: "All voice telemetry and clinical consultation endpoints enforce HTTPS with HSTS preloading (max-age=63072000) and strict cache controls.",
+    complianceBadge: "45 CFR § 164.312(e)(1)",
     pipelineFlow: [
-      { label: "Client Browser", sub: "WebRTC / Audio" },
-      { label: "TLS 1.3 Socket", sub: "Sub-120ms Pipe" },
-      { label: "FastAPI Engine", sub: "Protected Enclave" },
-      { label: "Neon DB", sub: "AES-256 at Rest" },
-      { label: "Audit Hash", sub: "SHA-256 Digest" },
+      { label: "Client Browser", sub: "Microphone Audio" },
+      { label: "HTTPS / HSTS", sub: "Encrypted Transport" },
+      { label: "Local Whisper", sub: "base.en Engine" },
+      { label: "PostgreSQL DB", sub: "Durable Ledger" },
+      { label: "Audit Chain", sub: "SHA-256 Digest" },
     ],
-    summary: "Key rotation occurs every 90 days. Data in transit cannot be intercepted, decrypted, or modified.",
+    summary: "Transmission security is enforced via TLS over web connections with strict HTTP headers preventing proxy caching.",
   },
   {
     id: "access",
     num: "03",
     tag: "AUTHORIZATION",
     title: "Granular Role-Based Access Controls (RBAC)",
-    headline: "Strict physician identity verification and least-privilege permissions govern every consultation review and FHIR export.",
-    complianceBadge: "Minimum Necessary Rule",
+    headline: "Strict Clerk server-side session authentication ensures patients can only access their own records, with full audit trail on unauthorized attempts.",
+    complianceBadge: "45 CFR § 164.312(a)(1)",
     pipelineFlow: [
-      { label: "Clerk Session", sub: "JWT Handshake" },
-      { label: "Identity Check", sub: "Licensed Attending" },
-      { label: "Triage Access", sub: "Level-1 Scope" },
+      { label: "Clerk Session", sub: "Server-Side Token" },
+      { label: "Identity Check", sub: "Authoritative Role" },
+      { label: "IDOR Check", sub: "Ownership Validation" },
       { label: "Session Token", sub: "Single Encounter" },
       { label: "Record Unlocked", sub: "Audit Entry Created" },
     ],
-    summary: "Access boundaries ensure emergency room clinicians only access records for actively assigned patients.",
+    summary: "IDOR boundaries prevent patients from querying other patients' clinical consultations or FHIR exports.",
   },
   {
     id: "audit",
     num: "04",
     tag: "AUDIT TRAIL",
-    title: "Immutable Cryptographic Audit Logging",
-    headline: "Every consultation intake, doctor deliberation round, and hospital pre-arrival dispatch creates an immutable SHA-256 audit record.",
-    complianceBadge: "HIPAA § 164.312(b)",
+    title: "SHA-256 Hash-Chained Audit Ledger",
+    headline: "Every consultation creation, access attempt, access denial, and emergency dispatch creates a tamper-evident SHA-256 chained audit record.",
+    complianceBadge: "45 CFR § 164.312(b)",
     pipelineFlow: [
       { label: "Clinical Action", sub: "Intake / Dispatch" },
       { label: "Payload Encoded", sub: "Canonical JSON" },
-      { label: "SHA-256 Hash", sub: "Web Cryptography" },
+      { label: "SHA-256 Hash", sub: "Cryptographic Digest" },
       { label: "Timestamp Signed", sub: "UTC Clock" },
-      { label: "Ledger Committed", sub: "Tamper Evident" },
+      { label: "Postgres Ledger", sub: "Durable Persistence" },
     ],
-    summary: "Provides automated, verifiable audit trails for institutional compliance and medical record verification.",
+    summary: "Backed by PostgreSQL persistence with automated cryptographic tamper-verification routines.",
   },
 ];
 
@@ -116,25 +116,25 @@ export default function PrivacyPolicyPage() {
               TECHNICAL VERIFICATION · FLIP TO INSPECT
             </span>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
-              Architectural Compliance & Business Associate Agreements
+              Architectural Safeguards & Technical Specifications
             </h2>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <ClinicalFlipCard
               category="REGULATORY FRAMEWORK"
-              title="HIPAA Security Rule (45 CFR Part 160 & 164)"
-              frontSnippet="MedVoice architecture complies with administrative, physical, and technical safeguard requirements for protected health information (PHI)."
-              frontBadge="BAA Agreement Ready"
+              title="HIPAA Security Rule (45 CFR § 164.312)"
+              frontSnippet="MedVoice architecture implements technical safeguard requirements under 45 CFR § 164.312 for electronic protected health information (ePHI)."
+              frontBadge="45 CFR § 164.312 Aligned"
               frontIcon={<ShieldCheck className="w-5 h-5" />}
               backTitle="SAFEGUARD SPECIFICATION"
               backItems={[
-                { label: "ACCESS CONTROL (§ 164.312(a))", value: "Unique user identification & automatic session timeout" },
-                { label: "TRANSMISSION SECURITY (§ 164.312(e))", value: "TLS 1.3 end-to-end encrypted voice sockets" },
-                { label: "INTEGRITY CONTROL (§ 164.312(c))", value: "SHA-256 cryptographic verification of FHIR bundles" },
-                { label: "AUDIT CONTROLS (§ 164.312(b))", value: "Immutable query, review, and telemetry dispatch records" },
+                { label: "ACCESS CONTROL (§ 164.312(a))", value: "Unique user identification, strict RBAC, and IDOR protection" },
+                { label: "TRANSMISSION SECURITY (§ 164.312(e))", value: "HTTPS/HSTS transport and no-store API cache controls" },
+                { label: "INTEGRITY CONTROL (§ 164.312(c))", value: "SHA-256 cryptographic chaining of clinical transactions" },
+                { label: "AUDIT CONTROLS (§ 164.312(b))", value: "PostgreSQL-backed tamper-evident access and denial ledger" },
               ]}
-              backNote="Business Associate Agreements (BAAs) available for enterprise hospital deployments."
+              backNote="Prototype implementation of technical safeguards. Formal institutional compliance requires organizational policies and BAAs."
             />
 
             <ClinicalFlipCard

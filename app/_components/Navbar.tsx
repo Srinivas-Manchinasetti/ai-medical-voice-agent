@@ -213,7 +213,7 @@ export function Navbar() {
                       <div className="p-2.5 rounded-xl bg-slate-50/90 border border-slate-200/70 text-xs flex flex-col gap-1">
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-slate-500 font-medium">Session Status:</span>
-                          <span className="font-mono font-bold text-emerald-700">HIPAA VERIFIED</span>
+                          <span className="font-mono font-bold text-emerald-700">RBAC AUTHENTICATED</span>
                         </div>
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-slate-500 font-medium">Data Retention:</span>
@@ -290,7 +290,7 @@ export function Navbar() {
                         >
                           <div className="flex items-center gap-2">
                             <ShieldCheck className="w-4 h-4 text-slate-600" />
-                            <span>HIPAA Safeguards</span>
+                            <span>Privacy & Technical Safeguards</span>
                           </div>
                           <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700" />
                         </Link>

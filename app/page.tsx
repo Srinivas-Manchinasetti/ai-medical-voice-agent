@@ -93,35 +93,35 @@ const METRICS = [
   {
     icon: Zap,
     iconColor: "text-cyan-600 bg-cyan-50 border-cyan-200",
-    value: 120,
-    prefix: "< ",
-    suffix: "ms",
-    label: "Voice Latency",
-    subtext: "Sub-120ms speech-to-text & real-time audio synthesis",
+    value: 1.68,
+    prefix: "~",
+    suffix: "s",
+    label: "Local Whisper ASR",
+    subtext: "Warm CPU transcription benchmark (base.en)",
   },
   {
     icon: ShieldCheck,
     iconColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
-    value: 99.4,
-    suffix: "%",
-    label: "Triage Accuracy",
-    subtext: "Validated against Emergency Severity Index (ESI 1–5)",
+    value: 73,
+    suffix: " / 73",
+    label: "Adversarial Invariant Pass",
+    subtext: "Deterministic ESI v4 life-threat safety arbiter",
   },
   {
     icon: Clock,
     iconColor: "text-indigo-600 bg-indigo-50 border-indigo-200",
-    value: 1450,
-    suffix: "+",
-    label: "Hours Saved / Mo",
-    subtext: "Automated SOAP charting & Epic/Cerner FHIR sync",
+    value: 5,
+    suffix: " Personas",
+    label: "Specialist Board",
+    subtext: "General intake + modular specialty clinical reasoning",
   },
   {
     icon: Database,
     iconColor: "text-cyan-700 bg-cyan-50 border-cyan-200",
     value: 100,
     suffix: "%",
-    label: "FHIR Interoperability",
-    subtext: "HL7 FHIR R4 Bundle export & ICD-10 medical coding",
+    label: "FHIR Conformance Test",
+    subtext: "HL7 FHIR R4 Bundle export verified by test harness",
   },
 ];
 
@@ -129,11 +129,11 @@ const SCROLL_STACK_CARDS: ScrollStackCard[] = [
   {
     step: "01",
     tag: "LISTEN",
-    title: "16kHz Streaming Voice Intake",
-    description: "MedVoice captures natural, unconstrained patient speech with 16kHz sub-120ms streaming. Room acoustics and hesitation are filtered while preserving clinical nuance.",
-    highlightBadge: "Sub-120ms Latency · Noise Cancelled",
+    title: "Local Whisper Speech Intake",
+    description: "MedVoice captures natural patient speech via MediaRecorder and processes it locally using Whisper base.en. Room acoustics and hesitation are handled while preserving clinical nuance.",
+    highlightBadge: "Local base.en Engine · Ephemeral Buffer",
     badgeColor: "text-cyan-700 bg-cyan-50 border-cyan-200",
-    metric: "16kHz PCM Audio Stream",
+    metric: "Local Whisper ASR (1.68s on CPU)",
     content: (
       <div className="space-y-3 font-mono text-xs">
         <div className="flex items-center justify-between border-b border-slate-200 pb-2 text-slate-500">
@@ -148,7 +148,7 @@ const SCROLL_STACK_CARDS: ScrollStackCard[] = [
         </p>
         <div className="flex items-center gap-1.5 pt-1 text-[11px] text-cyan-700">
           <Radio className="w-3.5 h-3.5 animate-pulse" />
-          <span>Continuous Speech Recognition · Acoustic Isolation</span>
+          <span>Local Whisper ASR · Ephemeral Audio Scrub</span>
         </div>
       </div>
     ),
@@ -156,11 +156,11 @@ const SCROLL_STACK_CARDS: ScrollStackCard[] = [
   {
     step: "02",
     tag: "UNDERSTAND",
-    title: "Continuous Symptom & ICD-10 Extraction",
-    description: "As the conversation unfolds, the clinical NLP pipeline isolates chief complaints, duration, and severity markers, cross-referencing candidates against ICD-10 and SNOMED CT.",
-    highlightBadge: "ICD-10 Entity Mapping · ACC/AHA Guidelines",
+    title: "Structured Symptom & ICD-10 Extraction",
+    description: "As the conversation unfolds, the clinical evidence extractor parses chief complaints, duration, severity, and denials, cross-referencing candidate conditions against ICD-10.",
+    highlightBadge: "ICD-10-Assisted Coding · ACC/AHA Protocols",
     badgeColor: "text-blue-700 bg-blue-50 border-blue-200",
-    metric: "99.4% Entity Resolution",
+    metric: "Multi-Clause Extraction",
     content: (
       <div className="space-y-3 font-mono text-xs">
         <div className="flex items-center justify-between border-b border-slate-200 pb-2 text-slate-500">
@@ -248,9 +248,9 @@ const STEPPER_ITEMS: StepItem[] = [
     id: "step-1",
     number: "1",
     label: "LISTEN",
-    title: "Continuous Voice Stream",
-    description: "Captures natural human dialogue with sub-120ms streaming.",
-    highlight: "16kHz PCM · Sub-120ms Latency",
+    title: "Continuous Voice Intake",
+    description: "Captures natural human dialogue with local Whisper base.en transcription.",
+    highlight: "Local Whisper ASR · Ephemeral Audio",
   },
   {
     id: "step-2",
@@ -373,11 +373,11 @@ export default function HomePage() {
             >
               <span className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-slate-600 bg-white/90 border border-slate-200/90 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                HIPAA SAFEGUARDS
+                TECHNICAL SAFEGUARDS (45 CFR § 164.312)
               </span>
               <span className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-slate-600 bg-white/90 border border-slate-200/90 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
                 <Zap className="w-3.5 h-3.5 text-cyan-600" />
-                SUB-120MS VOICE STREAM
+                LOCAL WHISPER ASR
               </span>
               <span className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-slate-600 bg-white/90 border border-slate-200/90 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
                 <FileText className="w-3.5 h-3.5 text-indigo-600" />
@@ -385,7 +385,7 @@ export default function HomePage() {
               </span>
               <span className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-slate-600 bg-white/90 border border-slate-200/90 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
                 <Lock className="w-3.5 h-3.5 text-emerald-600" />
-                ZERO AUDIO RETENTION
+                EPHEMERAL AUDIO SCRUB
               </span>
             </motion.div>
 
@@ -623,17 +623,17 @@ export default function HomePage() {
               <ClinicalFlipCard
                 category="NLP ENTITY EXTRACTION"
                 title="Continuous Symptom & ICD-10 Mining"
-                frontSnippet="Filters background room acoustics and conversational hesitation to isolate chief complaints and duration with sub-120ms latency."
-                frontBadge="Sub-120ms Engine"
+                frontSnippet="Filters background room acoustics and conversational hesitation to isolate chief complaints and duration with local Whisper base.en transcription."
+                frontBadge="Whisper base.en"
                 frontIcon={<Activity className="w-5 h-5" />}
                 backTitle="NLP EXTRACTION PIPELINE"
                 backItems={[
-                  { label: "AUDIO STREAM", value: "16kHz PCM stream with acoustic echo cancellation" },
+                  { label: "AUDIO STREAM", value: "Turn-based MediaRecorder audio capture with noise isolation" },
                   { label: "ENTITY IDENTIFIER", value: "Bi-directional clinical context and symptom duration parser" },
-                  { label: "CODE RECONCILIATION", value: "Automated mapping to ICD-10-CM and SNOMED-CT" },
+                  { label: "CODE RECONCILIATION", value: "Automated mapping to ICD-10-CM diagnostic categories" },
                   { label: "CONFIDENCE SCORE", value: "Deterministic thresholding (>95% clinical consensus)" },
                 ]}
-                backNote="Zero audio retention: raw audio streams purged immediately after transcription."
+                backNote="Ephemeral voice handling: temporary audio files deleted immediately after transcription."
               />
 
             </div>

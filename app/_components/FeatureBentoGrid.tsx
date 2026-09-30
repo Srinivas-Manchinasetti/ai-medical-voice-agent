@@ -60,10 +60,10 @@ export function FeatureBentoGrid() {
                 <div className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
                   <Globe2 className="h-5 w-5" />
                 </div>
-                <h3 className="text-xl font-bold text-slate-900">Multilingual Care</h3>
+                <h3 className="text-xl font-bold text-slate-900">Multi-Doctor Personas</h3>
               </div>
               <p className="text-sm text-slate-600 leading-relaxed mb-4">
-                Break language barriers. The voice agent seamlessly switches dialects in real-time over 30+ languages.
+                Specialized clinical reasoning. MedVoice pairs patient consultations with 5 distinct clinician personas across American and British accents using local Kokoro-82M neural TTS.
               </p>
 
               <div className="grid grid-cols-2 gap-1.5 mb-4">

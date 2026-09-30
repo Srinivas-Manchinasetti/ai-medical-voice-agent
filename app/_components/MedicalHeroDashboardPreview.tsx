@@ -337,7 +337,7 @@ export function MedicalHeroDashboardPreview({
 
           <div className="flex items-center gap-2 text-xs text-slate-300 font-mono">
             <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span>16kHz Audio Stream Intake · Sub-120ms Synthesis</span>
+            <span>Local Whisper base.en ASR · Kokoro-82M Neural Synthesis</span>
           </div>
         </div>
 
