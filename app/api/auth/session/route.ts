@@ -1,30 +1,24 @@
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
+import { getAuthContext } from '@/lib/auth/rbac';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ isSignedIn: false, user: null });
+    const auth = await getAuthContext(request);
+    if (!auth || auth.userId === "unauthenticated") {
+      return NextResponse.json({ isSignedIn: false, user: null, role: "patient" });
     }
     return NextResponse.json({
       isSignedIn: true,
       user: {
-        id: user.id,
-        name:
-          user.fullName ||
-          (user.firstName ? (user.firstName + (user.lastName ? ' ' + user.lastName : '')) : '') ||
-          user.username ||
-          'Physician',
-        firstName: user.firstName || 'Physician',
-        email:
-          user.primaryEmailAddress?.emailAddress ||
-          user.emailAddresses?.[0]?.emailAddress ||
-          '',
-        imageUrl: user.imageUrl || '',
+        id: auth.userId,
+        name: auth.name,
+        email: auth.email,
+        role: auth.role,
       },
+      role: auth.role,
     });
   } catch (error) {
-    return NextResponse.json({ isSignedIn: false, user: null });
+    return NextResponse.json({ isSignedIn: false, user: null, role: "patient" });
   }
 }
+

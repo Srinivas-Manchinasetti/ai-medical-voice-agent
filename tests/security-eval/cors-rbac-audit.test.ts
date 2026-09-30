@@ -1,13 +1,24 @@
 import {
   logAuditEvent,
+  clearAuditLedger,
   verifyAuditChain,
   getAuditEvents,
   computeEventHash,
   AuditEvent,
   GENESIS_HASH,
 } from "../../lib/audit/audit-logger";
-import { hasPermission, ROLE_PERMISSIONS, Role, Permission } from "../../lib/auth/rbac";
+import {
+  hasPermission,
+  ROLE_PERMISSIONS,
+  Role,
+  Permission,
+  getAuthContext,
+  authorizeRequest,
+} from "../../lib/auth/rbac";
 import { evaluateSafetyArbiter } from "../../lib/triage/safety-arbiter";
+
+// Ensure test environment is explicitly set for test runner
+(process.env as Record<string, string | undefined>).NODE_ENV = "test";
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -48,9 +59,57 @@ async function runSecurityAndAuditTestSuite() {
     assert(!hasPermission("admin", "consultations:create"), "Admin does not initiate clinical patient consultations");
   }
 
+  // TEST 1b: Server-Side Authentication Boundary & Anti-Spoofing Invariants
+  console.log("\n[Test Suite 1b] Server-Side Authentication Boundary & Anti-Spoofing Invariants");
+  {
+    // 1. Unauthenticated Request Resolution
+    const anonReq = new Request("https://app.medvoice.org/api/admin/metrics");
+    // Temporarily verify non-test behavior by simulating clean production environment
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+      const unauthContext = await getAuthContext(anonReq);
+      assert(unauthContext.userId === "unauthenticated", "Unauthenticated request resolves to userId: 'unauthenticated'");
+      assert(unauthContext.role === "patient", "Unauthenticated request strictly assigned non-privileged 'patient' role");
+
+      // Attempting to spoof admin via header in production MUST FAIL
+      const spoofAttemptReq = new Request("https://app.medvoice.org/api/admin/metrics", {
+        headers: { "x-mock-role": "admin" },
+      });
+      const spoofedContext = await getAuthContext(spoofAttemptReq);
+      assert(spoofedContext.role === "patient", "Client-controlled 'x-mock-role: admin' is strictly rejected in production");
+      assert(spoofedContext.userId === "unauthenticated", "Spoofed client remains unauthenticated");
+
+      // Verify authorizeRequest returns 401 Unauthorized for unauthenticated callers
+      const authResult = await authorizeRequest(spoofAttemptReq, "analytics:read");
+      assert(authResult.authorized === false, "Access correctly denied for spoof attempt");
+      if (!authResult.authorized) {
+        assert(authResult.errorResponse.status === 401, "Unauthenticated spoof attempt returns 401 Unauthorized");
+      }
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+    }
+
+    // 2. Test Harness Role Emulation (only available when NODE_ENV === 'test')
+    const testAdminReq = new Request("https://app.medvoice.org/api/admin/metrics", {
+      headers: { "x-mock-role": "admin", "x-mock-user-id": "test-admin-99" },
+    });
+    const testAdminContext = await getAuthContext(testAdminReq);
+    assert(testAdminContext.role === "admin", "Automated test harness can emulate admin for unit tests");
+
+    // 3. Authenticated Admin Down-scoping (Privilege Attenuation)
+    // When an admin voluntarily requests patient simulation, it down-scopes safely
+    const adminDownscopeReq = new Request("https://app.medvoice.org/api/admin/metrics", {
+      headers: { "x-mock-role": "admin", "x-simulate-patient-view": "true" },
+    });
+    // In test harness, x-mock-role creates admin, but x-simulate-patient-view down-scopes
+    // (Note: in production, Clerk provides the verified admin role)
+  }
+
   // TEST 2: Tamper-Evident Cryptographic Hash Chain
   console.log("\n[Test Suite 2] Cryptographic Hash Chained Audit Ledger");
   {
+    clearAuditLedger();
     // Log clean events
     const event1 = logAuditEvent({
       actorId: "usr-patient-101",

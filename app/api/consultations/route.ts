@@ -3,7 +3,7 @@ import { getDb } from "@/config/db";
 import { consultationsTable } from "@/config/schema";
 import { desc, eq } from "drizzle-orm";
 import { getAuthContext, hasPermission } from "@/lib/auth/rbac";
-import { logAuditEvent } from "@/lib/audit/audit-logger";
+import { logAuditEventAsync } from "@/lib/audit/audit-logger";
 
 // Fallback in-memory store if database is initializing or during local evaluation
 export const memoryConsultations: any[] = [
@@ -106,7 +106,7 @@ export async function GET(request: Request) {
     // Platform administrators have permission to query platform records for maintenance.
     const canReadAll = auth.role === "admin";
     if (!canReadAll && userIdParam && userIdParam !== auth.userId) {
-      logAuditEvent({
+      await logAuditEventAsync({
         actorId: auth.userId,
         actorRole: auth.role,
         action: "ACCESS_DENIED",
@@ -131,7 +131,7 @@ export async function GET(request: Request) {
     // Determine target user scope based on RBAC permissions
     const targetUserId = canReadAll ? userIdParam : auth.userId;
 
-    logAuditEvent({
+    await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role,
       action: "CONSULTATION_ACCESSED",
@@ -189,7 +189,7 @@ export async function POST(request: Request) {
 
     // RBAC: Verify permission to create clinical consultation
     if (!hasPermission(auth.role, "consultations:create")) {
-      logAuditEvent({
+      await logAuditEventAsync({
         actorId: auth.userId,
         actorRole: auth.role,
         action: "ACCESS_DENIED",
@@ -259,7 +259,7 @@ export async function POST(request: Request) {
     };
 
     // Append to tamper-evident cryptographic audit ledger
-    logAuditEvent({
+    await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role,
       action: "CONSULTATION_CREATED",

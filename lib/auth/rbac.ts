@@ -1,5 +1,5 @@
 import { currentUser } from "@clerk/nextjs/server";
-import { logAuditEvent, AuditActorRole } from "../audit/audit-logger";
+import { logAuditEventAsync, AuditActorRole } from "../audit/audit-logger";
 
 export type Role = "patient" | "admin";
 
@@ -44,59 +44,67 @@ export function hasPermission(role: Role, permission: Permission): boolean {
 }
 
 /**
- * Resolve the authenticated context from the request.
- * Supports:
- * 1. Clerk session authentication (production)
- * 2. Role assigned in user publicMetadata or privateMetadata ("patient" | "admin")
- * 3. Graceful fallback to sandbox Demo Mode if Clerk is not configured or during evaluation
+ * Resolve the authoritative authenticated context from the request.
+ * Security Invariants:
+ * 1. Authenticated Clerk session is the single source of truth for identity and role.
+ * 2. Role is strictly extracted from server-side Clerk metadata (publicMetadata.role).
+ * 3. A client can NEVER grant itself admin privileges via headers, query params, body, or cookies.
+ * 4. An authenticated admin may voluntarily down-scope to patient view ('x-simulate-patient-view')
+ *    for testing least-privilege UI behavior. A patient can NEVER elevate.
+ * 5. Mock role headers are strictly constrained to automated test suites (NODE_ENV === 'test').
  */
 export async function getAuthContext(request?: Request): Promise<AuthContext> {
-  const isDemo = process.env.DEMO_MODE !== "false" || !process.env.CLERK_SECRET_KEY;
-
-  // Check header-based simulated role for automated testing / sandbox demonstration
-  const testRoleHeader = request?.headers.get("x-mock-role") as Role | null;
-  const testUserHeader = request?.headers.get("x-mock-user-id");
-
+  // 1. Authoritative Clerk session resolution
   try {
     const user = await currentUser();
     if (user) {
       const userRole = (user.publicMetadata?.role as Role) || "patient";
+      const verifiedRole: Role = ["patient", "admin"].includes(userRole) ? userRole : "patient";
+
+      // Privilege attenuation: allow verified admin to down-scope to patient for safety inspection
+      const simulatePatient = request?.headers.get("x-simulate-patient-view") === "true";
+      const effectiveRole: Role = verifiedRole === "admin" && simulatePatient ? "patient" : verifiedRole;
+
       return {
         userId: user.id,
-        role: ["patient", "admin"].includes(userRole) ? userRole : "patient",
+        role: effectiveRole,
         name: user.fullName || user.firstName || user.username || "Authenticated User",
         email: user.primaryEmailAddress?.emailAddress || "",
         isDemoMode: false,
       };
     }
   } catch (err) {
-    // Clerk not configured or network unreachable
+    // Clerk session absent or unconfigured
   }
 
-  // If in demo mode or test suite, support designated sandbox role
-  if (testRoleHeader && ["patient", "admin"].includes(testRoleHeader)) {
+  // 2. Automated test runner harness ONLY (active when running unit/integration test processes)
+  const isTestHarness = process.env.NODE_ENV === "test";
+  const testRoleHeader = request?.headers.get("x-mock-role") as Role | null;
+  const testUserHeader = request?.headers.get("x-mock-user-id");
+
+  if (isTestHarness && testRoleHeader && ["patient", "admin"].includes(testRoleHeader)) {
     return {
-      userId: testUserHeader || `mock-${testRoleHeader}-01`,
+      userId: testUserHeader || `test-${testRoleHeader}-01`,
       role: testRoleHeader,
-      name: `Demo ${testRoleHeader.toUpperCase()}`,
-      email: `${testRoleHeader}@demo.local`,
+      name: `Test ${testRoleHeader.toUpperCase()}`,
+      email: `${testRoleHeader}@test.internal`,
       isDemoMode: true,
     };
   }
 
-  // Default guest in demo mode
+  // 3. Unauthenticated guest (anonymous web visitor)
   return {
-    userId: "anon-demo-user",
+    userId: "unauthenticated",
     role: "patient",
-    name: "Demo Patient",
-    email: "demo@med-voice.org",
-    isDemoMode: isDemo,
+    name: "Unauthenticated Guest",
+    email: "",
+    isDemoMode: false,
   };
 }
 
 /**
  * Enforce RBAC permission for a request.
- * If unauthorized, logs an ACCESS_DENIED audit event and returns an error response.
+ * If unauthorized, durably logs an ACCESS_DENIED audit event and returns an appropriate 401 or 403 response.
  */
 export async function authorizeRequest(
   request: Request,
@@ -106,7 +114,7 @@ export async function authorizeRequest(
   const auth = await getAuthContext(request);
 
   if (!hasPermission(auth.role, requiredPermission)) {
-    logAuditEvent({
+    await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role as AuditActorRole,
       action: "ACCESS_DENIED",
@@ -116,18 +124,26 @@ export async function authorizeRequest(
       metadata: {
         requiredPermission,
         userRole: auth.role,
+        isUnauthenticated: auth.userId === "unauthenticated",
       },
     });
+
+    const isUnauthenticated = auth.userId === "unauthenticated";
+    const statusCode = isUnauthenticated ? 401 : 403;
+    const errorMessage = isUnauthenticated
+      ? "Unauthorized: Authentication required to access this clinical administration resource."
+      : "Forbidden: Insufficient privileges. Administrator role required.";
 
     const errorResponse = new Response(
       JSON.stringify({
         success: false,
-        error: "Forbidden: Insufficient permissions for this clinical action.",
+        error: errorMessage,
+        code: isUnauthenticated ? "UNAUTHORIZED" : "FORBIDDEN",
         requiredPermission,
         currentRole: auth.role,
       }),
       {
-        status: 403,
+        status: statusCode,
         headers: { "Content-Type": "application/json" },
       }
     );
@@ -137,3 +153,4 @@ export async function authorizeRequest(
 
   return { authorized: true, auth };
 }
+

@@ -42,17 +42,31 @@ async def process_triage(request: TriageRequest):
 async def speech_to_text(file: UploadFile = File(...)):
     try:
         audio_bytes = await file.read()
-        if not audio_bytes:
+        if not audio_bytes or len(audio_bytes) == 0:
             raise HTTPException(status_code=400, detail="Uploaded audio file is empty.")
         
         transcript = transcribe_audio_bytes(
             audio_bytes=audio_bytes,
+            filename=file.filename or "audio.wav",
             openai_api_key=settings.OPENAI_API_KEY
         )
-        return {"status": "success", "transcript": transcript}
+        return {
+            "status": "success",
+            "transcript": transcript,
+            "engine": "whisper_base_en",
+            "is_empty": len(transcript) == 0
+        }
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        logger.warning(f"STT Validation Notice: {ve}")
+        raise HTTPException(status_code=422, detail=str(ve))
     except Exception as e:
-        logger.error(f"STT Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"STT Processing Failure: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Speech recognition failed to transcribe audio: {str(e)}"
+        )
 
 @router.post("/tts")
 async def text_to_speech(request: TTSRequest):

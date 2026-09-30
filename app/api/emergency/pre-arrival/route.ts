@@ -5,7 +5,7 @@ import {
   generatePreArrivalDirectives,
   EmergencyDispatchReceipt,
 } from "@/lib/emergency/dispatch";
-import { logAuditEvent } from "@/lib/audit/audit-logger";
+import { logAuditEventAsync } from "@/lib/audit/audit-logger";
 import { getAuthContext } from "@/lib/auth/rbac";
 
 // Simulated receiving hospital in-memory pre-arrival telemetry board
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     if (activeDispatches.length > 50) activeDispatches.pop();
 
     const auth = await getAuthContext(request);
-    logAuditEvent({
+    await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role,
       action: "EMERGENCY_DISPATCH",

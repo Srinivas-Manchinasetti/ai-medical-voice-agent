@@ -3,7 +3,7 @@ import { getAuthContext, hasPermission } from "@/lib/auth/rbac";
 import {
   getAuditEvents,
   verifyAuditChain,
-  logAuditEvent,
+  logAuditEventAsync,
   syncAuditLedgerFromDb,
   AuditEvent,
 } from "@/lib/audit/audit-logger";
@@ -12,9 +12,31 @@ export async function GET(request: Request) {
   try {
     const auth = await getAuthContext(request);
 
-    // Only auditors and administrators may inspect the audit chain
+    // 1. Enforce Authentication (401 Unauthorized for unauthenticated callers)
+    if (auth.userId === "unauthenticated") {
+      await logAuditEventAsync({
+        actorId: "unauthenticated",
+        actorRole: "patient",
+        action: "ACCESS_DENIED",
+        resourceType: "audit",
+        resourceId: "audit_ledger",
+        status: "DENIED",
+        metadata: { reason: "Unauthenticated request attempted to query audit ledger" },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unauthorized: Administrator authentication required to inspect the audit ledger.",
+          code: "UNAUTHORIZED",
+        },
+        { status: 401 }
+      );
+    }
+
+    // 2. Enforce Role Permissions (403 Forbidden for non-admin roles)
     if (!hasPermission(auth.role, "audit:read")) {
-      logAuditEvent({
+      await logAuditEventAsync({
         actorId: auth.userId,
         actorRole: auth.role,
         action: "ACCESS_DENIED",
@@ -27,7 +49,8 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Forbidden: Administrator credentials required to inspect the audit ledger.",
+          error: "Forbidden: Administrator credentials (audit:read) required to inspect the audit ledger.",
+          code: "FORBIDDEN",
         },
         { status: 403 }
       );
@@ -42,7 +65,7 @@ export async function GET(request: Request) {
     const verification = verifyAuditChain();
 
     // Log the audit inspection itself
-    logAuditEvent({
+    await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role,
       action: "AUDIT_CHAIN_VERIFIED",

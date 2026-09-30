@@ -288,6 +288,12 @@ function formatTimelineTime(timestamp?: string): string {
   return timestamp;
 }
 
+function formatTimer(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
+
 function formatClinicalFact(raw: string): string {
   if (!raw) return "";
   const clean = raw.trim();
@@ -605,71 +611,39 @@ export default function ConsultPage() {
   const startSpeechRecognitionListeningRef = useRef<() => void>(() => {});
   const handleUserUtteranceRef = useRef<(userText: string, isBargeIn?: boolean) => void>(() => {});
 
-  // Initialize and pin deterministic voice identities on mount
-  useEffect(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  // Canonical Whisper ASR Audio Capture refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
-    const selectVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (!voices || voices.length === 0) return;
+  // Helper to safely stop MediaRecorder and retrieve recorded audio Blob
+  const stopAndGetAudioBlob = (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder || recorder.state !== "recording") {
+        if (audioChunksRef.current.length > 0) {
+          const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+          audioChunksRef.current = [];
+          resolve(blob);
+        } else {
+          resolve(null);
+        }
+        return;
+      }
 
-      const englishVoices = voices.filter((v) => v.lang.startsWith("en"));
-      if (englishVoices.length === 0) return;
+      recorder.onstop = () => {
+        const mime = recorder.mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type: mime });
+        audioChunksRef.current = [];
+        resolve(blob);
+      };
 
-      const female =
-        englishVoices.find((v) => /Zira|Samantha|Google UK English Female|Victoria|Jenny|Aria|Karen|Hazel/i.test(v.name)) ||
-        englishVoices.find((v) => /Female|Woman/i.test(v.name)) ||
-        englishVoices.find((v) => !/Male|David|Mark|George/i.test(v.name)) ||
-        englishVoices[0];
-
-      const male =
-        englishVoices.find((v) => /David|Mark|George|Google UK English Male|Guy/i.test(v.name)) ||
-        englishVoices.find((v) => /Male|Man/i.test(v.name)) ||
-        englishVoices[0];
-
-      if (female) preferredFemaleVoiceRef.current = female;
-      if (male) preferredMaleVoiceRef.current = male;
-    };
-
-    selectVoices();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = selectVoices;
-    }
-  }, []);
-
-  useEffect(() => {
-    audioStateRef.current = audioState;
-  }, [audioState]);
-
-  useEffect(() => {
-    callActiveRef.current = callActive;
-  }, [callActive]);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
-  }, [messages, audioState, transcriptText]);
-
-  // Call duration timer
-  useEffect(() => {
-    if (callActive) {
-      timerRef.current = setInterval(() => {
-        setCallDuration((prev) => prev + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [callActive]);
-
-  const formatTimer = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+      try {
+        recorder.stop();
+      } catch {
+        resolve(null);
+      }
+    });
   };
 
   // Cleanly stops active microphone and removes all event listeners to prevent hardware / thread locks
@@ -678,6 +652,19 @@ export default function ConsultPage() {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+      mediaRecorderRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    audioChunksRef.current = [];
+
     if (recognitionRef.current) {
       const rec = recognitionRef.current;
       recognitionRef.current = null;
@@ -695,23 +682,74 @@ export default function ConsultPage() {
     }
   }, []);
 
-  // Commits transcribed speech to the clinical pipeline
-  const commitSpokenText = useCallback((forceText?: string) => {
+  // Commits transcribed speech to the clinical pipeline (Whisper ASR canonical, SpeechRecognition interim fallback)
+  const commitSpokenText = useCallback(async (forceText?: string) => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
 
-    const textToCommit = (forceText ?? transcriptTextRef.current ?? accumulatedTranscriptRef.current).trim();
-    if (!textToCommit) return;
-
-    console.log("🎤 Finalized patient utterance:", textToCommit);
+    const browserText = (forceText ?? transcriptTextRef.current ?? accumulatedTranscriptRef.current).trim();
     accumulatedTranscriptRef.current = "";
     transcriptTextRef.current = "";
     setTranscriptText("");
 
-    stopSpeechRecognitionListening();
-    handleUserUtteranceRef.current?.(textToCommit);
+    // Stop browser interim speech recognition
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+    }
+
+    // Retrieve recorded utterance from MediaRecorder
+    const audioBlob = await stopAndGetAudioBlob();
+
+    // Release microphone tracks
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+
+    let finalTranscript = browserText;
+
+    // Primary Canonical Path: Transcribe recorded utterance using Local Whisper ASR
+    if (audioBlob && audioBlob.size > 2000) {
+      try {
+        setAudioState("PROCESSING_PATIENT");
+        const formData = new FormData();
+        const ext = audioBlob.type?.includes("mp4") ? "utterance.mp4" :
+                    audioBlob.type?.includes("wav") ? "utterance.wav" : "utterance.webm";
+        formData.append("file", audioBlob, ext);
+
+        const sttRes = await fetch("/api/voice/stt", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (sttRes.ok) {
+          const sttData = await sttRes.json();
+          const whisperText = (sttData.transcript || "").trim();
+          if (whisperText.length > 0) {
+            console.log("🎯 Canonical Local Whisper ASR Transcript:", whisperText);
+            finalTranscript = whisperText;
+          }
+        } else {
+          const errJson = await sttRes.json().catch(() => ({}));
+          console.warn("Whisper STT endpoint notice:", errJson.error || errJson.detail);
+        }
+      } catch (asrErr) {
+        console.warn("Whisper STT network notice, using browser transcript:", asrErr);
+      }
+    }
+
+    if (!finalTranscript) {
+      console.log("No intelligible speech detected in utterance.");
+      if (callActiveRef.current) {
+        setAudioState("PATIENT_LISTENING");
+      }
+      return;
+    }
+
+    console.log("🎤 Finalized patient utterance:", finalTranscript);
+    handleUserUtteranceRef.current?.(finalTranscript);
   }, [stopSpeechRecognitionListening]);
 
   // Immediate Barge-In: cleanly halts doctor TTS and starts listening
@@ -1066,23 +1104,63 @@ export default function ConsultPage() {
     speakDoctorResponse(greetingText, doc.id, currentToken);
   }, [selectedDoctor.id, sessionMode, stopSpeechRecognitionListening, speakDoctorResponse]);
 
-  // Speech Recognition with Continuous Intake & Natural Silence Detection
+  // Speech Recognition with Continuous Intake, MediaRecorder audio buffering & Natural Silence Detection
   const startSpeechRecognitionListening = useCallback(() => {
     if (typeof window === "undefined") return;
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) {
-      setMicPermissionError("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
-      return;
-    }
-
-    // Stop and cleanly detach any previous recognition instance
+    // Stop and cleanly detach any previous recognition and recorder instance
     stopSpeechRecognitionListening();
 
     accumulatedTranscriptRef.current = "";
     transcriptTextRef.current = "";
     setTranscriptText("");
+    audioChunksRef.current = [];
+
+    // 1. Initialize MediaRecorder for canonical Whisper ASR
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        mediaStreamRef.current = stream;
+        try {
+          let mimeType = "";
+          if (typeof MediaRecorder !== "undefined") {
+            if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+              mimeType = "audio/webm;codecs=opus";
+            } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+              mimeType = "audio/webm";
+            } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+              mimeType = "audio/mp4";
+            }
+          }
+          const options = mimeType ? { mimeType } : undefined;
+          const recorder = new MediaRecorder(stream, options);
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+              audioChunksRef.current.push(e.data);
+            }
+          };
+          recorder.start(250);
+          mediaRecorderRef.current = recorder;
+          setAudioState("PATIENT_LISTENING");
+          setMicPermissionError(null);
+        } catch (recErr) {
+          console.warn("MediaRecorder initialization notice:", recErr);
+        }
+      }).catch((streamErr) => {
+        console.warn("Microphone stream access notice:", streamErr);
+        if (streamErr?.name === "NotAllowedError" || streamErr?.name === "PermissionDeniedError") {
+          setMicPermissionError("Microphone access denied. Please click the camera/mic icon in your browser address bar to allow.");
+          setAudioState("IDLE");
+        }
+      });
+    }
+
+    // 2. Initialize browser SpeechRecognition for interim live preview captions
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      return;
+    }
 
     try {
       const recognition = new SpeechRecognition();
@@ -1124,7 +1202,7 @@ export default function ConsultPage() {
           }
           silenceTimerRef.current = setTimeout(() => {
             const currentTotal = transcriptTextRef.current.trim();
-            if (currentTotal.length > 0 && audioStateRef.current === "PATIENT_LISTENING") {
+            if ((currentTotal.length > 0 || audioChunksRef.current.length > 0) && audioStateRef.current === "PATIENT_LISTENING") {
               console.log("⏱️ Natural 1.8s silence pause detected. Committing speech:", currentTotal);
               commitSpokenText(currentTotal);
             }
@@ -1149,7 +1227,7 @@ export default function ConsultPage() {
               try {
                 recognition.start();
               } catch {
-                startSpeechRecognitionListening();
+                // If recognition restart fails, MediaRecorder is still active
               }
             }
           }, 200);
@@ -1163,8 +1241,6 @@ export default function ConsultPage() {
       console.warn("Speech recognition start notice:", err);
       if (err?.message?.includes("already started")) {
         setAudioState("PATIENT_LISTENING");
-      } else {
-        setMicPermissionError("Could not engage microphone: " + (err.message || "Unknown error"));
       }
     }
   }, [stopSpeechRecognitionListening, commitSpokenText]);
@@ -1963,7 +2039,7 @@ export default function ConsultPage() {
                 }}
                 onToggleRecord={() => {
                   if (audioState === "PATIENT_LISTENING") {
-                    if (transcriptTextRef.current.trim() || accumulatedTranscriptRef.current.trim()) {
+                    if (transcriptTextRef.current.trim() || accumulatedTranscriptRef.current.trim() || audioChunksRef.current.length > 0) {
                       commitSpokenText();
                     } else {
                       setAudioState("IDLE");

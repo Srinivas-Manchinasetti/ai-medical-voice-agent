@@ -84,6 +84,46 @@ async function runDurableAuditTest() {
   assert(verification.valid === true, "Full audit chain across restarts validates cryptographically (100% authentic)");
   console.log(`  ✓ Validated ${verification.totalEvents} chained SHA-256 blocks from genesis to head.`);
 
+  // 7. Concurrent write serialization test
+  console.log("\n[Step 6] Concurrent write serialization & race-condition defense test...");
+  const concurrentCount = 5;
+  const currentTotal = restoredEvents.length;
+
+  console.log(`  • Dispatching ${concurrentCount} simultaneous logAuditEventAsync operations...`);
+  const concurrentResults = await Promise.all(
+    Array.from({ length: concurrentCount }, (_, i) =>
+      logAuditEventAsync({
+        actorId: `usr-stress-client-${i}`,
+        actorRole: "system",
+        action: "TRIAGE_EVALUATION",
+        resourceType: "system",
+        resourceId: `STRESS-RES-${i}`,
+        status: "SUCCESS",
+        metadata: { threadIndex: i, timestamp: Date.now() },
+      })
+    )
+  );
+
+  assert(concurrentResults.length === concurrentCount, `All ${concurrentCount} concurrent writes resolved successfully`);
+
+  // Verify monotonic indexing across all concurrent events
+  for (let i = 0; i < concurrentCount; i++) {
+    const expectedIndex = currentTotal + i;
+    assert(concurrentResults[i].index === expectedIndex, `Concurrent event ${i} assigned monotonic index ${expectedIndex}`);
+    if (i > 0) {
+      assert(
+        concurrentResults[i].previousHash === concurrentResults[i - 1].eventHash,
+        `Concurrent event ${i} previousHash links cryptographically to event ${i - 1} eventHash`
+      );
+    }
+  }
+
+  // Verify chain post-concurrency
+  const allEventsAfterConcurrency = getAuditEvents(200, 0);
+  const verifyConcurrencyChain = verifyAuditChain(allEventsAfterConcurrency);
+  assert(verifyConcurrencyChain.valid === true, "Audit chain integrity preserved with zero races during concurrency");
+  console.log(`  ✓ Concurrency test passed: ${concurrentCount} simultaneous writes strictly sequenced without collision.`);
+
   console.log("\n========================================================");
   console.log("  DURABLE AUDIT PERSISTENCE TEST COMPLETED SUCCESSFULLY");
   console.log("========================================================\n");
@@ -93,3 +133,4 @@ runDurableAuditTest().catch((err) => {
   console.error("Durable audit test failure:", err);
   process.exit(1);
 });
+

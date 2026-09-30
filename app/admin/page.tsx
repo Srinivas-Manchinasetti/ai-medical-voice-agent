@@ -100,9 +100,10 @@ interface AuditLogEntry {
 
 export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState<"overview" | "analytics" | "safety" | "health" | "audit">("overview");
-  const [roleMode, setRoleMode] = useState<"admin" | "patient">("admin");
+  const [simulatePatientView, setSimulatePatientView] = useState(false);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
+  const [authSession, setAuthSession] = useState<{ isSignedIn: boolean; role: string; email?: string } | null>(null);
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditVerification, setAuditVerification] = useState<{
@@ -111,23 +112,45 @@ export default function AdminDashboardPage() {
     headHash: string | null;
     reason?: string;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<{ code: number; message: string } | null>(null);
   const [auditFilter, setAuditFilter] = useState("");
 
-  const fetchData = useCallback(async (role: "admin" | "patient") => {
+  const fetchData = useCallback(async (isSimulatedPatient: boolean) => {
     setLoading(true);
-    setError(null);
+    setErrorStatus(null);
 
-    const headers: Record<string, string> = {
-      "x-mock-role": role,
-    };
+    // If an authenticated admin opts to simulate the patient experience, down-scope request
+    const headers: Record<string, string> = {};
+    if (isSimulatedPatient) {
+      headers["x-simulate-patient-view"] = "true";
+    }
 
     try {
-      // 1. Fetch Admin Metrics
+      // 1. Check verified session identity
+      const sessionRes = await fetch("/api/auth/session");
+      if (sessionRes.ok) {
+        const sessionJson = await sessionRes.json();
+        setAuthSession(sessionJson);
+      }
+
+      // 2. Fetch Admin Metrics with server-side authorization check
       const metricsRes = await fetch("/api/admin/metrics", { headers });
       if (!metricsRes.ok) {
+        if (metricsRes.status === 401) {
+          setErrorStatus({
+            code: 401,
+            message: "401 Unauthorized: You must be signed in with an administrator account to view clinical telemetry.",
+          });
+          setMetrics(null);
+          setAuditLogs([]);
+          setLoading(false);
+          return;
+        }
         if (metricsRes.status === 403) {
-          setError("403 Forbidden: Active role lacks 'analytics:read' permission.");
+          setErrorStatus({
+            code: 403,
+            message: "403 Forbidden: Least-privilege boundary active. Role 'patient' lacks administrative permissions.",
+          });
           setMetrics(null);
           setAuditLogs([]);
           setLoading(false);
@@ -140,7 +163,7 @@ export default function AdminDashboardPage() {
         setMetrics(metricsJson.data);
       }
 
-      // 2. Fetch Audit Logs
+      // 3. Fetch Audit Logs
       const auditRes = await fetch("/api/audit?limit=50", { headers });
       if (auditRes.ok) {
         const auditJson = await auditRes.json();
@@ -150,20 +173,25 @@ export default function AdminDashboardPage() {
         }
       }
     } catch (err: any) {
-      setError(err?.message || "Failed to communicate with administration API");
+      setErrorStatus({
+        code: 500,
+        message: err?.message || "Failed to communicate with administration API",
+      });
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchData(roleMode);
-  }, [roleMode, fetchData]);
+    fetchData(simulatePatientView);
+  }, [simulatePatientView, fetchData]);
 
   const handleVerifyAuditChain = async () => {
     setVerifying(true);
     try {
-      const headers = { "x-mock-role": roleMode };
+      const headers: Record<string, string> = {};
+      if (simulatePatientView) headers["x-simulate-patient-view"] = "true";
+
       const res = await fetch("/api/audit?limit=100", { headers });
       const json = await res.json();
       if (json.success) {
@@ -215,34 +243,28 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Role Mode Simulator & Refresh */}
+          {/* Session Info & Down-scope Testing Fixture */}
           <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-inner">
             <div className="text-xs font-semibold text-slate-400 px-2 flex items-center gap-1.5">
               <Key className="w-3.5 h-3.5 text-cyan-400" />
-              Simulated Role:
+              Active Role:{" "}
+              <span className={`font-mono font-bold ${authSession?.role === "admin" ? "text-cyan-400" : "text-amber-400"}`}>
+                {authSession?.role || "authenticating..."}
+              </span>
             </div>
             <button
-              onClick={() => setRoleMode("admin")}
+              onClick={() => setSimulatePatientView(!simulatePatientView)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                roleMode === "admin"
-                  ? "bg-cyan-500 text-slate-950 shadow-md font-semibold"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Administrator
-            </button>
-            <button
-              onClick={() => setRoleMode("patient")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                roleMode === "patient"
+                simulatePatientView
                   ? "bg-rose-500 text-white shadow-md font-semibold"
-                  : "text-slate-400 hover:text-white"
+                  : "bg-slate-800 text-slate-300 hover:text-white"
               }`}
+              title="Voluntarily down-scope to test patient 403 Forbidden enforcement"
             >
-              Patient (Restricted)
+              {simulatePatientView ? "Simulating Patient View (403 Active)" : "Test Patient Boundary (Down-scope)"}
             </button>
             <button
-              onClick={() => fetchData(roleMode)}
+              onClick={() => fetchData(simulatePatientView)}
               disabled={loading}
               className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
               title="Refresh Telemetry"
@@ -252,8 +274,31 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* 401 Unauthorized State Display */}
+        {errorStatus?.code === 401 && (
+          <div className="my-8 p-6 rounded-2xl bg-amber-950/30 border border-amber-800/50 backdrop-blur-sm">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-500/20 text-amber-400 rounded-xl">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-amber-200">Authentication Required</h3>
+                <p className="text-sm text-amber-300/90 mt-1">{errorStatus.message}</p>
+                <div className="mt-4">
+                  <a
+                    href="/sign-in"
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow transition-colors inline-block"
+                  >
+                    Sign In with Administrator Account
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 403 Forbidden State Display (RBAC Invariant Verification) */}
-        {error && (
+        {errorStatus?.code === 403 && (
           <div className="my-8 p-6 rounded-2xl bg-rose-950/30 border border-rose-800/50 backdrop-blur-sm">
             <div className="flex items-start gap-4">
               <div className="p-3 bg-rose-500/20 text-rose-400 rounded-xl">
@@ -261,25 +306,27 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1">
                 <h3 className="text-lg font-bold text-rose-200">Least-Privilege RBAC Invariant Enforced</h3>
-                <p className="text-sm text-rose-300/90 mt-1">{error}</p>
+                <p className="text-sm text-rose-300/90 mt-1">{errorStatus.message}</p>
                 <p className="text-xs text-rose-400/80 mt-2 font-mono bg-rose-950/60 p-2.5 rounded-lg border border-rose-900/60">
-                  SECURITY LOG: Simulated request with role &#39;patient&#39; attempted to query restricted administrative metrics.
+                  SECURITY LOG: Active request with role &#39;patient&#39; attempted to query restricted administrative metrics.
                   Event logged to immutable cryptographic SHA-256 chain under action &#39;ACCESS_DENIED&#39;.
                 </p>
-                <div className="mt-4">
-                  <button
-                    onClick={() => setRoleMode("admin")}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow transition-colors"
-                  >
-                    Switch to Administrator Role
-                  </button>
-                </div>
+                {simulatePatientView && (
+                  <div className="mt-4">
+                    <button
+                      onClick={() => setSimulatePatientView(false)}
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-xs font-semibold rounded-lg shadow transition-colors"
+                    >
+                      Disable Simulation & Restore Admin View
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {!error && (
+        {!errorStatus && (
           <>
             {/* Tabs */}
             <div className="flex items-center gap-2 mt-6 border-b border-slate-800/80 pb-2 overflow-x-auto">

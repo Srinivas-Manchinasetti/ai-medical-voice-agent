@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getAuthContext, hasPermission } from "@/lib/auth/rbac";
-import { logAuditEvent, syncAuditLedgerFromDb, verifyAuditChain, getAuditEvents } from "@/lib/audit/audit-logger";
+import {
+  logAuditEventAsync,
+  syncAuditLedgerFromDb,
+  verifyAuditChain,
+  getAuditEvents,
+} from "@/lib/audit/audit-logger";
 import { getDb } from "@/config/db";
-import { consultationsTable, auditEventsTable } from "@/config/schema";
+import { consultationsTable } from "@/config/schema";
 import { memoryConsultations } from "../../consultations/route";
 import { DOCTOR_PROFILES } from "@/config/doctors";
 
@@ -10,9 +15,31 @@ export async function GET(request: Request) {
   try {
     const auth = await getAuthContext(request);
 
-    // Verify analytics:read permission
+    // 1. Enforce Authentication (401 Unauthorized for unauthenticated callers)
+    if (auth.userId === "unauthenticated") {
+      await logAuditEventAsync({
+        actorId: "unauthenticated",
+        actorRole: "patient",
+        action: "ACCESS_DENIED",
+        resourceType: "system",
+        resourceId: "admin_metrics",
+        status: "DENIED",
+        metadata: { reason: "Unauthenticated request attempted to query admin telemetry" },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unauthorized: Administrator authentication required.",
+          code: "UNAUTHORIZED",
+        },
+        { status: 401 }
+      );
+    }
+
+    // 2. Enforce Role Permissions (403 Forbidden for non-admin roles)
     if (!hasPermission(auth.role, "analytics:read") && !hasPermission(auth.role, "system:read")) {
-      logAuditEvent({
+      await logAuditEventAsync({
         actorId: auth.userId,
         actorRole: auth.role,
         action: "ACCESS_DENIED",
@@ -25,7 +52,8 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Forbidden: Administrator permissions (analytics:read) required.",
+          error: "Forbidden: Administrator privileges (analytics:read) required.",
+          code: "FORBIDDEN",
         },
         { status: 403 }
       );
@@ -87,7 +115,7 @@ export async function GET(request: Request) {
     const triageEvaluations = auditEvents.filter((e) => e.action === "TRIAGE_EVALUATION").length;
 
     // Log the analytics read
-    logAuditEvent({
+    await logAuditEventAsync({
       actorId: auth.userId,
       actorRole: auth.role,
       action: "CONSULTATION_ACCESSED",

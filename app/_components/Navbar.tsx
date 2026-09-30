@@ -142,7 +142,7 @@ export function Navbar() {
 
           {/* Group 2: Centered Navigation (Substantial separation from logo & action) */}
           <div className="hidden md:flex items-center justify-center flex-1">
-            <PillNav items={NAV_LINKS} />
+            <PillNav items={NAV_LINKS.filter((item) => (item.href === "/admin" ? user?.publicMetadata?.role === "admin" : true))} />
           </div>
 
           {/* Group 3: Right Action Area */}
@@ -266,6 +266,22 @@ export function Navbar() {
                           </div>
                           <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700" />
                         </Link>
+
+                        {user?.publicMetadata?.role === "admin" && (
+                          <Link
+                            href="/admin"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 text-xs font-semibold text-purple-900 transition-colors group cursor-pointer bg-purple-50/50 border border-purple-200/50"
+                          >
+                            <div className="flex items-center gap-2">
+                              <ShieldCheck className="w-4 h-4 text-purple-600" />
+                              <span className="font-bold">Governance & Audit</span>
+                            </div>
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
+                              Admin
+                            </span>
+                          </Link>
+                        )}
 
                         <Link
                           href="/privacy"
