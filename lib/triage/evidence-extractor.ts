@@ -116,35 +116,80 @@ export class EvidenceExtractor {
       }
     }
 
-    // Swallowing difficulty / Dysphagia
-    const mentionsSwallowing = /\b(swallow|swallowing|dysphagia|drink|liquids|saliva)\b/i.test(lower);
-    if (mentionsSwallowing) {
-      const isDenied = /\b(no|nope|not|neither|without|don'?t\s+have|can\s+swallow\s+fine|no\s+trouble)\b/i.test(lower);
-      const status = isDenied ? "absent" : "present";
-      const normalizedText = isDenied ? "Denied (No difficulty swallowing)" : "Present (Difficulty swallowing)";
+    // Odynophagia (Painful Swallowing) vs Dysphagia (Difficulty/Obstruction Swallowing)
+    const hasPainfulSwallowing = /\b(?:hurts?|painful|pain|burning|sharp)\s+(?:when\s+(?:i\s+)?swallow|to\s+swallow|swallowing)\b/i.test(lower) ||
+      /\b(?:when\s+(?:i\s+)?swallow|swallowing)\s+(?:it\s+)?(?:hurts?|is\s+painful)\b/i.test(lower) ||
+      /\bodynophagia\b/i.test(lower);
 
+    if (hasPainfulSwallowing) {
+      const fact: ClinicalFact = {
+        id: `fact-odynophagia-${turnId}`,
+        name: "painful_swallowing",
+        label: "Painful swallowing (Odynophagia)",
+        category: "associated_symptom",
+        status: "present",
+        value: true,
+        normalizedText: "Present (Painful swallowing / Odynophagia)",
+        confidence: 0.98,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+      newFindingsDetected.push("painful_swallowing");
+    }
+
+    // Swallowing difficulty / True Dysphagia (Mechanical or functional inability to pass liquids/food)
+    const hasDysphagiaComplaint = /\b(trouble\s+swallowing|difficulty\s+swallowing|hard\s+to\s+swallow|cannot\s+swallow|can't\s+swallow|choking\s+on\s+liquids|food\s+gets?\s+stuck|unable\s+to\s+swallow|dysphagia)\b/i.test(lower);
+    const hasDysphagiaDenial = /\b(?:no|not|neither|without|no\s+trouble|can\s+swallow\s+(?:fine|ok|normally))\s+(?:trouble\s+swallowing|difficulty\s+swallowing|problems?\s+swallowing|dysphagia)\b/i.test(lower) ||
+      (/^(?:no|nope|not\s+really|neither)[.!?\s]*$/i.test(lower) && lastTarget === "swallowing_difficulty");
+    const mentionsSwallowing = hasPainfulSwallowing || hasDysphagiaComplaint || hasDysphagiaDenial || /\b(swallow|swallowing)\b/i.test(lower);
+
+    if (hasDysphagiaComplaint && !hasDysphagiaDenial) {
       const fact: ClinicalFact = {
         id: `fact-dysphagia-${turnId}`,
         name: "swallowing_difficulty",
         label: "Swallowing difficulty (Dysphagia)",
         category: "red_flag",
-        status,
-        value: !isDenied,
-        normalizedText,
+        status: "present",
+        value: true,
+        normalizedText: "Present (Mechanical/functional difficulty swallowing)",
         confidence: 0.95,
         source: "patient",
         turnId,
         timestamp,
       };
       newFacts.push(fact);
-      if (isDenied) deniedTopics.push("swallowing_difficulty");
-
       redFlagAssessments.swallowing = {
         domain: "swallowing",
         label: "Swallowing & saliva management",
         assessed: true,
-        status: isDenied ? "clear" : "concerning",
-        finding: normalizedText,
+        status: "concerning",
+        finding: "Present (Difficulty swallowing)",
+      };
+    } else if (hasDysphagiaDenial) {
+      const fact: ClinicalFact = {
+        id: `fact-dysphagia-${turnId}`,
+        name: "swallowing_difficulty",
+        label: "Swallowing difficulty (Dysphagia)",
+        category: "red_flag",
+        status: "absent",
+        value: false,
+        normalizedText: "Denied (No difficulty swallowing fluids)",
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      deniedTopics.push("swallowing_difficulty");
+      redFlagAssessments.swallowing = {
+        domain: "swallowing",
+        label: "Swallowing & saliva management",
+        assessed: true,
+        status: "clear",
+        finding: "Denied (No difficulty swallowing)",
       };
     }
 
@@ -357,20 +402,23 @@ export class EvidenceExtractor {
     }
 
     // 7. SEVERITY (0-10 or Mild/Moderate/Severe)
-    const severityNumMatch = lower.match(/\b([0-9]|10)\s*(?:out\s+of\s+10|\/10)?\b/i);
+    const severityExplicitMatch = lower.match(/\b(?:pain\s+(?:is\s+|at\s+)?|severity\s+(?:is\s+|at\s+)?|around\s+|about\s+)?([0-9]|10)\s*(?:out\s+of\s+10|\/10)\b/i) ||
+      (/\b(?:pain|severity|hurts?)\s+(?:is\s+|at\s+)?([0-9]|10)\b/i.exec(lower));
+    const severityTargetedMatch = lastTarget === "severity" ? lower.match(/\b([0-9]|10)\b/) : null;
+    const severityNum = severityExplicitMatch ? severityExplicitMatch[1] : (severityTargetedMatch ? severityTargetedMatch[1] : null);
     const hasQualSeverity = /\b(mild|moderate|severe|unbearable|excruciating|tolerable)\b/i.test(lower);
 
-    if (severityNumMatch && lastTarget === "severity") {
-      const sevVal = `${severityNumMatch[1]}/10`;
+    if (severityNum) {
+      const sevVal = `${severityNum}/10`;
       const sevFact: ClinicalFact = {
         id: `fact-severity-${turnId}`,
         name: "severity",
         label: "Pain severity",
         category: "symptom_profile",
         status: "present",
-        value: parseInt(severityNumMatch[1], 10),
+        value: parseInt(severityNum, 10),
         normalizedText: sevVal,
-        confidence: 0.95,
+        confidence: 0.96,
         source: "patient",
         turnId,
         timestamp,

@@ -176,11 +176,18 @@ export class QuestionPlanner {
 
       // Step A2: Red Flag Dysphagia (Saliva / Liquids)
       if (!isBlocked("swallowing_difficulty")) {
+        const hasOdynophagia = state.associatedSymptoms.some(s => s.name === "painful_swallowing") ||
+          state.establishedFacts.some(f => f.name === "painful_swallowing");
+        const phrasing = hasOdynophagia
+          ? "I understand that swallowing is painful. Despite the pain, are you still able to swallow liquids and keep them down without choking?"
+          : "Have you had any difficulty swallowing liquids or your own saliva?";
         return {
           target: "swallowing_difficulty",
           label: "Swallowing difficulty",
-          clinicalRationale: "Screen for epiglottitis, peritonsillar abscess, and airway obstruction risk.",
-          suggestedPhrasing: "Have you had any difficulty swallowing liquids or your own saliva?",
+          clinicalRationale: hasOdynophagia
+            ? "Patient reported painful swallowing (odynophagia); screen specifically for mechanical obstruction or inability to swallow fluids (true dysphagia)."
+            : "Screen for epiglottitis, peritonsillar abscess, and airway obstruction risk.",
+          suggestedPhrasing: phrasing,
           isEmergencyIntervention: false,
           isPivotToNewFinding: false,
           priority: "high",

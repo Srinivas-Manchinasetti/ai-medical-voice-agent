@@ -295,18 +295,20 @@ export class ConversationManager {
         const hasGradual = /\b(?:gradual(?:ly)?|slowly|over\s+time)\b/i.test(textLower);
         const hasSudden = /\b(?:sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere)\b/i.test(textLower);
 
-        let courseVal = "gradually worsening";
-        if (hasImproving) courseVal = "improving";
-        else if (hasSame) courseVal = "staying about the same (stable)";
-        else if (hasSudden) courseVal = "sudden onset";
-        else if (hasWorsening && hasGradual) courseVal = "gradually worsening over time";
-        else if (hasWorsening) courseVal = "getting worse";
+        if (hasWorsening || hasImproving || hasSame || hasGradual || hasSudden) {
+          let courseVal = "gradually worsening";
+          if (hasImproving) courseVal = "improving";
+          else if (hasSame) courseVal = "staying about the same (stable)";
+          else if (hasSudden) courseVal = "sudden onset";
+          else if (hasWorsening && hasGradual) courseVal = "gradually worsening over time";
+          else if (hasWorsening) courseVal = "getting worse";
 
-        return {
-          intent: "answer_question",
-          resolvedSlot: "course",
-          resolvedValue: courseVal,
-        };
+          return {
+            intent: "answer_question",
+            resolvedSlot: "course",
+            resolvedValue: courseVal,
+          };
+        }
       }
 
       // C. EXERTIONAL RELATIONSHIP
@@ -355,14 +357,30 @@ export class ConversationManager {
 
       // G. SWALLOWING DIFFICULTY
       if (slot === "swallowing_difficulty") {
-        const isDenied = /\b(no|nope|not|neither|nothing|nothing\s+much|nothing\s+really|none|no\s+trouble|can\s+swallow|fine|without)\b/i.test(textLower);
-        return { intent: "answer_question", resolvedSlot: "swallowing_difficulty", resolvedValue: isDenied ? "denied" : "difficulty swallowing reported" };
+        const hasSpecificDenial = /\b(?:no|not|neither|without|no\s+trouble|can\s+swallow\s+(?:fine|ok|normally))\s+(?:trouble\s+swallowing|difficulty\s+swallowing|problems?\s+swallowing|dysphagia)\b/i.test(textLower) ||
+          /^(?:no|nope|not\s+really|neither)[.!?\s]*$/i.test(textLower) ||
+          /\b(swallowing\s+is\s+(?:fine|ok|normal)|can\s+swallow\s+(?:fine|liquids|normally))\b/i.test(textLower);
+        const hasSpecificComplaint = /\b(trouble\s+swallowing|difficulty\s+swallowing|hard\s+to\s+swallow|cannot\s+swallow|can't\s+swallow|choking|dysphagia)\b/i.test(textLower);
+        const hasOdynophagiaOnly = /\b(?:hurts?|painful|pain|burning|sharp)\s+(?:when\s+(?:i\s+)?swallow|to\s+swallow|swallowing)\b/i.test(textLower) ||
+          /\b(?:when\s+(?:i\s+)?swallow|swallowing)\s+(?:it\s+)?(?:hurts?|is\s+painful)\b/i.test(textLower);
+
+        if (hasOdynophagiaOnly && !hasSpecificComplaint && !hasSpecificDenial) {
+          return { intent: "answer_question", resolvedSlot: "odynophagia", resolvedValue: "painful swallowing" };
+        }
+        if (hasSpecificComplaint) {
+          return { intent: "answer_question", resolvedSlot: "swallowing_difficulty", resolvedValue: "difficulty swallowing reported" };
+        }
+        if (hasSpecificDenial) {
+          return { intent: "answer_question", resolvedSlot: "swallowing_difficulty", resolvedValue: "denied" };
+        }
       }
 
       // H. FEVER
       if (slot === "fever") {
-        const isDenied = /\b(no|nope|not|neither|nothing|nothing\s+much|nothing\s+really|none|haven'?t|no\s+fever)\b/i.test(textLower);
-        return { intent: "answer_question", resolvedSlot: "fever", resolvedValue: isDenied ? "denied" : "fever reported" };
+        const hasSpecificDenial = /\b(no\s+fever|haven'?t\s+had\s+(?:a\s+)?fever|without\s+fever|no\s+temperature|denies\s+fever)\b/i.test(textLower) ||
+          /^(?:no|nope|neither|none)[.!?\s]*$/i.test(textLower);
+        const hasSpecificFever = /\b(fever|chills|temperature|feverish)\b/i.test(textLower) && !hasSpecificDenial;
+        return { intent: "answer_question", resolvedSlot: "fever", resolvedValue: hasSpecificDenial ? "denied" : (hasSpecificFever ? "fever reported" : "denied") };
       }
 
       // I. SEVERITY
@@ -373,8 +391,10 @@ export class ConversationManager {
 
       // J. EAR PAIN
       if (slot === "ear_pain") {
-        const isDenied = /\b(no|nope|not|neither|nothing|nothing\s+much|nothing\s+really|none|no\s+ear\s+pain)\b/i.test(textLower);
-        return { intent: "answer_question", resolvedSlot: "ear_pain", resolvedValue: isDenied ? "denied" : "ear pain reported" };
+        const hasSpecificDenial = /\b(no\s+ear\s+pain|no\s+earache|ears?\s+(?:don't|do\s+not)\s+hurt)\b/i.test(textLower) ||
+          /^(?:no|nope|neither|none)[.!?\s]*$/i.test(textLower);
+        const hasSpecificEar = /\b(ear\s+pain|earache|ears?\s+hurts?)\b/i.test(textLower) && !hasSpecificDenial;
+        return { intent: "answer_question", resolvedSlot: "ear_pain", resolvedValue: hasSpecificDenial ? "denied" : (hasSpecificEar ? "ear pain reported" : "denied") };
       }
 
       // F. NEUROLOGICAL SIGNS
@@ -392,7 +412,27 @@ export class ConversationManager {
       }
     }
 
-    // 3. Fallback opportunistic symptom extraction if no pending question matched
+    // 3. Fallback opportunistic symptom extraction if pending question wasn't directly answered
+    const sevMatch = textLower.match(/\b(?:pain\s+(?:level\s+)?(?:is\s+)?|severity\s+(?:is\s+)?|about\s+|around\s+)?([0-9]|10)\s*(?:out of 10|\/10)\b/i) ||
+      textLower.match(/\bpain\s+(?:level\s+)?(?:is\s+)?(?:about\s+|around\s+)?([0-9]|10)\b/i);
+    if (sevMatch) {
+      return { intent: "answer_question", resolvedSlot: "severity", resolvedValue: `${sevMatch[1]}/10` };
+    }
+
+    if (/\b(no\s+fever|haven'?t\s+had\s+(?:a\s+)?fever|without\s+fever|denies\s+fever)\b/i.test(textLower)) {
+      return { intent: "answer_question", resolvedSlot: "fever", resolvedValue: "denied" };
+    }
+
+    if (/\b(?:hurts?|painful|pain|burning|sharp)\s+(?:when\s+(?:i\s+)?swallow|to\s+swallow|swallowing)\b/i.test(textLower) ||
+        /\b(?:when\s+(?:i\s+)?swallow|swallowing)\s+(?:it\s+)?(?:hurts?|is\s+painful)\b/i.test(textLower) ||
+        /\bodynophagia\b/i.test(textLower)) {
+      return { intent: "answer_question", resolvedSlot: "odynophagia", resolvedValue: "painful swallowing" };
+    }
+
+    if (/\b(trouble\s+swallowing|difficulty\s+swallowing|hard\s+to\s+swallow|cannot\s+swallow|can't\s+swallow|dysphagia)\b/i.test(textLower)) {
+      return { intent: "answer_question", resolvedSlot: "swallowing_difficulty", resolvedValue: "difficulty swallowing reported" };
+    }
+
     if (/\b(chest|heart|sternum|angina|palpitation)\b/i.test(textLower)) {
       return { intent: "answer_question", resolvedSlot: "location", resolvedValue: "chest" };
     }
@@ -1222,9 +1262,102 @@ export class ConversationManager {
         state.slots.known_facts.push("VOICE_CHANGE: present");
       }
     }
-    if (/\b(gradual(?:ly)?\s+increased|got\s+worse|built\s+up)\b/i.test(state.cumulativeTranscript)) {
+    if (/\b(gradual(?:ly)?\s+increased|got\s+worse|built\s+up|getting\s+worse|increasing)\b/i.test(state.cumulativeTranscript)) {
       if (!state.slots.known_facts.some(f => /course/i.test(f))) {
         state.slots.known_facts.push("COURSE: gradually worsening");
+      }
+    }
+
+    // Opportunistic Severity Extraction (0-10, /10, or "pain is 6")
+    if (!state.slots.severity) {
+      const sevMatch = state.cumulativeTranscript.match(/\b(?:pain\s+(?:level\s+)?(?:is\s+)?|severity\s+(?:is\s+)?|about\s+|around\s+)?([0-9]|10)\s*(?:out of 10|\/10)\b/i) ||
+        state.cumulativeTranscript.match(/\bpain\s+(?:level\s+)?(?:is\s+)?(?:about\s+|around\s+)?([0-9]|10)\b/i);
+      if (sevMatch) {
+        const score = sevMatch[1];
+        state.slots.severity = `${score}/10`;
+        const fact = `SEVERITY: ${score}/10`;
+        if (!state.slots.known_facts.some(f => f.startsWith("SEVERITY"))) {
+          state.slots.known_facts.push(fact);
+        }
+      }
+    }
+
+    // Opportunistic Fever Screening (Denial vs Presence)
+    const hasFeverDenial = /\b(no\s+fever|haven'?t\s+had\s+(?:a\s+)?fever|without\s+fever|no\s+temperature|denies\s+fever|no\s+fever\s+or\s+chills)\b/i.test(state.cumulativeTranscript);
+    const hasFeverPresent = !hasFeverDenial && /\b(have\s+(?:a\s+)?fever|feverish|chills|high\s+temperature|fever\s+of)\b/i.test(state.cumulativeTranscript);
+
+    if (hasFeverDenial) {
+      if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes("fever")) {
+        state.conversationMemory.deniedSymptoms.push("fever");
+      }
+      if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes("fever")) {
+        state.conversationMemory.questionsAlreadyAsked.push("fever");
+      }
+      if (!state.slots.known_facts.some(f => /denied:\s*fever/i.test(f))) {
+        state.slots.known_facts.push("Denied: fever");
+      }
+    } else if (hasFeverPresent) {
+      if (!state.slots.associated_symptoms.includes("fever")) {
+        state.slots.associated_symptoms.push("fever");
+      }
+      if (!state.slots.known_facts.some(f => /^FEVER:/i.test(f))) {
+        state.slots.known_facts.push("FEVER: present");
+      }
+    }
+
+    // Opportunistic Swallowing: Odynophagia (painful swallowing) vs Dysphagia (mechanical obstruction / inability to pass fluids)
+    const hasOdynophagia = /\b(?:hurts?|painful|pain|burning|sharp)\s+(?:when\s+(?:i\s+)?swallow|to\s+swallow|swallowing)\b/i.test(state.cumulativeTranscript) ||
+      /\b(?:when\s+(?:i\s+)?swallow|swallowing)\s+(?:it\s+)?(?:hurts?|is\s+painful)\b/i.test(state.cumulativeTranscript) ||
+      /\bodynophagia\b/i.test(state.cumulativeTranscript);
+
+    if (hasOdynophagia) {
+      if (!state.slots.associated_symptoms.includes("painful swallowing (odynophagia)")) {
+        state.slots.associated_symptoms.push("painful swallowing (odynophagia)");
+      }
+      if (!state.slots.known_facts.some(f => /odynophagia|painful\s+swallowing/i.test(f))) {
+        state.slots.known_facts.push("ODYNOPHAGIA: painful swallowing (saliva/food)");
+      }
+    }
+
+    const hasDysphagiaComplaint = /\b(trouble\s+swallowing|difficulty\s+swallowing|hard\s+to\s+swallow|cannot\s+swallow|can't\s+swallow|choking\s+on\s+liquids|food\s+gets?\s+stuck|unable\s+to\s+swallow|dysphagia)\b/i.test(state.cumulativeTranscript);
+    const hasDysphagiaDenial = /\b(?:no|not|neither|without|no\s+trouble|can\s+swallow\s+(?:fine|ok|normally))\s+(?:trouble\s+swallowing|difficulty\s+swallowing|problems?\s+swallowing|dysphagia)\b/i.test(state.cumulativeTranscript);
+
+    if (hasDysphagiaComplaint && !hasDysphagiaDenial) {
+      if (!state.slots.known_facts.some(f => /^SWALLOWING_DIFFICULTY:/i.test(f))) {
+        state.slots.known_facts.push("SWALLOWING_DIFFICULTY: present (mechanical/functional)");
+      }
+    } else if (hasDysphagiaDenial) {
+      if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes("swallowing_difficulty")) {
+        state.conversationMemory.deniedSymptoms.push("swallowing_difficulty");
+      }
+      if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes("swallowing_difficulty")) {
+        state.conversationMemory.questionsAlreadyAsked.push("swallowing_difficulty");
+      }
+      if (!state.slots.known_facts.some(f => /denied:\s*swallowing_difficulty/i.test(f))) {
+        state.slots.known_facts.push("Denied: swallowing_difficulty");
+      }
+    }
+
+    // Opportunistic Ear Pain (Otalgia)
+    const hasEarDenial = /\b(no\s+ear\s+pain|no\s+earache|ears?\s+(?:don't|do\s+not)\s+hurt|denies\s+ear\s+pain)\b/i.test(state.cumulativeTranscript);
+    const hasEarPresent = !hasEarDenial && /\b(ear\s+pain|earache|ears?\s+hurts?|ear\s+is\s+(?:hurting|aching|paining)|pain\s+spreads?\s+to\s+ears?)\b/i.test(state.cumulativeTranscript);
+
+    if (hasEarDenial) {
+      if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes("ear_pain")) {
+        state.conversationMemory.deniedSymptoms.push("ear_pain");
+      }
+      if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes("ear_pain")) {
+        state.conversationMemory.questionsAlreadyAsked.push("ear_pain");
+      }
+      if (!state.slots.known_facts.some(f => /denied:\s*ear_pain/i.test(f))) {
+        state.slots.known_facts.push("Denied: ear_pain");
+      }
+    } else if (hasEarPresent) {
+      if (!state.slots.associated_symptoms.includes("ear pain")) {
+        state.slots.associated_symptoms.push("ear pain");
+      }
+      if (!state.slots.known_facts.some(f => /^EAR_PAIN:/i.test(f))) {
+        state.slots.known_facts.push("EAR_PAIN: present");
       }
     }
 

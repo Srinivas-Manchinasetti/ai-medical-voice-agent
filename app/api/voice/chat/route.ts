@@ -172,7 +172,7 @@ export async function POST(request: Request) {
         turnResult.state.slots.known_facts.some(f => /voice/i.test(f));
       const voiceCharKnown = turnResult.state.slots.known_facts.some(f => /voice_character|hoarse|aphonia/i.test(f));
       if (hasVoiceChange && !voiceCharKnown) calculatedMissingDims.push("Voice-change character (hoarseness vs aphonia)");
-      const dysphagiaAssessed = turnResult.state.slots.known_facts.some(f => /swallow/i.test(f)) ||
+      const dysphagiaAssessed = turnResult.state.slots.known_facts.some(f => /swallowing_difficulty/i.test(f)) ||
         turnResult.state.conversationMemory?.deniedSymptoms.includes("swallowing_difficulty");
       if (!dysphagiaAssessed) calculatedMissingDims.push("Difficulty swallowing (saliva/fluids)");
       const feverAssessed = turnResult.state.slots.known_facts.some(f => /fever/i.test(f)) ||

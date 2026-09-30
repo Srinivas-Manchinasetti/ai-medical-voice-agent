@@ -247,35 +247,44 @@ export class ResponsePlanner {
     const hasNeuro = Boolean(state.slots.neurological_signs.length > 0 || /\b(headache|dizz|droop|weak|speech)\b/i.test(state.cumulativeTranscript));
 
     const askedQuestions = new Set(memory.questionsAlreadyAsked.map(q => q.toLowerCase()));
+    const deniedSymptoms = new Set((memory.deniedSymptoms || []).map(d => d.toLowerCase()));
+    const isTopicAddressed = (topic: string) => {
+      const topLower = topic.toLowerCase();
+      if (askedQuestions.has(topLower)) return true;
+      if (deniedSymptoms.has(topLower)) return true;
+      if (state.slots.known_facts.some(f => f.toLowerCase().includes(topLower))) return true;
+      if ((state.slots as any)[topic]) return true;
+      return false;
+    };
 
     let nextInquiry: { topic: string; clinicalRationale: string; suggestedPhrasing: string } | undefined = undefined;
 
     if (hasChest) {
-      if (!state.slots.character && !askedQuestions.has("character")) {
+      if (!state.slots.character && !isTopicAddressed("character")) {
         nextInquiry = {
           topic: "character",
           clinicalRationale: "Differentiate pressure/squeezing from sharp or pleuritic pain.",
           suggestedPhrasing: "Could you describe what the discomfort feels like — is it a tight pressure, squeezing, burning, or a sharp pain?",
         };
-      } else if (!state.slots.onset && !askedQuestions.has("onset")) {
+      } else if (!state.slots.onset && !isTopicAddressed("onset")) {
         nextInquiry = {
           topic: "onset",
           clinicalRationale: "Establish onset acuity and timeline.",
           suggestedPhrasing: "When did this begin, and did it start suddenly or build up gradually?",
         };
-      } else if (!state.slots.radiation && !askedQuestions.has("radiation")) {
+      } else if (!state.slots.radiation && !isTopicAddressed("radiation")) {
         nextInquiry = {
           topic: "radiation",
           clinicalRationale: "Screen for radiation into left arm, jaw, neck, or back.",
           suggestedPhrasing: "Does that chest discomfort travel anywhere, such as into your left arm, jaw, neck, or back?",
         };
-      } else if (!state.slots.exertional && !askedQuestions.has("exertional")) {
+      } else if (!state.slots.exertional && !isTopicAddressed("exertional")) {
         nextInquiry = {
           topic: "exertional",
           clinicalRationale: "Determine exertional vs rest ischemia.",
           suggestedPhrasing: "Does this discomfort happen when you're physically active, or does it happen while resting?",
         };
-      } else if (state.slots.associated_symptoms.length === 0 && !askedQuestions.has("associated_symptoms")) {
+      } else if (state.slots.associated_symptoms.length === 0 && !isTopicAddressed("associated_symptoms")) {
         nextInquiry = {
           topic: "associated_symptoms",
           clinicalRationale: "Screen for diaphoresis, dyspnea, nausea, and presyncope.",
@@ -283,28 +292,27 @@ export class ResponsePlanner {
         };
       }
     } else if (hasNeuro) {
-      const denied = new Set((memory.deniedSymptoms || []).map(d => d.toLowerCase()));
       const weaknessReported = state.slots.neurological_signs.some(s => /weak|numb/i.test(s));
 
-      if (weaknessReported && !askedQuestions.has("weakness_distribution") && !askedQuestions.has("laterality")) {
+      if (weaknessReported && !isTopicAddressed("weakness_distribution") && !isTopicAddressed("laterality")) {
         nextInquiry = {
           topic: "weakness_distribution",
           clinicalRationale: "Clarify whether weakness/numbness is unilateral (higher concern for focal stroke/TIA) or bilateral/generalized (more consistent with orthostatic presyncope or peripheral cause).",
           suggestedPhrasing: "When that weakness and numbness happens, is it on one side of your body, or on both sides?",
         };
-      } else if (state.slots.neurological_signs.length === 0 && !askedQuestions.has("neurological_signs") && !denied.has("facial drooping")) {
+      } else if (state.slots.neurological_signs.length === 0 && !isTopicAddressed("neurological_signs") && !deniedSymptoms.has("facial drooping")) {
         nextInquiry = {
           topic: "neurological_signs",
           clinicalRationale: "Screen for BE-FAST stroke signs (facial droop, unilateral arm/leg weakness, speech difficulty).",
           suggestedPhrasing: "Have you noticed any weakness in your arms or legs, facial drooping, or difficulty finding your words?",
         };
-      } else if (!state.slots.duration && !askedQuestions.has("duration") && !memory.durationPattern) {
+      } else if (!state.slots.duration && !isTopicAddressed("duration") && !memory.durationPattern) {
         nextInquiry = {
           topic: "duration",
           clinicalRationale: "Establish episode duration to differentiate transient orthostasis from persistent deficits.",
           suggestedPhrasing: "When these episodes happen, roughly how long does each one last?",
         };
-      } else if (!state.slots.onset && !askedQuestions.has("onset")) {
+      } else if (!state.slots.onset && !isTopicAddressed("onset")) {
         nextInquiry = {
           topic: "onset",
           clinicalRationale: "Establish symptom timeline and progression.",
@@ -318,43 +326,49 @@ export class ResponsePlanner {
         state.slots.known_facts.some(f => /throat/i.test(f));
 
       // Pivot to new voice change finding if just reported
-      if (hasVoiceChange && !askedQuestions.has("voice_character")) {
+      if (hasVoiceChange && !isTopicAddressed("voice_character")) {
         nextInquiry = {
           topic: "voice_character",
           clinicalRationale: "Patient communicated a voice change. Differentiate hoarseness / laryngitis from aphonia or upper airway difficulty.",
           suggestedPhrasing: "The voice change is useful to know. Is it more like hoarseness, weakness, or difficulty producing your voice?",
         };
-      } else if (!state.slots.onset && !askedQuestions.has("onset")) {
+      } else if (!state.slots.onset && !isTopicAddressed("onset")) {
         nextInquiry = {
           topic: "onset",
           clinicalRationale: "Establish symptom timeline and progression.",
           suggestedPhrasing: "Could you tell me when this began, and whether it started suddenly or built up gradually?",
         };
-      } else if (hasThroat && !state.slots.known_facts.some(f => /course/i.test(f)) && !askedQuestions.has("course")) {
+      } else if (hasThroat && !state.slots.known_facts.some(f => /course/i.test(f)) && !isTopicAddressed("course")) {
         nextInquiry = {
           topic: "course",
           clinicalRationale: "Establish course and progression of throat symptoms.",
           suggestedPhrasing: "Has the throat pain been getting worse, improving, or staying about the same?",
         };
-      } else if (hasThroat && !askedQuestions.has("swallowing_difficulty")) {
+      } else if (hasThroat && !isTopicAddressed("swallowing_difficulty")) {
+        const hasOdynophagia = state.slots.known_facts.some(f => /odynophagia|painful\s+swallowing/i.test(f)) ||
+          state.slots.associated_symptoms.some(s => /painful\s+swallowing/i.test(s));
         nextInquiry = {
           topic: "swallowing_difficulty",
-          clinicalRationale: "Screen for red-flag dysphagia, peritonsillar abscess, and upper airway compromise.",
-          suggestedPhrasing: "Have you had any difficulty swallowing liquids or your own saliva?",
+          clinicalRationale: hasOdynophagia
+            ? "Patient reported painful swallowing (odynophagia); screen specifically for mechanical obstruction or inability to swallow fluids (true dysphagia)."
+            : "Screen for red-flag dysphagia, peritonsillar abscess, and upper airway compromise.",
+          suggestedPhrasing: hasOdynophagia
+            ? "I understand that swallowing is painful. Despite the pain, are you still able to swallow liquids and keep them down without choking?"
+            : "Have you had any difficulty swallowing liquids or your own saliva?",
         };
-      } else if (hasThroat && !askedQuestions.has("fever")) {
+      } else if (hasThroat && !isTopicAddressed("fever")) {
         nextInquiry = {
           topic: "fever",
           clinicalRationale: "Screen for systemic infection and bacterial pharyngitis.",
           suggestedPhrasing: "Have you had a fever or chills?",
         };
-      } else if (!state.slots.severity && !askedQuestions.has("severity")) {
+      } else if (!state.slots.severity && !isTopicAddressed("severity")) {
         nextInquiry = {
           topic: "severity",
           clinicalRationale: "Quantify symptom pain intensity.",
           suggestedPhrasing: "How severe is the throat pain right now on a scale from zero to ten?",
         };
-      } else if (hasThroat && !askedQuestions.has("ear_pain")) {
+      } else if (hasThroat && !isTopicAddressed("ear_pain")) {
         nextInquiry = {
           topic: "ear_pain",
           clinicalRationale: "Screen for referred otalgia.",
