@@ -22,26 +22,30 @@ async function runSecurityAndAuditTestSuite() {
   console.log("  PHASE 1 SECURITY, RBAC & AUDIT VERIFICATION SUITE");
   console.log("========================================================\n");
 
-  // TEST 1: RBAC Permission Matrix Checks
+  // TEST 1: RBAC Permission Matrix Checks (Clean Patient / Admin Model)
   console.log("[Test Suite 1] Role-Based Access Control (RBAC) Invariants");
   {
+    // Patient Permissions & Least-Privilege Boundaries
     assert(hasPermission("patient", "consultations:create"), "Patient can create their own consultation");
     assert(hasPermission("patient", "consultations:read:own"), "Patient can read their own consultations");
-    assert(!hasPermission("patient", "consultations:read:all"), "Patient CANNOT read all consultations");
+    assert(hasPermission("patient", "emergency:dispatch"), "Patient can trigger emergency dispatch");
+    assert(hasPermission("patient", "health:export:own"), "Patient can export their own FHIR health record");
+
+    // Negative Boundaries: Patient CANNOT access platform audit or analytics
     assert(!hasPermission("patient", "audit:read"), "Patient CANNOT inspect audit ledger");
-    assert(!hasPermission("patient", "consultations:override"), "Patient CANNOT override clinical decisions");
+    assert(!hasPermission("patient", "audit:verify"), "Patient CANNOT verify audit chain");
+    assert(!hasPermission("patient", "analytics:read"), "Patient CANNOT access system analytics");
+    assert(!hasPermission("patient", "system:read"), "Patient CANNOT access platform internals");
 
-    assert(hasPermission("doctor", "consultations:read:all"), "Doctor CAN read all patient consultations");
-    assert(hasPermission("doctor", "consultations:override"), "Doctor CAN submit clinical overrides");
-    assert(!hasPermission("doctor", "audit:verify"), "Doctor CANNOT run root audit verification");
-
-    assert(hasPermission("auditor", "audit:read"), "Auditor CAN read audit events");
-    assert(hasPermission("auditor", "audit:verify"), "Auditor CAN verify cryptographic audit chain");
-    assert(hasPermission("auditor", "consultations:read:all"), "Auditor CAN read consultations for compliance");
-    assert(!hasPermission("auditor", "consultations:create"), "Auditor CANNOT create new clinical consultations");
-
+    // Admin Permissions (Platform Maintenance & Compliance)
+    assert(hasPermission("admin", "analytics:read"), "Admin can read platform analytics");
+    assert(hasPermission("admin", "system:read"), "Admin can monitor system health");
+    assert(hasPermission("admin", "audit:read"), "Admin can inspect audit ledger");
     assert(hasPermission("admin", "audit:verify"), "Admin has audit:verify permission");
-    assert(hasPermission("admin", "consultations:override"), "Admin has consultations:override permission");
+
+    // Critical Clinical Invariant: Admin CANNOT arbitrarily override AI clinical triage
+    // (Clinical safety is governed strictly by the deterministic Safety Arbiter, not admin fiat)
+    assert(!hasPermission("admin", "consultations:create"), "Admin does not initiate clinical patient consultations");
   }
 
   // TEST 2: Tamper-Evident Cryptographic Hash Chain
@@ -63,13 +67,13 @@ async function runSecurityAndAuditTestSuite() {
     assert(event1.eventHash.length === 64, "Event hash is valid 64-char SHA-256 hex string");
 
     const event2 = logAuditEvent({
-      actorId: "usr-doc-202",
-      actorRole: "doctor",
+      actorId: "usr-admin-01",
+      actorRole: "admin",
       action: "CONSULTATION_ACCESSED",
       resourceType: "consultation",
       resourceId: "MED-TEST-001",
       status: "SUCCESS",
-      metadata: { specialty: "Cardiology" },
+      metadata: { reason: "Platform telemetry and compliance review" },
     });
 
     assert(event2.index === 1, "Second event index is 1");

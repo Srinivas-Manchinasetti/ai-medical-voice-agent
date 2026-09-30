@@ -10,7 +10,7 @@ export type AuditAction =
   | "ACCESS_DENIED"
   | "ROLE_ELEVATION_ATTEMPT";
 
-export type AuditActorRole = "patient" | "doctor" | "auditor" | "admin" | "system";
+export type AuditActorRole = "patient" | "admin" | "system";
 
 export interface AuditEvent {
   index: number;

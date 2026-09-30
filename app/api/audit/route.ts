@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Forbidden: Auditor or Administrator credentials required to inspect the audit ledger.",
+          error: "Forbidden: Administrator credentials required to inspect the audit ledger.",
         },
         { status: 403 }
       );

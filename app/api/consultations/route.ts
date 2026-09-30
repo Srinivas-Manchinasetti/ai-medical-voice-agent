@@ -103,8 +103,8 @@ export async function GET(request: Request) {
     const userIdParam = searchParams.get("userId");
 
     // RBAC: Patients can only view their own consultations.
-    // Doctors, Auditors, and Admins have permission to query records broadly.
-    const canReadAll = hasPermission(auth.role, "consultations:read:all");
+    // Platform administrators have permission to query platform records for maintenance.
+    const canReadAll = auth.role === "admin";
     if (!canReadAll && userIdParam && userIdParam !== auth.userId) {
       logAuditEvent({
         actorId: auth.userId,

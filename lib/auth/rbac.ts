@@ -1,14 +1,15 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { logAuditEvent, AuditActorRole } from "../audit/audit-logger";
 
-export type Role = "patient" | "doctor" | "auditor" | "admin";
+export type Role = "patient" | "admin";
 
 export type Permission =
   | "consultations:create"
   | "consultations:read:own"
-  | "consultations:read:all"
-  | "consultations:override"
   | "emergency:dispatch"
+  | "health:export:own"
+  | "analytics:read"
+  | "system:read"
   | "audit:read"
   | "audit:verify";
 
@@ -17,25 +18,11 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "consultations:create",
     "consultations:read:own",
     "emergency:dispatch",
-  ],
-  doctor: [
-    "consultations:create",
-    "consultations:read:own",
-    "consultations:read:all",
-    "consultations:override",
-    "emergency:dispatch",
-  ],
-  auditor: [
-    "consultations:read:all",
-    "audit:read",
-    "audit:verify",
+    "health:export:own",
   ],
   admin: [
-    "consultations:create",
-    "consultations:read:own",
-    "consultations:read:all",
-    "consultations:override",
-    "emergency:dispatch",
+    "analytics:read",
+    "system:read",
     "audit:read",
     "audit:verify",
   ],
@@ -60,7 +47,7 @@ export function hasPermission(role: Role, permission: Permission): boolean {
  * Resolve the authenticated context from the request.
  * Supports:
  * 1. Clerk session authentication (production)
- * 2. Role assigned in user publicMetadata or privateMetadata
+ * 2. Role assigned in user publicMetadata or privateMetadata ("patient" | "admin")
  * 3. Graceful fallback to sandbox Demo Mode if Clerk is not configured or during evaluation
  */
 export async function getAuthContext(request?: Request): Promise<AuthContext> {
@@ -76,7 +63,7 @@ export async function getAuthContext(request?: Request): Promise<AuthContext> {
       const userRole = (user.publicMetadata?.role as Role) || "patient";
       return {
         userId: user.id,
-        role: ["patient", "doctor", "auditor", "admin"].includes(userRole) ? userRole : "patient",
+        role: ["patient", "admin"].includes(userRole) ? userRole : "patient",
         name: user.fullName || user.firstName || user.username || "Authenticated User",
         email: user.primaryEmailAddress?.emailAddress || "",
         isDemoMode: false,
@@ -87,7 +74,7 @@ export async function getAuthContext(request?: Request): Promise<AuthContext> {
   }
 
   // If in demo mode or test suite, support designated sandbox role
-  if (testRoleHeader && ["patient", "doctor", "auditor", "admin"].includes(testRoleHeader)) {
+  if (testRoleHeader && ["patient", "admin"].includes(testRoleHeader)) {
     return {
       userId: testUserHeader || `mock-${testRoleHeader}-01`,
       role: testRoleHeader,
