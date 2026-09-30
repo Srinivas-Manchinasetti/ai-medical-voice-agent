@@ -646,6 +646,21 @@ export default function ConsultPage() {
     });
   };
 
+  // Safely stops and unloads active HTML5 AudioElement without triggering spurious error events
+  const stopAndClearActiveAudio = useCallback(() => {
+    if (activeAudioRef.current) {
+      try {
+        const audio = activeAudioRef.current;
+        activeAudioRef.current = null;
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      } catch {}
+    }
+  }, []);
+
   // Cleanly stops active microphone and removes all event listeners to prevent hardware / thread locks
   const stopSpeechRecognitionListening = useCallback(() => {
     if (silenceTimerRef.current) {
@@ -758,13 +773,7 @@ export default function ConsultPage() {
     // Invalidate any in-flight async TTS generation so late-arriving audio is suppressed
     playbackSessionTokenRef.current += 1;
 
-    if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.src = "";
-        activeAudioRef.current = null;
-      } catch {}
-    }
+    stopAndClearActiveAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch {}
     }
@@ -821,13 +830,7 @@ export default function ConsultPage() {
     // 3. Halt any ongoing audio and speech intake immediately
     stopSpeechRecognitionListening();
 
-    if (activeAudioRef.current) {
-      try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.src = "";
-        activeAudioRef.current = null;
-      } catch {}
-    }
+    stopAndClearActiveAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try { window.speechSynthesis.cancel(); } catch {}
     }
@@ -1004,22 +1007,38 @@ export default function ConsultPage() {
 
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        activeAudioRef.current = null;
+        if (activeAudioRef.current === audio) {
+          activeAudioRef.current = null;
+        }
         handleSpeechEnd();
       };
 
-      audio.onerror = (e) => {
-        console.error("[MedVoice Audio] Audio playback error:", e);
+      audio.onerror = () => {
+        if (playbackSessionTokenRef.current !== token) return;
+        const mediaErr = audio.error;
+        const detail = mediaErr ? `Code ${mediaErr.code}: ${mediaErr.message || "playback issue"}` : "media decode notice";
+        console.warn(`[MedVoice Audio] Audio element playback notice (${detail}). Transitioning to browser voice fallback for ${targetDoctor.name}...`);
         URL.revokeObjectURL(audioUrl);
-        activeAudioRef.current = null;
-        if (playbackSessionTokenRef.current === token) {
-          playBrowserFallback(targetDoctor.voiceProfile?.locale);
+        if (activeAudioRef.current === audio) {
+          activeAudioRef.current = null;
         }
+        playBrowserFallback(targetDoctor.voiceProfile?.locale);
       };
 
-      await audio.play();
-      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: engineHeader }));
-      console.log(`[MedVoice Audio] ${engineHeader} audio playback started successfully for ${targetDoctor.name}.`);
+      audio.play().then(() => {
+        setActiveSpeaker((prev) => ({ ...prev, voiceEngine: engineHeader }));
+        console.log(`[MedVoice Audio] ${engineHeader} audio playback started successfully for ${targetDoctor.name}.`);
+      }).catch((playErr: any) => {
+        if (playbackSessionTokenRef.current !== token) return;
+        console.warn(`[MedVoice Audio] Audio play() notice: ${playErr?.message || playErr}. Transitioning to fallback...`);
+        audio.onended = null;
+        audio.onerror = null;
+        URL.revokeObjectURL(audioUrl);
+        if (activeAudioRef.current === audio) {
+          activeAudioRef.current = null;
+        }
+        playBrowserFallback(targetDoctor.voiceProfile?.locale);
+      });
     } catch (err: any) {
       console.warn(`[MedVoice Audio] Synthesis route error for ${targetDoctor.name} (${targetDoctor.voiceId}):`, err.message);
       if (playbackSessionTokenRef.current === token) {
