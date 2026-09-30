@@ -378,7 +378,7 @@ export function generateFHIRBundle(record: ConsultationRecordFHIR): FHIRBundle {
         },
         text: {
           status: "generated",
-          div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${record.soapObjective || "Automated NLP feature extraction complete."}</p><p>Detected Symptoms: ${record.detectedSymptoms?.join(", ") || "None"}</p></div>`,
+          div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${record.soapObjective || "No objective clinical measurements recorded (remote voice consultation)."}</p></div>`,
         },
       },
       {

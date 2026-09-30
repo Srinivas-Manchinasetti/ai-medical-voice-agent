@@ -4,6 +4,7 @@ import {
   getAuditEvents,
   verifyAuditChain,
   logAuditEvent,
+  syncAuditLedgerFromDb,
   AuditEvent,
 } from "@/lib/audit/audit-logger";
 
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
     const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
 
+    await syncAuditLedgerFromDb();
     const events = getAuditEvents(limit, offset);
     const verification = verifyAuditChain();
 

@@ -325,12 +325,24 @@ export class ResponsePlanner {
       const hasThroat = /\b(throat|swallow)\b/i.test(patientUtterance) ||
         state.slots.known_facts.some(f => /throat/i.test(f));
 
+      // Check for painful swallowing (odynophagia)
+      const hasOdynophagia = /\b(?:hurts?|painful|pain|burning|sharp)\s+(?:when\s+(?:i\s+)?swallow|to\s+swallow|swallowing)\b/i.test(patientUtterance) ||
+        state.slots.known_facts.some(f => /odynophagia|painful\s+swallowing/i.test(f)) ||
+        state.slots.associated_symptoms.some(s => /painful\s+swallowing/i.test(s));
+      const swallowingAssessed = isTopicAddressed("swallowing_difficulty") || isTopicAddressed("dysphagia");
+
       // Pivot to new voice change finding if just reported
       if (hasVoiceChange && !isTopicAddressed("voice_character")) {
         nextInquiry = {
           topic: "voice_character",
           clinicalRationale: "Patient communicated a voice change. Differentiate hoarseness / laryngitis from aphonia or upper airway difficulty.",
           suggestedPhrasing: "The voice change is useful to know. Is it more like hoarseness, weakness, or difficulty producing your voice?",
+        };
+      } else if (hasOdynophagia && !swallowingAssessed) {
+        nextInquiry = {
+          topic: "swallowing_difficulty",
+          clinicalRationale: "Patient reported painful swallowing (odynophagia); screen specifically for mechanical obstruction or inability to swallow fluids (true dysphagia).",
+          suggestedPhrasing: "When you say it hurts to swallow, are you still able to swallow liquids and saliva normally?",
         };
       } else if (!state.slots.onset && !isTopicAddressed("onset")) {
         nextInquiry = {

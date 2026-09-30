@@ -463,9 +463,13 @@ export class EvidenceExtractor {
     // Chief complaint assignment
     let updatedChiefComplaint: ClinicalFact | undefined = undefined;
     if (!state.chiefComplaint) {
-      const primarySymptom = newFacts.find(f => f.category === "chief_complaint");
+      const primarySymptom = newFacts.find(f => f.category === "chief_complaint") ||
+        newFacts.find(f => f.name === "painful_swallowing" || f.name === "swallowing_difficulty");
       if (primarySymptom) {
-        updatedChiefComplaint = primarySymptom;
+        updatedChiefComplaint = {
+          ...primarySymptom,
+          category: "chief_complaint",
+        };
       }
     }
 

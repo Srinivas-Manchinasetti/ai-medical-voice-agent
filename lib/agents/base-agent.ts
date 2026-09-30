@@ -77,10 +77,10 @@ export abstract class BaseClinicalAgent {
         toolName,
         {
           transcript: patientCase.transcript,
-          age: patientCase.demographics.age,
-          ageGroup: patientCase.demographics.age_group,
+          age: patientCase.demographics?.age,
+          ageGroup: patientCase.demographics?.age_group,
           vitals: patientCase.vitals,
-          hasChestPain: patientCase.pre_safety_flags.some(f => f.includes("CHEST")),
+          hasChestPain: (patientCase.pre_safety_flags || []).some(f => f.includes("CHEST")),
           currentMedications: []
         }
       );

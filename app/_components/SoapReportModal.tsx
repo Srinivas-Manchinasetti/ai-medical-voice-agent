@@ -70,32 +70,22 @@ export function SoapReportModal({
   const [copiedNote, setCopiedNote] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
 
+  const isReportReady = Boolean(encounter?.soap?.subjective && encounter?.soap?.assessment);
+
   // Initialize and format text values when encounter changes
   useEffect(() => {
     if (isOpen && encounter) {
-      const patientUtterances = encounter.transcript
-        .filter((t) => t.role === "patient")
-        .map((t) => t.text);
-
-      const chief = patientUtterances[0] || "Acute symptom evaluation";
-      const hpiDetails = patientUtterances.length > 1
-        ? patientUtterances.slice(1).join(" ")
-        : "";
-
-      const defaultSubjective = `Chief Complaint:\n${chief}\n\nHistory of Present Illness:\nPatient reports: "${chief}". ${
-        hpiDetails ? `Additional patient testimony: "${hpiDetails}".` : ""
-      } Key reported symptoms include: ${encounter.detectedSymptoms?.join(", ") || "None specified"}.\n\nAssociated Symptoms & Pertinent Observations:\nExtracted from live audio intake. Natural speech rhythm and cadence recorded.`;
-
-      const defaultObjective = `Available Observations & Acoustic Biomarkers:\n• Vital Signs & Physical Exam: No direct physical examination or automated biometric telemetry hardware connected during remote voice encounter. (Never fabricated; patient-reported metrics only if noted).\n• Speech Characteristics: Cadence and articulation logged via acoustic intake.\n• Clinical Decision Instruments Executed: Algorithmic ESI v4 Invariant Engine verified.\n• Diagnostic Tags: ${encounter.icdCodes?.join(", ") || "Z76.0"}.`;
-
-      const defaultAssessment = `Primary Clinical Impression:\n${encounter.triageTitle} (ESI Level ${encounter.esiScore ?? (encounter.triageLevel === "emergency" ? 2 : 3)}).\n\nSpecialist Consensus & Triage:\nMulti-Agent Clinical Board consultation with ${encounter.doctorName} (${encounter.specialty}).\nSafety Arbiter Status: Zero False Negatives Invariant Verified.\n\nClinical Governance Note:\nPreliminary AI clinical assessment based on patient testimony. Requires attending physician clinical validation.`;
-
-      const defaultPlan = `Actionable Clinical Directives:\n1. Immediate Disposition: ${encounter.recommendedAction.toUpperCase()}\n2. Emergency Pre-Arrival Protocols: Patient advised to remain seated in a comfortable upright position. Avoid walking or exertion. Keep entrance door unlocked for emergency personnel.\n3. Safety Directives: Do not take aspirin, food, or liquids prior to in-hospital medical evaluation.\n4. Clinical Handoff: Encrypted clinical encounter record prepared for receiving emergency triage team.`;
-
-      setSubjective(encounter.soap?.subjective || defaultSubjective);
-      setObjective(encounter.soap?.objective || defaultObjective);
-      setAssessment(encounter.soap?.assessment || defaultAssessment);
-      setPlan(encounter.soap?.plan || defaultPlan);
+      if (encounter.soap?.subjective && encounter.soap?.assessment) {
+        setSubjective(encounter.soap.subjective);
+        setObjective(encounter.soap.objective || "");
+        setAssessment(encounter.soap.assessment);
+        setPlan(encounter.soap.plan || "");
+      } else {
+        setSubjective("");
+        setObjective("");
+        setAssessment("");
+        setPlan("");
+      }
 
       setIsEditing(false);
       setSaveSuccess(false);
@@ -124,6 +114,7 @@ export function SoapReportModal({
 
   // Copy standard clinical note to clipboard
   const handleCopyNote = async () => {
+    if (!isReportReady) return;
     const formattedNote = `==============================================================================
 SOAP NOTE — MEDVOICE CLINICAL ENCOUNTER
 ==============================================================================
@@ -163,6 +154,7 @@ Attending Clinician Signature: _________________________ Date: ____________
 
   // Export HL7 FHIR R4 Bundle
   const handleExportFhir = () => {
+    if (!isReportReady) return;
     const bundle = generateFHIRBundle({
       id: encounterId,
       patientName: encounter.patientName,
@@ -205,6 +197,7 @@ Attending Clinician Signature: _________________________ Date: ____________
 
   // Commit / Save Encounter to Database & Longitudinal Record
   const handleApproveAndSave = async () => {
+    if (!isReportReady) return;
     setIsSaving(true);
     try {
       const payload = {
@@ -312,8 +305,12 @@ Attending Clinician Signature: _________________________ Date: ____________
             <div>
               <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">Governance</span>
               <div className="mt-1">
-                <span className="inline-block text-[10px] font-mono font-bold tracking-wider uppercase px-2 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200">
-                  AI DRAFT · REVIEW REQUIRED
+                <span className={`inline-block text-[10px] font-mono font-bold tracking-wider uppercase px-2 py-0.5 rounded border ${
+                  !isReportReady
+                    ? "bg-slate-50 text-slate-600 border-slate-200"
+                    : "bg-amber-50 text-amber-900 border-amber-200"
+                }`}>
+                  {!isReportReady ? "REPORT IN PROGRESS" : "AI DRAFT · REVIEW REQUIRED"}
                 </span>
               </div>
             </div>
@@ -346,130 +343,163 @@ Attending Clinician Signature: _________________________ Date: ____________
             </motion.div>
           )}
 
-          {/* S — SUBJECTIVE */}
-          <section className="space-y-2">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-              <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
-                <span className="w-5 h-5 rounded-md bg-cyan-700 text-white flex items-center justify-center text-[11px] font-mono font-bold">
-                  S
-                </span>
-                <span>SUBJECTIVE</span>
-              </h3>
-              <span className="text-[10px] font-mono text-slate-400">Patient-Reported Narrative</span>
-            </div>
-
-            {isEditing ? (
-              <textarea
-                value={subjective}
-                onChange={(e) => setSubjective(e.target.value)}
-                rows={5}
-                className="w-full text-xs sm:text-sm p-3 rounded-xl border border-cyan-300 focus:outline-hidden focus:ring-2 focus:ring-cyan-500/20 bg-slate-50/50 leading-relaxed font-sans"
-              />
-            ) : (
-              <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
-                {subjective}
+          {!isReportReady ? (
+            <div className="py-12 px-6 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+              <div className="w-14 h-14 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700 mb-4 shadow-xs">
+                <FileText className="w-7 h-7 text-cyan-600 animate-pulse" />
               </div>
-            )}
-          </section>
-
-          {/* O — OBJECTIVE */}
-          <section className="space-y-2">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-              <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
-                <span className="w-5 h-5 rounded-md bg-teal-700 text-white flex items-center justify-center text-[11px] font-mono font-bold">
-                  O
-                </span>
-                <span>OBJECTIVE</span>
-              </h3>
-              <span className="text-[10px] font-mono text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 font-bold">
-                Zero Vitals Fabricated
+              <span className="text-[11px] font-mono uppercase tracking-widest text-cyan-800 font-bold bg-cyan-50 border border-cyan-200 px-2.5 py-1 rounded-full mb-2">
+                Clinical Report in Progress
               </span>
-            </div>
-
-            {isEditing ? (
-              <textarea
-                value={objective}
-                onChange={(e) => setObjective(e.target.value)}
-                rows={5}
-                className="w-full text-xs sm:text-sm p-3 rounded-xl border border-teal-300 focus:outline-hidden focus:ring-2 focus:ring-teal-500/20 bg-slate-50/50 leading-relaxed font-sans"
-              />
-            ) : (
-              <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
-                {objective}
+              <h3 className="text-lg font-bold text-slate-900 font-serif mb-2">
+                Deliberation & Provenance Generation Pending
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed mb-6">
+                The multi-agent clinical board convenes once sufficient symptom dimensions are gathered or the consultation completes. SOAP notes are generated strictly from verified patient testimony and acoustic telemetry—no parallel notes are fabricated from raw transcripts.
+              </p>
+              <div className="w-full bg-slate-50 rounded-xl border border-slate-200 p-3.5 text-left text-xs font-mono space-y-2">
+                <div className="flex justify-between text-slate-600">
+                  <span>Intake Dialogue:</span>
+                  <span className="font-bold text-slate-900">{encounter.transcript.length} turns recorded</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Current Triage:</span>
+                  <span className="font-bold text-slate-900">{encounter.triageTitle}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Provenance Model:</span>
+                  <span className="font-bold text-cyan-800">Strict Patient-Reported</span>
+                </div>
               </div>
-            )}
+            </div>
+          ) : (
+            <>
+              {/* S — SUBJECTIVE */}
+              <section className="space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                  <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-md bg-cyan-700 text-white flex items-center justify-center text-[11px] font-mono font-bold">
+                      S
+                    </span>
+                    <span>SUBJECTIVE</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-400">Patient-Reported Narrative</span>
+                </div>
 
-            {/* ICD-10 Chips */}
-            {encounter.icdCodes && encounter.icdCodes.length > 0 && !isEditing && (
-              <div className="pt-2 flex items-center gap-1.5 flex-wrap">
-                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">
-                  ICD-10 Tags:
-                </span>
-                {encounter.icdCodes.map((code) => (
-                  <span
-                    key={code}
-                    className="text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200 px-2 py-0.5 rounded"
-                  >
-                    {code}
+                {isEditing ? (
+                  <textarea
+                    value={subjective}
+                    onChange={(e) => setSubjective(e.target.value)}
+                    rows={5}
+                    className="w-full text-xs sm:text-sm p-3 rounded-xl border border-cyan-300 focus:outline-hidden focus:ring-2 focus:ring-cyan-500/20 bg-slate-50/50 leading-relaxed font-sans"
+                  />
+                ) : (
+                  <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
+                    {subjective}
+                  </div>
+                )}
+              </section>
+
+              {/* O — OBJECTIVE */}
+              <section className="space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                  <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-md bg-teal-700 text-white flex items-center justify-center text-[11px] font-mono font-bold">
+                      O
+                    </span>
+                    <span>OBJECTIVE</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 font-bold">
+                    Zero Vitals Fabricated
                   </span>
-                ))}
-              </div>
-            )}
-          </section>
+                </div>
 
-          {/* A — ASSESSMENT */}
-          <section className="space-y-2">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-              <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
-                <span className="w-5 h-5 rounded-md bg-amber-600 text-white flex items-center justify-center text-[11px] font-mono font-bold">
-                  A
-                </span>
-                <span>ASSESSMENT</span>
-              </h3>
-              <span className="text-[10px] font-mono text-slate-400">
-                Acuity: ESI {encounter.esiScore ?? (encounter.triageLevel === "emergency" ? 2 : 3)}
-              </span>
-            </div>
+                {isEditing ? (
+                  <textarea
+                    value={objective}
+                    onChange={(e) => setObjective(e.target.value)}
+                    rows={5}
+                    className="w-full text-xs sm:text-sm p-3 rounded-xl border border-teal-300 focus:outline-hidden focus:ring-2 focus:ring-teal-500/20 bg-slate-50/50 leading-relaxed font-sans"
+                  />
+                ) : (
+                  <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
+                    {objective}
+                  </div>
+                )}
 
-            {isEditing ? (
-              <textarea
-                value={assessment}
-                onChange={(e) => setAssessment(e.target.value)}
-                rows={5}
-                className="w-full text-xs sm:text-sm p-3 rounded-xl border border-amber-300 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 bg-slate-50/50 leading-relaxed font-sans"
-              />
-            ) : (
-              <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
-                {assessment}
-              </div>
-            )}
-          </section>
+                {/* ICD-10 Chips */}
+                {encounter.icdCodes && encounter.icdCodes.length > 0 && !isEditing && (
+                  <div className="pt-2 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">
+                      ICD-10 Tags:
+                    </span>
+                    {encounter.icdCodes.map((code) => (
+                      <span
+                        key={code}
+                        className="text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200 px-2 py-0.5 rounded"
+                      >
+                        {code}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
 
-          {/* P — PLAN */}
-          <section className="space-y-2">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-              <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
-                <span className="w-5 h-5 rounded-md bg-emerald-700 text-white flex items-center justify-center text-[11px] font-mono font-bold">
-                  P
-                </span>
-                <span>PLAN</span>
-              </h3>
-              <span className="text-[10px] font-mono text-slate-400">Actionable Directives</span>
-            </div>
+              {/* A — ASSESSMENT */}
+              <section className="space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                  <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-md bg-amber-600 text-white flex items-center justify-center text-[11px] font-mono font-bold">
+                      A
+                    </span>
+                    <span>ASSESSMENT</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Acuity: ESI {encounter.esiScore ?? (encounter.triageLevel === "emergency" ? 2 : 3)}
+                  </span>
+                </div>
 
-            {isEditing ? (
-              <textarea
-                value={plan}
-                onChange={(e) => setPlan(e.target.value)}
-                rows={5}
-                className="w-full text-xs sm:text-sm p-3 rounded-xl border border-emerald-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 bg-slate-50/50 leading-relaxed font-sans"
-              />
-            ) : (
-              <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
-                {plan}
-              </div>
-            )}
-          </section>
+                {isEditing ? (
+                  <textarea
+                    value={assessment}
+                    onChange={(e) => setAssessment(e.target.value)}
+                    rows={5}
+                    className="w-full text-xs sm:text-sm p-3 rounded-xl border border-amber-300 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 bg-slate-50/50 leading-relaxed font-sans"
+                  />
+                ) : (
+                  <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
+                    {assessment}
+                  </div>
+                )}
+              </section>
+
+              {/* P — PLAN */}
+              <section className="space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                  <h3 className="text-xs font-black uppercase font-mono tracking-wider text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-md bg-emerald-700 text-white flex items-center justify-center text-[11px] font-mono font-bold">
+                      P
+                    </span>
+                    <span>PLAN</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-400">Actionable Directives</span>
+                </div>
+
+                {isEditing ? (
+                  <textarea
+                    value={plan}
+                    onChange={(e) => setPlan(e.target.value)}
+                    rows={5}
+                    className="w-full text-xs sm:text-sm p-3 rounded-xl border border-emerald-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 bg-slate-50/50 leading-relaxed font-sans"
+                  />
+                ) : (
+                  <div className="pt-1 whitespace-pre-line font-normal text-slate-700 leading-relaxed">
+                    {plan}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
 
           {/* Collapsible Audio Dialogue Drawer */}
           {encounter.transcript && encounter.transcript.length > 0 && (
@@ -512,10 +542,13 @@ Attending Clinician Signature: _________________________ Date: ____________
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsEditing(!isEditing)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-                isEditing
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+              disabled={!isReportReady}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                !isReportReady
+                  ? "opacity-40 cursor-not-allowed bg-slate-50 text-slate-400 border-slate-200"
+                  : isEditing
+                  ? "bg-slate-900 text-white border-slate-900 cursor-pointer"
+                  : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200 cursor-pointer"
               }`}
             >
               <Edit3 className="w-3.5 h-3.5" />
@@ -524,7 +557,12 @@ Attending Clinician Signature: _________________________ Date: ____________
 
             <button
               onClick={handleCopyNote}
-              className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              disabled={!isReportReady}
+              className={`px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 ${
+                !isReportReady
+                  ? "opacity-40 cursor-not-allowed text-slate-400"
+                  : "text-slate-700 hover:bg-slate-50 cursor-pointer"
+              }`}
             >
               {copiedNote ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{copiedNote ? "Copied" : "Copy SOAP"}</span>
@@ -532,7 +570,12 @@ Attending Clinician Signature: _________________________ Date: ____________
 
             <button
               onClick={handleExportFhir}
-              className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              disabled={!isReportReady}
+              className={`px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 ${
+                !isReportReady
+                  ? "opacity-40 cursor-not-allowed text-slate-400"
+                  : "text-slate-700 hover:bg-slate-50 cursor-pointer"
+              }`}
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export FHIR</span>
@@ -551,13 +594,15 @@ Attending Clinician Signature: _________________________ Date: ____________
               variant="primary"
               size="md"
               onClick={handleApproveAndSave}
-              disabled={isSaving || saveSuccess}
+              disabled={isSaving || saveSuccess || !isReportReady}
               icon={saveSuccess ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Save className="w-4 h-4" />}
             >
               {isSaving
                 ? "Saving..."
                 : saveSuccess
                 ? "Approved & Saved"
+                : !isReportReady
+                ? "Report Pending"
                 : "Approve & Save Encounter"}
             </PremiumButton>
           </div>

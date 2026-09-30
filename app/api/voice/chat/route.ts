@@ -8,6 +8,7 @@ import { conversationManager } from "@/lib/triage/conversation-manager";
 import { clinicalKnowledgeRetriever } from "@/lib/clinical-knowledge/retriever";
 import { generateDoctorTurnResponse } from "@/lib/ai/clinical-llm";
 import { hospitalRagService } from "@/lib/care-network/hospital-rag";
+import { buildProvenanceEvidenceFromClinicalState } from "@/lib/agents/provenance";
 
 export async function POST(request: Request) {
   try {
@@ -403,8 +404,18 @@ export async function POST(request: Request) {
     }
 
     // 3. Assemble Normalized Patient Case for Full Board Deliberation (Convene Board or Emergency Preemption)
+    const patientId = `PT-${Date.now().toString().slice(-4)}`;
+    const provenanceEvidence = buildProvenanceEvidenceFromClinicalState({
+      state: turnResult.state,
+      speechFeatures,
+      vitals: {},
+      transcript: turnResult.state.cumulativeTranscript,
+      patientName,
+      patientId,
+    });
+
     const patientCase: PatientCase = {
-      patient_id: `PT-${Date.now().toString().slice(-4)}`,
+      patient_id: patientId,
       patient_name: patientName,
       transcript: turnResult.state.cumulativeTranscript,
       conversation_history: conversationHistory,
@@ -417,7 +428,7 @@ export async function POST(request: Request) {
       speech_features: speechFeatures,
       pre_safety_flags: turnResult.preArbiterResult.pre_safety_flags,
       immediate_danger_detected: turnResult.preArbiterResult.immediate_danger,
-      provenance_evidence: [],
+      provenance_evidence: provenanceEvidence,
       is_interruption: Boolean(isInterruption),
       interrupted_agent: interruptedAgent || undefined,
       case_version: turnResult.state.caseVersion,

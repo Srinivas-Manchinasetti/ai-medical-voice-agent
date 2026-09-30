@@ -46,7 +46,7 @@ export function evaluatePostArbiter(
   // Evaluate deterministic clinical rule set
   const arbiterResult: ArbiterResult = evaluateSafetyArbiter({
     rawText: patientCase.transcript,
-    patientAge: patientCase.demographics.age,
+    patientAge: patientCase.demographics?.age,
     llmSuggestedLevel: consensus.recommended_disposition === "emergency_evaluation" ? "emergency" :
                        consensus.recommended_disposition === "urgent_outpatient" ? "priority" : "routine"
   });

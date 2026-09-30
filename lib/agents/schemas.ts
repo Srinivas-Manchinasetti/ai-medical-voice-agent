@@ -42,7 +42,9 @@ export const EvidenceProvenanceSourceSchema = z.enum([
   "device_measured",
   "tool_derived",
   "agent_inferred",
-  "deterministic_pre_arbiter"
+  "ai_inferred",
+  "deterministic_pre_arbiter",
+  "not_assessed",
 ]);
 export type EvidenceProvenanceSource = z.infer<typeof EvidenceProvenanceSourceSchema>;
 
@@ -50,17 +52,23 @@ export const ConfidenceSemanticsSchema = z.enum([
   "deterministic_flag",
   "tool_calibrated",
   "uncalibrated_model_score",
-  "patient_statement"
+  "patient_statement",
+  "unassessed"
 ]);
 export type ConfidenceSemantics = z.infer<typeof ConfidenceSemanticsSchema>;
 
 export const EvidenceItemSchema = z.object({
   id: z.string(),
+  domain: z.string().optional(),
+  label: z.string().optional(),
   type: z.string(),
   description: z.string(),
+  value: z.any().optional(),
+  status: z.enum(["present", "absent", "denied", "not_assessed", "inferred", "unknown"]).default("present").optional(),
   source: EvidenceProvenanceSourceSchema,
   confidence: z.number().nullable().default(null),
   confidence_semantics: ConfidenceSemanticsSchema.default("patient_statement"),
+  turnId: z.number().optional(),
   timestamp: z.string(),
   raw_payload: z.record(z.string(), z.any()).optional()
 });

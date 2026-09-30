@@ -9,7 +9,7 @@ async function main() {
 
   // --- PART 1: Evidence Extractor Verification ---
   console.log("--- PART 1: Evidence Extractor ---");
-  const v2 = createInitialInterviewStateV2("test-patient-mc");
+  const v2 = createInitialInterviewStateV2();
   const ext1 = evidenceExtractor.extract("I have had a bad sore throat for two days.", v2);
   console.log("Turn 1 Extracted Facts:", ext1.newFacts.map(f => `${f.name}: ${f.normalizedText || f.value}`));
 

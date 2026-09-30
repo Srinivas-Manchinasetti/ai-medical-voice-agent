@@ -65,6 +65,13 @@ export class Blackboard {
       timestamp: now,
     });
 
+    // 1b. Ingest structured provenance evidence if present
+    if (patientCase.provenance_evidence && patientCase.provenance_evidence.length > 0) {
+      patientCase.provenance_evidence.forEach(item => {
+        this.addEvidence(item);
+      });
+    }
+
     // 2. Extracted symptoms
     patientCase.detected_symptoms.forEach((sym, idx) => {
       this.addEvidence({
@@ -79,50 +86,63 @@ export class Blackboard {
     });
 
     // 3. Vitals (device measured)
-    Object.entries(patientCase.vitals).forEach(([key, val]) => {
-      this.addEvidence({
-        id: `ev-vital-${key}`,
-        type: "vital_sign",
-        description: `${key}: ${val}`,
-        source: "device_measured",
-        confidence: 0.99,
-        confidence_semantics: "tool_calibrated",
-        timestamp: now,
-        raw_payload: { [key]: val }
+    if (patientCase.vitals) {
+      Object.entries(patientCase.vitals).forEach(([key, val]) => {
+        this.addEvidence({
+          id: `ev-vital-${key}`,
+          domain: key,
+          label: key,
+          type: "vital_sign",
+          description: `${key}: ${val}`,
+          status: "present",
+          source: "device_measured",
+          confidence: 0.99,
+          confidence_semantics: "tool_calibrated",
+          timestamp: now,
+          raw_payload: { [key]: val }
+        });
       });
-    });
+    }
 
     // 4. Acoustic paralinguistic observations
-    if (patientCase.speech_features) {
+    if (patientCase.speech_features && patientCase.speech_features.observations) {
       patientCase.speech_features.observations.forEach((obs, idx) => {
         this.addEvidence({
           id: `ev-acoustic-${idx}`,
+          domain: "speech_acoustics",
+          label: "Speech Telemetry",
           type: "acoustic_observation",
           description: obs,
+          status: "present",
           source: "device_measured",
-          confidence: patientCase.speech_features.clinical_relevance.confidence,
+          confidence: patientCase.speech_features?.clinical_relevance?.confidence ?? 0.85,
           confidence_semantics: "tool_calibrated",
           timestamp: now,
           raw_payload: {
-            speech_rate_wpm: patientCase.speech_features.speech_rate_wpm,
-            speech_pause_ratio: patientCase.speech_features.speech_pause_ratio
+            speech_rate_wpm: patientCase.speech_features?.speech_rate_wpm ?? 135,
+            speech_pause_ratio: patientCase.speech_features?.speech_pause_ratio ?? 0.2
           }
         });
       });
     }
 
     // 5. Deterministic pre-arbiter safety flags
-    patientCase.pre_safety_flags.forEach((flag, idx) => {
-      this.addEvidence({
-        id: `ev-pre-flag-${idx}`,
-        type: "deterministic_flag",
-        description: flag,
-        source: "deterministic_pre_arbiter",
-        confidence: 1.0,
-        confidence_semantics: "deterministic_flag",
-        timestamp: now,
+    if (patientCase.pre_safety_flags) {
+      patientCase.pre_safety_flags.forEach((flag, idx) => {
+        this.addEvidence({
+          id: `ev-pre-flag-${idx}`,
+          domain: "pre_safety_flag",
+          label: "Pre-Safety Flag",
+          type: "deterministic_flag",
+          description: flag,
+          status: "present",
+          source: "deterministic_pre_arbiter",
+          confidence: 1.0,
+          confidence_semantics: "deterministic_flag",
+          timestamp: now,
+        });
       });
-    });
+    }
 
     // 6. Handle patient interruption / barge-in evidence if present
     if (patientCase.is_interruption) {

@@ -93,5 +93,26 @@ export const consultationsTable = pgTable("consultations", {
   createdAt: timestamp("created_at").defaultNow()
 });
 
+/**
+ * Tamper-Evident Cryptographic SHA-256 Audit Chain Ledger
+ */
+export const auditEventsTable = pgTable("audit_events", {
+  index: integer("index").notNull().unique(),
+  id: varchar("id", { length: 128 }).primaryKey(),
+  timestamp: varchar("timestamp", { length: 64 }).notNull(),
+  actorId: varchar("actor_id", { length: 128 }).notNull(),
+  actorRole: varchar("actor_role", { length: 64 }).notNull(),
+  action: varchar("action", { length: 128 }).notNull(),
+  resourceType: varchar("resource_type", { length: 64 }).notNull(),
+  resourceId: varchar("resource_id", { length: 255 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  clientIp: varchar("client_ip", { length: 64 }),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
+  previousHash: varchar("previous_hash", { length: 64 }).notNull(),
+  eventHash: varchar("event_hash", { length: 64 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow()
+});
+
+
 
 

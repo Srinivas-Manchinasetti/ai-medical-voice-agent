@@ -36,6 +36,7 @@ const NAV_LINKS: NavLinkItem[] = [
   { href: "/consult", label: "Consult", alt: "DELIBERATION" },
   { href: "/dashboard", label: "SOAP", alt: "CHARTS" },
   { href: "/care", label: "Care", alt: "HOSPITALS" },
+  { href: "/admin", label: "Admin", alt: "GOVERNANCE" },
   { href: "/privacy", label: "Privacy", alt: "SECURITY" },
 ];
 

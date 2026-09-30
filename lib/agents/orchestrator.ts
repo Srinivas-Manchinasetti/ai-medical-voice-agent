@@ -106,9 +106,9 @@ export class TriageOrchestrator {
 
     // 4. Pediatric Triggers
     const isPediatric = hasPediatricFlag ||
-                        patientCase.demographics.age_group === "infant" ||
-                        patientCase.demographics.age_group === "pediatric" ||
-                        (patientCase.demographics.age !== undefined && patientCase.demographics.age < 16) ||
+                        patientCase.demographics?.age_group === "infant" ||
+                        patientCase.demographics?.age_group === "pediatric" ||
+                        (patientCase.demographics?.age !== undefined && patientCase.demographics.age < 16) ||
                         ["baby", "child", "infant", "toddler", "weeks old", "months old"].some(k => text.includes(k));
     if (isPediatric) {
       requests.push({
@@ -178,7 +178,7 @@ export class TriageOrchestrator {
       concerns: concerns,
       evidence: [
         patientCase.transcript,
-        `Vitals status: ${Object.keys(patientCase.vitals).length ? JSON.stringify(patientCase.vitals) : "Stable / Non-acute"}`
+        `Vitals status: ${patientCase.vitals && Object.keys(patientCase.vitals).length ? JSON.stringify(patientCase.vitals) : "Not assessed / Hardware telemetry absent"}`
       ],
       evidence_for: [patientCase.transcript],
       evidence_against: [],

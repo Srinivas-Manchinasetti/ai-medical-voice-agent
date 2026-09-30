@@ -21,10 +21,12 @@
     "test:planner": "tsx scripts/test-response-planner-scenarios.ts",
     "test:dispatch": "tsx tests/emergency-eval/dispatch.test.ts",
     "test:security": "tsx tests/security-eval/cors-rbac-audit.test.ts",
+    "test:durable-audit": "tsx tests/security-eval/durable-audit.test.ts",
     "test:engine": "tsx scripts/test-clinical-conversation-engine.ts",
     "test:adversarial": "tsx scripts/test-clinical-adversarial-scenarios.ts",
     "test:multiclause": "tsx scripts/test-multi-clause-clinical-state.ts",
-    "test:all": "npm run test:security && npm run test:interpreter && npm run test:planner && npm run test:engine && npm run test:adversarial && npm run test:multiclause && npm run test:rag && npm run test:explanatory && npm run test:manager && npm run test:board && npm run test:clinical && npm run test:interview && npm run test:bargein && npm run test:discussion && npm run test:acceptance && npm run test:fhir && npm run test:dispatch"
+    "test:provenance": "tsx scripts/test-provenance-soap.ts",
+    "test:all": "npm run test:security && npm run test:durable-audit && npm run test:interpreter && npm run test:planner && npm run test:engine && npm run test:adversarial && npm run test:multiclause && npm run test:provenance && npm run test:rag && npm run test:explanatory && npm run test:manager && npm run test:board && npm run test:clinical && npm run test:interview && npm run test:bargein && npm run test:discussion && npm run test:acceptance && npm run test:fhir && npm run test:dispatch"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

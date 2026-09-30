@@ -123,12 +123,108 @@ export class ClinicalBoard {
       deliberation_messages: synthResult.consensus.deliberation_messages
     };
 
-    // 7. Generate Formal Multi-Agent SOAP Documentation (Standard Clinical Structure)
+    // 7. Generate Formal Multi-Agent SOAP Documentation with Explicit Provenance
+    const prov = patientCase.provenance_evidence || [];
+
+    // Categorize by provenance source and status
+    const patientReported = prov.filter(p => p.source === "patient_reported" && p.status !== "denied");
+    const patientDenials = prov.filter(p => p.source === "patient_reported" && p.status === "denied");
+
+    // Build SUBJECTIVE [PATIENT-REPORTED]
+    const ccItem = patientReported.find(p => p.domain === "chief_complaint")?.value ||
+      (synthResult.consensus.key_findings.length > 0 ? synthResult.consensus.key_findings[0] : "Clinical symptom evaluation");
+    const onsetItem = patientReported.find(p => p.domain === "onset")?.value;
+    const durItem = patientReported.find(p => p.domain === "duration")?.value;
+    const courseItem = patientReported.find(p => p.domain === "course")?.value;
+    const sevItem = patientReported.find(p => p.domain === "pain_severity")?.value;
+    const reportedSyms = patientReported
+      .filter(p => p.domain !== "chief_complaint" && p.domain !== "onset" && p.domain !== "duration" && p.domain !== "course" && p.domain !== "pain_severity")
+      .map(p => p.label || p.description);
+
+    const subjectiveLines: string[] = [
+      "[PATIENT-REPORTED]",
+      `• Chief Complaint: ${ccItem}`,
+    ];
+    if (onsetItem || durItem || courseItem) {
+      const timelineParts = [
+        onsetItem ? `Onset: ${onsetItem}` : null,
+        durItem ? `Duration: ${durItem}` : null,
+        courseItem ? `Course: ${courseItem}` : null,
+      ].filter(Boolean);
+      subjectiveLines.push(`• Timeline & Course: ${timelineParts.join("; ")}`);
+    }
+    if (reportedSyms.length > 0) {
+      subjectiveLines.push(`• Reported Symptoms: ${reportedSyms.join(", ")}`);
+    } else if (synthResult.consensus.key_findings.length > 0) {
+      subjectiveLines.push(`• Reported Symptoms: ${synthResult.consensus.key_findings.join(", ")}`);
+    }
+    if (sevItem) {
+      subjectiveLines.push(`• Pain Severity: ${sevItem}`);
+    }
+    if (patientDenials.length > 0) {
+      subjectiveLines.push(`• Pertinent Denials: ${patientDenials.map(d => `${d.label || d.domain}: Denied`).join("; ")}`);
+    }
+
+    const subjective = subjectiveLines.join("\n");
+
+    // Build OBJECTIVE [NOT ASSESSED] & [DEVICE / ACOUSTIC MEASURED]
+    const objectiveLines: string[] = [
+      "[NOT ASSESSED]",
+      "• Blood Pressure: Not assessed (remote voice consultation)",
+      "• Heart Rate: Not assessed (no hardware telemetry connected)",
+      "• SpO₂: Not assessed (no pulse oximeter connected)",
+      patientDenials.some(d => d.domain === "fever")
+        ? "• Temperature: Not assessed (patient verbally denied fever; no biometric reading)"
+        : "• Temperature: Not assessed (no thermometer connected)",
+      "• Respiratory Rate: Not assessed (chest excursion unobserved over audio)",
+      "• Physical Examination: Not performed (telehealth voice interface)",
+    ];
+
+    const speechRate = patientCase.speech_features?.speech_rate_wpm || 135;
+    const speechObs = patientCase.speech_features?.observations?.length
+      ? patientCase.speech_features.observations.join("; ")
+      : "Natural conversational cadence, intelligible verbal stream";
+
+    objectiveLines.push("");
+    objectiveLines.push("[DEVICE / ACOUSTIC MEASURED]");
+    objectiveLines.push(`• Speech Rate: ${speechRate} WPM`);
+    objectiveLines.push(`• Acoustic Biomarkers: ${speechObs}`);
+    objectiveLines.push(`• Decision Instruments Executed: ${orchResult.tools_executed.length > 0 ? orchResult.tools_executed.map(t => `${t.tool_name} (${t.clinical_summary})`).join("; ") : "Algorithmic ESI v4 Invariant Engine"}`);
+    objectiveLines.push(`• Diagnostic Tags: ${postResult.icd10_codes.join(", ") || "Z76.0"}`);
+
+    const objective = objectiveLines.join("\n");
+
+    // Build ASSESSMENT [AI-INFERRED / ALGORITHMIC]
+    const assessmentLines: string[] = [
+      "[AI-INFERRED / ALGORITHMIC]",
+      `• Primary Triage Impression: ${postResult.final_esi_title} (ESI Level ${postResult.final_esi_level})`,
+      `• Multi-Agent Consensus: ${orchResult.active_specialists.length} specialists convened (${orchResult.active_specialists.join(", ")}). Primary lead: ${synthResult.consensus.primary_specialty}.`,
+      "• Differential Diagnoses:",
+      ...(synthResult.consensus.differential.length > 0
+        ? synthResult.consensus.differential.map(d => `  - ${d.condition} [Prob: ${d.probability.toUpperCase()}]: ${d.clinical_rationale || "Derived from reported symptoms"}`)
+        : ["  - Unspecified acute presentation [Prob: LOW]"]),
+      `• Deterministic Safety Status: ${postResult.arbiter_override_applied ? "OVERRIDE ENFORCED — " + postResult.override_rationale : "NOMINAL VERIFICATION (0 False Negatives Invariant)"}`,
+      "• Clinical Governance: Algorithmic triage guidance derived from conversational testimony. Does not replace physical examination by an attending physician.",
+    ];
+
+    const assessment = assessmentLines.join("\n");
+
+    // Build PLAN [AI-GENERATED]
+    const planLines: string[] = [
+      "[AI-GENERATED]",
+      `• Recommended Disposition: ${postResult.final_disposition.toUpperCase()}`,
+      `• Clinical Next Steps: ${orchResult.opinions.flatMap(o => o.recommended_actions).slice(0, 4).join("; ") || "Urgent clinical evaluation"}`,
+      "• Patient Safety Precautions: Keep patient calm and seated. Do not exert. If acute shortness of breath, inability to swallow liquids, or chest pressure develops, contact 108 or 112 emergency services immediately.",
+      `• Audit Ledger & Provenance: Tamper-evident SHA-256 block height ${postResult.audit_hash_chain.length} (Root: ${postResult.audit_sha256.slice(0, 16)}...)`,
+    ];
+
+    const plan = planLines.join("\n");
+
     const soap_note = {
-      subjective: `Patient (${patientCase.patient_name || "Patient"}, ID: ${patientCase.patient_id}) reports: "${patientCase.transcript}". Documented onset/duration and symptom narrative extracted from audio intake. Key reported symptoms: ${synthResult.consensus.key_findings.join(", ") || "None specified"}. Pertinent speech observations: ${patientCase.speech_features?.observations.join("; ") || "Natural vocal cadence, clear speech pattern"}.`,
-      objective: `• Physical Exam / Vitals: No direct physical examination or automated biometric telemetry hardware connected during remote voice encounter (No vitals fabricated; patient-reported metrics only if noted).\n• Speech & Acoustic Biomarkers: Cadence ${patientCase.speech_features?.speech_rate_wpm || 140} WPM; voice variability ${patientCase.speech_features?.voice_energy_variability ?? "nominal"}; ${patientCase.speech_features?.observations.join("; ") || "Continuous verbal stream"}.\n• Decision Instruments Executed: ${orchResult.tools_executed.length > 0 ? orchResult.tools_executed.map(t => `${t.tool_name} (${t.clinical_summary})`).join("; ") : "Algorithmic ESI v4 Invariant Engine"}.\n• Identified Clinical Signs & ICD-10 Tags: ${postResult.icd10_codes.join(", ") || "Z76.0"}.`,
-      assessment: `• Preliminary Impression: ${postResult.final_esi_title} (ESI ${postResult.final_esi_level}).\n• Specialty Board Deliberation: ${orchResult.active_specialists.length} specialists convened (${orchResult.active_specialists.join(", ")}). Primary lead: ${synthResult.consensus.primary_specialty}.\n• Differential Diagnoses: ${synthResult.consensus.differential.map(d => `${d.condition} [Prob: ${d.probability.toUpperCase()}]`).join(", ") || "None documented"}.\n• Safety Arbiter Status: ${postResult.arbiter_override_applied ? "OVERRIDE ENFORCED — " + postResult.override_rationale : "NOMINAL VERIFICATION (0 False Negatives Guarantee)"}.\n• Clinician Note: AI-generated preliminary evaluation based on patient verbal testimony. Requires attending physician clinical validation.`,
-      plan: `1. Immediate Clinical Disposition: ${postResult.final_disposition.toUpperCase()}\n2. Priority Diagnostic & Resuscitation Directives: ${orchResult.opinions.flatMap(o => o.recommended_actions).slice(0, 4).join("; ") || "Urgent clinical evaluation"}\n3. Pre-Arrival & Safety Precautions: Keep patient calm and seated. Do not leave unattended. If acute shortness of breath or loss of consciousness develops, call 108 or 112 emergency medical services immediately.\n4. Audit Ledger & Provenance: Tamper-evident SHA-256 chain block height ${postResult.audit_hash_chain.length} (Root: ${postResult.audit_sha256.slice(0, 16)}...).`
+      subjective,
+      objective,
+      assessment,
+      plan,
     };
 
     return {

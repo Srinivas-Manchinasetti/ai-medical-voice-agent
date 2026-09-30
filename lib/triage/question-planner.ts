@@ -127,6 +127,25 @@ export class QuestionPlanner {
       };
     }
 
+    // 3.1 SAFETY PIVOT: Differentiate Painful Swallowing (Odynophagia) from True Dysphagia / Mechanical Obstruction
+    const hasPainfulSwallowing = state.establishedFacts.some(f => f.name === "painful_swallowing" && f.status === "present") ||
+      extracted.newFacts.some(f => f.name === "painful_swallowing" && f.status === "present");
+    const swallowingDifficultyAssessed = state.establishedFacts.some(f => f.name === "swallowing_difficulty") ||
+      isBlocked("swallowing_difficulty") ||
+      state.redFlags.swallowing?.assessed;
+
+    if (hasPainfulSwallowing && !swallowingDifficultyAssessed) {
+      return {
+        target: "swallowing_difficulty",
+        label: "Differentiate odynophagia vs true dysphagia",
+        clinicalRationale: "Patient reported painful swallowing (odynophagia). Critical safety screen: differentiate mucosal odynophagia from true mechanical dysphagia, inability to swallow liquids, or pooled secretions.",
+        suggestedPhrasing: "When you say it hurts to swallow, are you still able to swallow liquids and saliva normally?",
+        isEmergencyIntervention: false,
+        isPivotToNewFinding: true,
+        priority: "high",
+      };
+    }
+
     // 4. CHIEF COMPLAINT: If not yet established
     if (!state.chiefComplaint && !isBlocked("chief_complaint")) {
       return {
@@ -142,7 +161,7 @@ export class QuestionPlanner {
 
     // 5. DOMAIN-SPECIFIC NEXT-BEST QUESTION SELECTION
     const ccName = state.chiefComplaint?.name || "";
-    const isThroatPresentation = ccName.includes("throat") || state.establishedFacts.some(f => f.name.includes("throat"));
+    const isThroatPresentation = ccName.includes("throat") || ccName.includes("swallow") || state.establishedFacts.some(f => f.name.includes("throat") || f.name.includes("swallow"));
     const isChestPresentation = ccName.includes("chest") || state.establishedFacts.some(f => f.name.includes("chest"));
     const isNeuroPresentation = ccName.includes("neuro") || state.establishedFacts.some(f => f.name.includes("droop") || f.name.includes("weakness"));
 
