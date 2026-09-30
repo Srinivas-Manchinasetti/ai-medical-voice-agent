@@ -853,7 +853,8 @@ export default function ConsultPage() {
         "dr-marcus-vance": /David|Guy|Alex|Mark|Male/i,
         "dr-elena-rostova": /Hazel|Victoria|Emma|Libby|Female/i,
         "dr-arthur-pendelton": /George|Oliver|Daniel|Male/i,
-        "dr-priya-patel": /Heera|Veena|Kavya|India|Female/i,
+        "dr-anna-bennett": /Nicole|Samantha|Victoria|Zira|Jenny|Female/i,
+        "dr-priya-patel": /Nicole|Samantha|Victoria|Zira|Jenny|Female/i,
       };
 
       const pattern = DOCTOR_FALLBACK_PATTERNS[targetDoctor.id];

@@ -9,7 +9,8 @@ export const DOCTOR_KOKORO_VOICES: Record<string, string> = {
   "dr-marcus-vance": "am_michael", // Authoritative, focused American male cardiologist
   "dr-elena-rostova": "bf_emma", // Gentle, compassionate British female pediatrician
   "dr-arthur-pendelton": "bm_george", // Methodical, analytical British male neurologist
-  "dr-priya-patel": "af_nicole", // Crisp, friendly American female dermatologist
+  "dr-anna-bennett": "af_nicole", // Warm, compassionate American female dermatologist
+  "dr-priya-patel": "af_nicole", // Backward compatibility alias
 };
 
 export function resolveAuthoritativeVoice(doctorId?: string): string {
@@ -25,6 +26,7 @@ export function resolveAuthoritativeSpeed(doctorId?: string): number {
     "dr-marcus-vance": 0.92,
     "dr-elena-rostova": 0.97,
     "dr-arthur-pendelton": 0.90,
+    "dr-anna-bennett": 0.98,
     "dr-priya-patel": 0.98,
   };
   if (doctorId && SPEED_MAP[doctorId]) {

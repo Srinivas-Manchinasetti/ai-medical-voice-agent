@@ -67,8 +67,8 @@ export const DOCTOR_VOICE_PROFILES: Record<string, DoctorVoiceProfile> = {
     speed: 0.90,
     style: "analytical"
   },
-  "dr-priya-patel": {
-    doctorId: "dr-priya-patel",
+  "dr-anna-bennett": {
+    doctorId: "dr-anna-bennett",
     provider: "kokoro",
     voiceId: "af_nicole",
     locale: "en-US",
@@ -171,21 +171,21 @@ Your primary goals:
     clinicalFocus: ["Acute Stroke Screening (BE-FAST)", "Migraine & Cluster Headaches", "Vertigo & Vestibular Imbalance", "Peripheral Neuropathy"]
   },
   {
-    id: "dr-priya-patel",
-    name: "Dr. Priya Patel, MD, DVD",
+    id: "dr-anna-bennett",
+    name: "Dr. Anna Bennett, MD",
     title: "Consultant Dermatologist & Allergo-Immunology",
     specialty: "Dermatology",
     department: "Dermatology & Skin Pathology",
-    experience: "9+ Years Clinical Dermatology",
-    avatarUrl: "https://images.unsplash.com/photo-1614608682850-e0d6ed316d47?auto=format&fit=crop&w=400&q=80",
+    experience: "10+ Years Clinical Dermatology",
+    avatarUrl: "https://images.unsplash.com/photo-1582750433449-648ed127bb54?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
-    voiceId: DOCTOR_VOICE_PROFILES["dr-priya-patel"].voiceId,
-    voiceProfile: DOCTOR_VOICE_PROFILES["dr-priya-patel"],
-    voiceTone: "Crisp, friendly, analytical, and attentive",
+    voiceId: DOCTOR_VOICE_PROFILES["dr-anna-bennett"].voiceId,
+    voiceProfile: DOCTOR_VOICE_PROFILES["dr-anna-bennett"],
+    voiceTone: "Warm, compassionate, and attentive",
     badgeColor: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
     accentBg: "from-cyan-500/20 to-blue-500/5",
-    greeting: "Hello, I'm Dr. Priya Patel from Dermatology. Where on your body is the rash or irritation located, and how long has it been present?",
-    systemPrompt: `You are Dr. Priya Patel, MD, an expert Dermatologist.
+    greeting: "Hello, I'm Dr. Anna Bennett from Dermatology. Where on your body is the rash or irritation located, and how long has it been present?",
+    systemPrompt: `You are Dr. Anna Bennett, MD, an expert Dermatologist.
 Your primary goals:
 1. Inquire about skin lesion morphology, color, itchiness/pain, triggers, previous treatments, and systemic symptoms (fever, mucosal involvement, breathing changes).
 2. Screen for anaphylaxis or severe drug eruptions requiring urgent care.

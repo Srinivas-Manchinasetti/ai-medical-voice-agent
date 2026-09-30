@@ -157,7 +157,7 @@ async function runSecurityAndAuditTestSuite() {
       "dr-marcus-vance": { voiceId: "am_michael", gender: "male", speed: 0.92, provider: "kokoro" },
       "dr-elena-rostova": { voiceId: "bf_emma", gender: "female", speed: 0.97, provider: "kokoro" },
       "dr-arthur-pendelton": { voiceId: "bm_george", gender: "male", speed: 0.90, provider: "kokoro" },
-      "dr-priya-patel": { voiceId: "af_nicole", gender: "female", speed: 0.98, provider: "kokoro" },
+      "dr-anna-bennett": { voiceId: "af_nicole", gender: "female", speed: 0.98, provider: "kokoro" },
     };
 
     assert(DOCTOR_PROFILES.length === 5, "5 distinct clinical personas defined");
@@ -184,13 +184,13 @@ async function runSecurityAndAuditTestSuite() {
     // Anti-Spoofing & Client Override Rejection Test
     console.log("\n[Test Suite 5b] Voice Anti-Spoofing & Client Override Rejection");
     {
-      // Attempt: Client requests Dr. Priya Patel (female) with Dr. Marcus's voice (male)
-      const spoofedAttemptDoctorId = "dr-priya-patel";
+      // Attempt: Client requests Dr. Anna Bennett (female) with Dr. Marcus's voice (male)
+      const spoofedAttemptDoctorId = "dr-anna-bennett";
       const spoofedRequestedVoice = "am_michael";
       const profile = DOCTOR_VOICE_PROFILES[spoofedAttemptDoctorId];
       const enforcedVoice = profile.voiceId;
 
-      assert(enforcedVoice === "af_nicole", "Server strictly enforces af_nicole for Dr. Priya Patel, rejecting spoofed am_michael");
+      assert(enforcedVoice === "af_nicole", "Server strictly enforces af_nicole for Dr. Anna Bennett, rejecting spoofed am_michael");
       assert(enforcedVoice !== spoofedRequestedVoice, "Server-authoritative voice does NOT honor unauthorized client voice override");
 
       // Attempt: Unknown / manipulated doctor ID
