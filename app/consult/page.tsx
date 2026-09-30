@@ -407,7 +407,7 @@ export default function ConsultPage() {
   const [boardData, setBoardData] = useState<BoardData | null>(null);
   const [interviewState, setInterviewState] = useState<any>(null);
   
-  const [activeRightTab, setActiveRightTab] = useState<"board" | "context" | "safety" | "care">("board");
+  const [activeRightTab, setActiveRightTab] = useState<"board" | "context" | "safety" | "care">("context");
   const [nearbyHospitals, setNearbyHospitals] = useState<any[]>([]);
   const [userLocation, setUserLocation] = useState<{ latitude?: number; longitude?: number; city?: string } | null>(null);
   const [locationPermission, setLocationPermission] = useState<"granted" | "denied" | "unknown">("unknown");
@@ -697,6 +697,20 @@ export default function ConsultPage() {
     }
   }, []);
 
+  // Cancels recording without transcribing or sending — pure discard-and-return-to-IDLE
+  const cancelVoiceRecording = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    audioChunksRef.current = [];
+    transcriptTextRef.current = "";
+    accumulatedTranscriptRef.current = "";
+    setTranscriptText("");
+    stopSpeechRecognitionListening();
+    setAudioState("IDLE");
+  }, [stopSpeechRecognitionListening]);
+
   // Commits transcribed speech to the clinical pipeline (Whisper ASR canonical, SpeechRecognition interim fallback)
   const commitSpokenText = useCallback(async (forceText?: string) => {
     if (silenceTimerRef.current) {
@@ -725,8 +739,14 @@ export default function ConsultPage() {
 
     let finalTranscript = browserText;
 
-    // Primary Canonical Path: Transcribe recorded utterance using Local Whisper ASR
-    if (audioBlob && audioBlob.size > 2000) {
+    // If browser SpeechRecognition already captured text, use it immediately — no
+    // redundant Whisper round-trip. The user already saw and verified this transcript
+    // in the VoicePill bar, so re-transcribing adds latency for no accuracy gain.
+    if (finalTranscript.length > 0) {
+      console.log("🎤 Immediate browser transcript (Whisper skipped):", finalTranscript);
+    } else if (audioBlob && audioBlob.size > 2000) {
+      // Fallback: browser SpeechRecognition returned nothing (unsupported browser,
+      // empty interim, etc.) — send audio to Local Whisper ASR for transcription.
       try {
         setAudioState("PROCESSING_PATIENT");
         const formData = new FormData();
@@ -743,7 +763,7 @@ export default function ConsultPage() {
           const sttData = await sttRes.json();
           const whisperText = (sttData.transcript || "").trim();
           if (whisperText.length > 0) {
-            console.log("🎯 Canonical Local Whisper ASR Transcript:", whisperText);
+            console.log("🎯 Whisper ASR fallback transcript:", whisperText);
             finalTranscript = whisperText;
           }
         } else {
@@ -751,7 +771,7 @@ export default function ConsultPage() {
           console.warn("Whisper STT endpoint notice:", errJson.error || errJson.detail);
         }
       } catch (asrErr) {
-        console.warn("Whisper STT network notice, using browser transcript:", asrErr);
+        console.warn("Whisper STT fallback network error:", asrErr);
       }
     }
 
@@ -1457,7 +1477,7 @@ export default function ConsultPage() {
           if (isHistoryGathering) {
             setActiveRightTab("context");
           } else {
-            setActiveRightTab("board");
+            setActiveRightTab("context");
           }
         }
 
@@ -1562,7 +1582,7 @@ export default function ConsultPage() {
                   Ready when you are.
                 </h1>
                 <p className="text-base sm:text-lg text-slate-600 max-w-2xl font-normal leading-relaxed">
-                  Choose who you&apos;d like to consult with to begin your clinical intake. Specialist agents listen concurrently in the background, evaluating acoustic biomarkers against deterministic ESI v4 safety protocols.
+                  Choose who you&apos;d like to consult with. Your symptoms will be carefully reviewed, with safety checks running continuously in the background.
                 </p>
               </div>
 
@@ -1729,8 +1749,8 @@ export default function ConsultPage() {
                   <div className="text-[11px] text-slate-500 mt-0.5">Automated EHR Bundles</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
-                  <div className="text-xs font-bold text-slate-900 font-mono">DETERMINISTIC ESI</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Algorithmic safety checks</div>
+                  <div className="text-xs font-bold text-slate-900 font-mono">SAFETY CHECKS</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Continuous safety monitoring</div>
                 </div>
               </div>
             </motion.div>
@@ -1860,16 +1880,7 @@ export default function ConsultPage() {
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.6)]" />
               <span className="text-xs font-bold uppercase tracking-widest text-slate-700 font-mono">
-                Clinical Workstation · Multi-Specialist Deliberation
-              </span>
-            </div>
-            <div className="hidden sm:flex items-center gap-2.5 text-xs font-mono text-slate-500">
-              <span className="px-2.5 py-0.5 rounded-full bg-white/80 border border-slate-200/80 font-bold text-slate-700">
-                16kHz PCM
-              </span>
-              <span>·</span>
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 font-bold text-emerald-800">
-                SAFETY ARBITER ACTIVE
+                Clinical Consultation
               </span>
             </div>
           </div>
@@ -1890,7 +1901,7 @@ export default function ConsultPage() {
               </div>
               <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
                 <span className={audioState === "DOCTOR_SPEAKING" ? "text-emerald-700 font-bold animate-pulse" : audioState === "PATIENT_LISTENING" ? "text-cyan-700 font-bold" : "text-slate-500"}>
-                  {audioState === "DOCTOR_SPEAKING" ? `● ${activeSpeaker.name.split(" ")[1] || "Doctor"} Speaking (${activeSpeaker.voiceId})` : audioState === "PATIENT_LISTENING" ? "● Listening to Voice" : "● Acoustic Standby"}
+                  {audioState === "DOCTOR_SPEAKING" ? `● ${activeSpeaker.name.split(",")[0].split(" ").pop() || "Doctor"} Speaking` : audioState === "PATIENT_LISTENING" ? "● Listening..." : "● Ready"}
                 </span>
               </div>
             </div>
@@ -2010,19 +2021,17 @@ export default function ConsultPage() {
 
             </div>
 
-            {/* LIVE VOICE PERSONA IDENTITY HUD */}
+            {/* SPEAKING INDICATOR */}
             <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono shadow-xs">
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${audioState === "DOCTOR_SPEAKING" ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-slate-500"}`} />
-                <span className="font-bold text-white tracking-wide">{activeSpeaker.name.toUpperCase()}</span>
+                <span className="font-bold text-white tracking-wide">{activeSpeaker.name.split(",")[0].toUpperCase()}</span>
                 <span className="text-slate-600">•</span>
-                <span className="text-cyan-300 font-semibold">Voice: {activeSpeaker.voiceId}</span>
-                <span className="text-slate-600">•</span>
-                <span className="text-emerald-400 font-semibold">Engine: {activeSpeaker.voiceEngine}</span>
+                <span className="text-cyan-300 font-semibold">{activeSpeaker.specialty || "General Clinician"}</span>
               </div>
               {audioState === "DOCTOR_SPEAKING" && (
                 <span className="text-[10px] text-emerald-400 font-bold tracking-wider animate-pulse flex items-center gap-1">
-                  <Volume2 className="w-3 h-3" /> SYNTHESIZED PLAYBACK
+                  <Volume2 className="w-3 h-3" /> Speaking
                 </span>
               )}
             </div>
@@ -2045,14 +2054,7 @@ export default function ConsultPage() {
                   }
                 }}
                 onToggleRecord={() => {
-                  if (audioState === "PATIENT_LISTENING") {
-                    if (transcriptTextRef.current.trim() || accumulatedTranscriptRef.current.trim() || audioChunksRef.current.length > 0) {
-                      commitSpokenText();
-                    } else {
-                      setAudioState("IDLE");
-                      stopSpeechRecognitionListening();
-                    }
-                  } else {
+                  if (audioState !== "PATIENT_LISTENING") {
                     if (!callActive) {
                       callActiveRef.current = true;
                       setCallActive(true);
@@ -2060,24 +2062,38 @@ export default function ConsultPage() {
                     startSpeechRecognitionListening();
                   }
                 }}
+                onStopRecord={cancelVoiceRecording}
+                onSendRecord={() => commitSpokenText()}
                 onInterrupt={() => triggerBargeIn()}
               />
             </div>
 
-            {/* Supporting Observable Processing Stages & Vitals Telemetry */}
-            <div className="pt-3 border-t border-slate-200/70 flex flex-col gap-3">
-              <div className="flex items-center justify-between text-xs font-mono text-slate-500 px-1">
-                <span className="font-bold uppercase tracking-wider text-slate-700">Observable Deliberation Pipeline</span>
-                <PulseHeart
-                  bpm={triageData?.triageLevel === "emergency" ? 108 : 84}
-                  status={triageData?.triageLevel === "emergency" ? "elevated" : "stable"}
-                  rhythm={triageData?.triageLevel === "emergency" ? "Sinus Tachycardia" : "Normal Sinus Rhythm"}
-                />
+            {/* Compact Clinical Safety Status */}
+            <div className="pt-3 border-t border-slate-200/70">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-semibold text-slate-700">Clinical Safety</span>
+                </div>
+                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${
+                  triageData?.isEmergency
+                    ? "text-rose-800 bg-rose-50 border-rose-200"
+                    : audioState === "PROCESSING_PATIENT"
+                    ? "text-cyan-800 bg-cyan-50 border-cyan-200"
+                    : "text-emerald-800 bg-emerald-50 border-emerald-200"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    triageData?.isEmergency ? "bg-rose-500" : "bg-emerald-500"
+                  } animate-pulse`} />
+                  {triageData?.isEmergency
+                    ? "Emergency Detected"
+                    : audioState === "PROCESSING_PATIENT"
+                    ? "Analyzing"
+                    : callActive
+                    ? "Active"
+                    : "Standby"}
+                </span>
               </div>
-              <ThoughtLine
-                steps={clinicalThoughtSteps}
-                isComplete={Boolean(triageData?.esiScore && audioState !== "PROCESSING_PATIENT" && audioState !== "PATIENT_LISTENING")}
-              />
             </div>
           </section>
 
@@ -2105,37 +2121,21 @@ export default function ConsultPage() {
 
               <div className="relative z-10 flex flex-col gap-5">
                 
-                {/* Module Header: Clean, Human-Scale Hierarchy with Subtle Active Status Beam */}
+                {/* Module Header */}
                 <div className="relative flex flex-col gap-3 pb-3 border-b border-slate-200/80">
-                  {/* Very subtle animated cyan status beam behind the active agent indicator */}
-                  <div className="absolute -top-1 left-0 w-36 h-8 bg-cyan-500/10 rounded-full blur-xl pointer-events-none -z-10 animate-pulse" />
 
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-xs font-bold uppercase tracking-widest text-slate-500 font-mono">
-                        Clinical Board
+                        Assessment
                       </span>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
                         <span className="text-sm font-bold text-slate-900 uppercase tracking-wide font-mono">
-                          {boardData?.phase === "deliberating" || boardData?.phase === "specialist_deliberation" || boardData?.phase === "board_decision" || boardData?.phase === "decided" || (boardData?.opinions && boardData.opinions.length > 1)
-                            ? "Live Deliberation"
-                            : "Primary Intake"}
-                        </span>
-                        <span className="text-slate-300">·</span>
-                        <span className="text-xs font-mono text-slate-500 font-semibold">
-                          {(() => {
-                            const count = boardData?.opinions?.length || (boardData?.deliberation_messages && boardData.deliberation_messages.length > 1 ? 2 : 1);
-                            return `${count} ${count === 1 ? "specialist active" : "specialists active"}`;
-                          })()}
+                          {callActive ? "In Progress" : "Standby"}
                         </span>
                       </div>
                     </div>
-
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-50/90 text-cyan-800 border border-cyan-200/90 text-xs font-mono font-bold shadow-2xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-600 animate-pulse" />
-                      Multidisciplinary
-                    </span>
                   </div>
                 </div>
 
@@ -2152,7 +2152,7 @@ export default function ConsultPage() {
                             : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
                         }`}
                       >
-                        Deliberation
+                        Review
                       </button>
                     </MovingBorder>
                   </div>
@@ -2239,8 +2239,8 @@ export default function ConsultPage() {
                               badgeColor: "text-cyan-800 bg-cyan-50 border-cyan-200",
                               isLive: callActive,
                               content: callActive
-                                ? `Active clinical intake in progress with ${selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "lead clinician"}. Specialist agents monitor incoming acoustic biomarkers and symptom reports.`
-                                : `${selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "Lead clinician"} ready on standby. Initiate voice consultation to evaluate symptoms.`,
+                                ? `Active consultation in progress with ${selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "your clinician"}. Your symptoms are being reviewed for important warning signs.`
+                                : `${selectedDoctor?.name ? selectedDoctor.name.split(",")[0] : "Your clinician"} is ready. Start a voice consultation to discuss your symptoms.`,
                               timestamp: "Live",
                               evidence: [] as Array<{ name: string; value: string }>
                             }
@@ -2419,49 +2419,7 @@ export default function ConsultPage() {
                       })}
                     </div>
 
-                    {/* React Bits SpotlightCard for Board Consensus Focal Point */}
-                    <AnimatedContent contentKey={boardData?.consensus_summary || boardData?.opinions?.length || "consensus"}>
-                      <SpotlightCard
-                        isActive={Boolean(boardData?.opinions && boardData.opinions.length > 0)}
-                        spotlightColor="rgba(6, 182, 212, 0.12)"
-                        className={`p-6 sm:p-7 rounded-2xl bg-white border shadow-2xs flex flex-col gap-4.5 transition-all ${
-                          boardData?.opinions && boardData.opinions.length > 0
-                            ? "border-cyan-300/80 shadow-[0_0_20px_-4px_rgba(6,182,212,0.18)]"
-                            : "border-slate-200/90"
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
-                          <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-900 font-mono whitespace-nowrap">
-                            <span className="text-amber-500 text-lg leading-none">✦</span>
-                            <span>Board Consensus</span>
-                          </div>
-                          <span className="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-semibold text-cyan-950 bg-cyan-50 border border-cyan-200/90 shadow-2xs whitespace-nowrap">
-                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse mr-2" />
-                            <span>
-                              {boardData?.opinions && boardData.opinions.length > 0
-                                ? `${boardData.opinions.length} ${boardData.opinions.length > 1 ? "specialists" : "specialist"} aligned`
-                                : (hasContextFacts || messages.length > 1)
-                                ? "Intake in progress"
-                                : "Awaiting clinical evidence"}
-                            </span>
-                          </span>
-                        </div>
-                        <div className="flex flex-col gap-2.5">
-                          <h4 className="text-base sm:text-lg font-bold text-slate-950 leading-snug">
-                            {boardData?.conflicts && boardData.conflicts.length > 0
-                              ? "Dual-activation acute protocol initiated under inter-specialist review."
-                              : (boardData?.opinions?.some(o => o.risk_level === "high") || triageData?.triageLevel === "emergency" || (triageData?.esiScore && triageData.esiScore <= 2))
-                              ? "Emergency evaluation indicated under specialist consensus."
-                              : (!boardData?.opinions || boardData.opinions.length === 0 || triageData?.triageLevel === "gathering_history" || boardData?.phase === "gathering_history" || boardData?.phase === "dormant" || boardData?.phase === "active_inquiring")
-                              ? (boardData?.consensus_summary || (contextKnownFacts.length > 0 ? "Primary care intake gathering clinical evidence before specialist board review." : "The board will form a clinical disposition after sufficient history is gathered."))
-                              : "Presentation evaluated as non-emergent. Outpatient clinical monitoring recommended."}
-                          </h4>
-                          <p className="text-xs sm:text-sm text-slate-600 font-normal leading-relaxed">
-                            Specialist consensus updates dynamically across every turn of the consultation based on acoustic biomarkers and symptom reports.
-                          </p>
-                        </div>
-                      </SpotlightCard>
-                    </AnimatedContent>
+
 
                   </div>
                 )}
