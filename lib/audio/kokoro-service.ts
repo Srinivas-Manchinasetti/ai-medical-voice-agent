@@ -13,6 +13,13 @@ export const DOCTOR_KOKORO_VOICES: Record<string, string> = {
   "dr-priya-patel": "af_nicole", // Crisp, friendly dermatologist
 };
 
+export function resolveAuthoritativeVoice(doctorId?: string): string {
+  if (doctorId && DOCTOR_KOKORO_VOICES[doctorId]) {
+    return DOCTOR_KOKORO_VOICES[doctorId];
+  }
+  return DEFAULT_PATIENT_FACING_VOICE;
+}
+
 export const DEFAULT_PATIENT_FACING_VOICE = "af_heart";
 
 export interface SynthesisResult {
@@ -112,13 +119,14 @@ class KokoroService {
       throw new Error("Text is empty after sanitization.");
     }
 
-    // 2. Deterministic Voice Selection
-    // Primary invariant: Patient-facing clinician is Dr. Sarah Chen (af_heart)
-    let selectedVoice = DEFAULT_PATIENT_FACING_VOICE;
-    if (options.voice) {
-      selectedVoice = options.voice;
-    } else if (options.doctorId && DOCTOR_KOKORO_VOICES[options.doctorId]) {
-      selectedVoice = DOCTOR_KOKORO_VOICES[options.doctorId];
+    // 2. Server-Authoritative Immutable Voice Selection
+    // Invariant: Doctor identity dictates voice. Client cannot spoof or override voiceId.
+    const selectedVoice = resolveAuthoritativeVoice(options.doctorId);
+
+    if (options.voice && options.voice !== selectedVoice) {
+      console.warn(
+        `[Kokoro Voice Security] Client attempted to override voice to '${options.voice}' for doctor '${options.doctorId}'. Enforcing authoritative persona voice '${selectedVoice}'.`
+      );
     }
 
     const tts = await this.getModel();

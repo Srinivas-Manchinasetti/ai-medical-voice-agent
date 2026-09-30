@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { evaluateSafetyArbiter } from "@/lib/triage/safety-arbiter";
+import { getAuthContext } from "@/lib/auth/rbac";
+import { logAuditEvent } from "@/lib/audit/audit-logger";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export async function POST(request: Request) {
   try {
+    const auth = await getAuthContext(request);
     const body = await request.json();
     const {
       transcript,
@@ -75,6 +78,23 @@ export async function POST(request: Request) {
     }
 
     const soapSummary = `S: Patient reports: "${transcript}". O: Deterministic clinical features: ${arbiter.detectedSymptoms.join(", ") || "None"}. A: ${arbiter.esiTitle} (ESI ${arbiter.esiScore}, ICD-10: ${arbiter.icd10Codes.join(", ")}). P: ${arbiter.clinicalProtocol}`;
+
+    // Append evaluation to tamper-evident audit ledger
+    logAuditEvent({
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: "TRIAGE_EVALUATION",
+      resourceType: "patient",
+      resourceId: patient_id,
+      status: "SUCCESS",
+      metadata: {
+        triageLevel: arbiter.triageLevel,
+        esiScore: arbiter.esiScore,
+        isEmergency: arbiter.isEmergency,
+        redFlagsTriggered: arbiter.redFlagsTriggered,
+        specialty,
+      },
+    });
 
     return NextResponse.json({
       status: "success",

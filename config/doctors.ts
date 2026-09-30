@@ -7,6 +7,7 @@ export interface DoctorProfile {
   experience: string;
   avatarUrl: string;
   voiceGender: "female" | "male";
+  voiceId: "af_heart" | "am_michael" | "af_bella" | "bm_george" | "af_nicole" | string;
   voiceTone: string;
   badgeColor: string;
   accentBg: string;
@@ -25,6 +26,7 @@ export const DOCTOR_PROFILES: DoctorProfile[] = [
     experience: "14+ Years Clinical Experience",
     avatarUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
+    voiceId: "af_heart",
     voiceTone: "Empathetic, clear, and reassuring",
     badgeColor: "bg-teal-500/10 text-teal-400 border-teal-500/20",
     accentBg: "from-teal-500/20 to-emerald-500/5",
@@ -47,6 +49,7 @@ Your primary goals:
     experience: "18+ Years Interventional Cardiology",
     avatarUrl: "https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&w=400&q=80",
     voiceGender: "male",
+    voiceId: "am_michael",
     voiceTone: "Authoritative, calm, and acutely focused",
     badgeColor: "bg-rose-500/10 text-rose-400 border-rose-500/20",
     accentBg: "from-rose-500/20 to-red-500/5",
@@ -66,8 +69,9 @@ Your primary goals:
     specialty: "Pediatrics",
     department: "Pediatric & Adolescent Medicine",
     experience: "11+ Years Pediatric Care",
-    avatarUrl: "https://images.unsplash.com/photo-1582750433449-648ed127bb54?auto=format&fit=crop&w=400&q=80",
+    avatarUrl: "https://images.unsplash.com/photo-1651008376811-b90baee60c1f?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
+    voiceId: "af_bella",
     voiceTone: "Gentle, compassionate, and family-friendly",
     badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     accentBg: "from-amber-500/20 to-orange-500/5",
@@ -88,6 +92,7 @@ Your primary goals:
     experience: "20+ Years Clinical Neuroscience",
     avatarUrl: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=400&q=80",
     voiceGender: "male",
+    voiceId: "bm_george",
     voiceTone: "Methodical, observant, and reassuring",
     badgeColor: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
     accentBg: "from-indigo-500/20 to-purple-500/5",
@@ -108,6 +113,7 @@ Your primary goals:
     experience: "9+ Years Clinical Dermatology",
     avatarUrl: "https://images.unsplash.com/photo-1614608682850-e0d6ed316d47?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
+    voiceId: "af_nicole",
     voiceTone: "Friendly, analytical, and attentive",
     badgeColor: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
     accentBg: "from-cyan-500/20 to-blue-500/5",

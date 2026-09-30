@@ -44,7 +44,7 @@ import Link from "next/link";
 import { Navbar } from "../_components/Navbar";
 import { AppFooter } from "../_components/AppFooter";
 import { SoapReportModal } from "../_components/SoapReportModal";
-import { DOCTOR_PROFILES, DoctorProfile } from "@/config/doctors";
+import { DOCTOR_PROFILES, DoctorProfile, getDoctorById } from "@/config/doctors";
 import { CursorGrid } from "@/components/ui/cursor-grid";
 import RotatingText from "@/components/RotatingText";
 import CountUp from "@/components/CountUp";
@@ -345,6 +345,25 @@ export default function ConsultPage() {
 
   const [sessionMode, setSessionMode] = useState<ConsultSessionMode>("CONSULT_LOBBY");
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorProfile>(DOCTOR_PROFILES[0]);
+  const [activeSpeaker, setActiveSpeaker] = useState<{
+    id: string;
+    name: string;
+    voiceId: string;
+    specialty: string;
+    department: string;
+    avatarUrl: string;
+    voiceGender: "female" | "male";
+    voiceEngine: "Kokoro" | "Browser Fallback" | "Text Only";
+  }>({
+    id: DOCTOR_PROFILES[0].id,
+    name: DOCTOR_PROFILES[0].name,
+    voiceId: DOCTOR_PROFILES[0].voiceId,
+    specialty: DOCTOR_PROFILES[0].specialty,
+    department: DOCTOR_PROFILES[0].department,
+    avatarUrl: DOCTOR_PROFILES[0].avatarUrl,
+    voiceGender: DOCTOR_PROFILES[0].voiceGender,
+    voiceEngine: "Kokoro",
+  });
   const [callActive, setCallActive] = useState<boolean>(false);
   const [audioState, setAudioState] = useState<AudioState>("IDLE");
 
@@ -705,12 +724,28 @@ export default function ConsultPage() {
     }
   }, []);
 
-  // Text-To-Speech with Kokoro-first Neural Audio and deterministic browser fallback
-  const speakDoctorResponse = useCallback(async (text: string) => {
+  // Text-To-Speech with Kokoro-first Neural Audio and deterministic persona-safe fallback
+  const speakDoctorResponse = useCallback(async (text: string, doctorId?: string) => {
     const cleanText = text.replace(/[*_#`\[\]()]/g, "").trim();
     if (!cleanText) return;
 
-    // 1. Halt any ongoing audio and speech intake immediately
+    // 1. Resolve immutable doctor persona for this response
+    const targetDocId = doctorId || selectedDoctor.id;
+    const targetDoctor = getDoctorById(targetDocId) || selectedDoctor;
+
+    // Synchronize active speaker identity across UI components
+    setActiveSpeaker({
+      id: targetDoctor.id,
+      name: targetDoctor.name,
+      voiceId: targetDoctor.voiceId,
+      specialty: targetDoctor.specialty,
+      department: targetDoctor.department,
+      avatarUrl: targetDoctor.avatarUrl,
+      voiceGender: targetDoctor.voiceGender,
+      voiceEngine: "Kokoro",
+    });
+
+    // 2. Halt any ongoing audio and speech intake immediately
     stopSpeechRecognitionListening();
 
     if (activeAudioRef.current) {
@@ -746,45 +781,69 @@ export default function ConsultPage() {
       }
     };
 
-    // Helper for deterministic browser TTS fallback (Only used on genuine Kokoro failure)
+    // Helper for deterministic, persona-safe browser TTS fallback (Only used on genuine Kokoro failure)
     const playBrowserFallback = () => {
-      console.warn("[MedVoice Audio Fallback] Kokoro TTS unavailable. Using browser speech synthesis for:", selectedDoctor.name);
+      console.warn(`[MedVoice Audio Fallback] Kokoro TTS unavailable for ${targetDoctor.name} (voiceId: ${targetDoctor.voiceId}). Attempting deterministic fallback...`);
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Text Only" }));
         handleSpeechEnd();
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.rate = 1.0;
-      utterance.pitch = selectedDoctor.voiceGender === "female" ? 1.15 : 0.95;
+      const isFemale = targetDoctor.voiceGender === "female";
+      const voices = window.speechSynthesis.getVoices();
+      const englishVoices = voices.filter((v) => v.lang.startsWith("en"));
 
-      const isFemale = selectedDoctor.voiceGender === "female";
-      let chosenVoice = isFemale ? preferredFemaleVoiceRef.current : preferredMaleVoiceRef.current;
+      // Per-doctor specific preferred voice name patterns
+      const DOCTOR_FALLBACK_PATTERNS: Record<string, RegExp> = {
+        "dr-sarah-chen": /Samantha|Zira|Jenny|Aria|Victoria/i,
+        "dr-marcus-vance": /David|Guy|Alex|Mark|George|Male/i,
+        "dr-elena-rostova": /Hazel|Samantha|Jenny|Victoria|Female/i,
+        "dr-arthur-pendelton": /George|Oliver|Daniel|David|Male/i,
+        "dr-priya-patel": /Heera|Zira|Samantha|Google UK English Female|Female/i,
+      };
 
-      if (!chosenVoice) {
-        const voices = window.speechSynthesis.getVoices();
-        const englishVoices = voices.filter((v) => v.lang.startsWith("en"));
-        if (englishVoices.length > 0) {
-          if (isFemale) {
-            chosenVoice =
-              englishVoices.find((v) => /Zira|Samantha|Google UK English Female|Victoria|Jenny|Aria|Karen|Hazel/i.test(v.name)) ||
-              englishVoices.find((v) => /Female|Woman/i.test(v.name)) ||
-              englishVoices.find((v) => !/Male|David|Mark|George/i.test(v.name)) ||
-              englishVoices[0];
-            if (chosenVoice) preferredFemaleVoiceRef.current = chosenVoice;
-          } else {
-            chosenVoice =
-              englishVoices.find((v) => /David|Mark|George|Google UK English Male|Guy/i.test(v.name)) ||
-              englishVoices.find((v) => /Male|Man/i.test(v.name)) ||
-              englishVoices[0];
-            if (chosenVoice) preferredMaleVoiceRef.current = chosenVoice;
-          }
+      const pattern = DOCTOR_FALLBACK_PATTERNS[targetDoctor.id];
+      let chosenVoice: SpeechSynthesisVoice | undefined;
+
+      if (pattern && englishVoices.length > 0) {
+        chosenVoice = englishVoices.find((v) => pattern.test(v.name));
+      }
+
+      // Strict gender preservation: NEVER play cross-gender voice
+      if (!chosenVoice && englishVoices.length > 0) {
+        if (isFemale) {
+          chosenVoice =
+            englishVoices.find((v) => /female|woman|zira|samantha|victoria|jenny|karen/i.test(v.name)) ||
+            englishVoices.find((v) => !/male|david|mark|george|alex|daniel|guy/i.test(v.name));
+        } else {
+          chosenVoice = englishVoices.find((v) => /male|man|david|mark|george|guy|alex|daniel/i.test(v.name));
         }
       }
 
-      if (chosenVoice) {
-        utterance.voice = chosenVoice;
+      // If no gender-appropriate voice is available, MUTE rather than mis-gender doctor persona
+      if (!chosenVoice) {
+        console.warn(`[MedVoice Audio Safety] No appropriate ${targetDoctor.voiceGender} voice found in browser for ${targetDoctor.name}. Suppressing audio to preserve persona identity.`);
+        setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Text Only" }));
+        setClinicalToasts((prev) => [
+          ...prev,
+          {
+            id: `tts-no-voice-${Date.now()}`,
+            type: "info",
+            title: "Voice Playback Muted (Persona Safety)",
+            description: `No natural ${targetDoctor.voiceGender} voice found on system for ${targetDoctor.name}. Displaying text transcript to preserve identity.`,
+          },
+        ]);
+        handleSpeechEnd();
+        return;
       }
+
+      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Browser Fallback" }));
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.voice = chosenVoice;
+      utterance.rate = 1.0;
+      utterance.pitch = isFemale ? 1.05 : 0.95;
 
       utterance.onstart = () => {
         setAudioState("DOCTOR_SPEAKING");
@@ -795,15 +854,16 @@ export default function ConsultPage() {
       window.speechSynthesis.speak(utterance);
     };
 
-    // 2. Primary Path: Kokoro Neural Audio (/api/voice/tts)
+    // 3. Primary Path: Kokoro Neural Audio (/api/voice/tts)
     try {
-      console.log(`[MedVoice Audio] Synthesizing speech via Kokoro (voice: af_heart) for ${selectedDoctor.name}...`);
+      console.log(`[MedVoice Audio] Synthesizing speech via Kokoro (voice: ${targetDoctor.voiceId}) for ${targetDoctor.name}...`);
       const response = await fetch("/api/voice/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: cleanText,
-          doctorId: selectedDoctor.id,
+          doctorId: targetDoctor.id,
+          voice: targetDoctor.voiceId,
         }),
       });
 
@@ -830,9 +890,10 @@ export default function ConsultPage() {
       };
 
       await audio.play();
-      console.log("[MedVoice Audio] Kokoro af_heart audio playback started successfully.");
+      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Kokoro" }));
+      console.log(`[MedVoice Audio] Kokoro ${targetDoctor.voiceId} audio playback started successfully for ${targetDoctor.name}.`);
     } catch (err: any) {
-      console.warn("[MedVoice Audio] Kokoro synthesis route error. Triggering browser fallback:", err.message);
+      console.warn(`[MedVoice Audio] Kokoro synthesis route error for ${targetDoctor.name} (${targetDoctor.voiceId}):`, err.message);
       playBrowserFallback();
     }
   }, [selectedDoctor, stopSpeechRecognitionListening]);
@@ -949,6 +1010,16 @@ export default function ConsultPage() {
   const startConsultation = async (doc?: DoctorProfile) => {
     const doctorToUse = doc || selectedDoctor;
     if (doc) setSelectedDoctor(doc);
+    setActiveSpeaker({
+      id: doctorToUse.id,
+      name: doctorToUse.name,
+      voiceId: doctorToUse.voiceId,
+      specialty: doctorToUse.specialty,
+      department: doctorToUse.department,
+      avatarUrl: doctorToUse.avatarUrl,
+      voiceGender: doctorToUse.voiceGender,
+      voiceEngine: "Kokoro",
+    });
     callActiveRef.current = true;
     setCallActive(true);
     setCallDuration(0);
@@ -964,7 +1035,7 @@ export default function ConsultPage() {
       doctorSpecialty: doctorToUse.department
     };
     setMessages([initialGreeting]);
-    speakDoctorResponse(doctorToUse.greeting);
+    speakDoctorResponse(doctorToUse.greeting, doctorToUse.id);
   };
 
   // End consultation session
@@ -1060,8 +1131,21 @@ export default function ConsultPage() {
         const data = await res.json();
         const doctorReplyText = data.doctorReply || "I have received your symptoms and documented them.";
 
-        const respondingDoctorName = data.doctor?.name || selectedDoctor.name;
-        const respondingDoctorSpecialty = data.doctor?.specialty || selectedDoctor.department;
+        const respondingDoctorId = data.doctor?.id || selectedDoctor.id;
+        const respondingDoctorProfile = getDoctorById(respondingDoctorId) || selectedDoctor;
+        const respondingDoctorName = data.doctor?.name || respondingDoctorProfile.name;
+        const respondingDoctorSpecialty = data.doctor?.specialty || respondingDoctorProfile.department;
+
+        setActiveSpeaker({
+          id: respondingDoctorProfile.id,
+          name: respondingDoctorProfile.name,
+          voiceId: respondingDoctorProfile.voiceId,
+          specialty: respondingDoctorProfile.specialty,
+          department: respondingDoctorProfile.department,
+          avatarUrl: respondingDoctorProfile.avatarUrl,
+          voiceGender: respondingDoctorProfile.voiceGender,
+          voiceEngine: "Kokoro",
+        });
 
         const newDoctorMessage: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
@@ -1119,7 +1203,7 @@ export default function ConsultPage() {
           }
         }
 
-        speakDoctorResponse(doctorReplyText);
+        speakDoctorResponse(doctorReplyText, respondingDoctorId);
       }
     } catch (err) {
       console.error("Consultation chat error:", err);
@@ -1133,7 +1217,7 @@ export default function ConsultPage() {
 
   // Helper for Doctor Status
   const getDoctorLiveStatus = (doc: DoctorProfile) => {
-    if (audioState === "DOCTOR_SPEAKING" && selectedDoctor.id === doc.id) {
+    if (audioState === "DOCTOR_SPEAKING" && activeSpeaker.id === doc.id) {
       return { label: "Speaking", color: "text-emerald-700 bg-emerald-50", dot: "bg-emerald-500 animate-pulse" };
     }
     if (doc.id === "dr-sarah-chen") {
@@ -1237,7 +1321,19 @@ export default function ConsultPage() {
                       <button
                         key={doc.id}
                         type="button"
-                        onClick={() => setSelectedDoctor(doc)}
+                        onClick={() => {
+                          setSelectedDoctor(doc);
+                          setActiveSpeaker({
+                            id: doc.id,
+                            name: doc.name,
+                            voiceId: doc.voiceId,
+                            specialty: doc.specialty,
+                            department: doc.department,
+                            avatarUrl: doc.avatarUrl,
+                            voiceGender: doc.voiceGender,
+                            voiceEngine: "Kokoro",
+                          });
+                        }}
                         className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
                           isSelected
                             ? "bg-slate-950 text-white shadow-sm ring-2 ring-cyan-500/30"
@@ -1327,7 +1423,19 @@ export default function ConsultPage() {
                     return (
                       <div
                         key={doc.id}
-                        onClick={() => setSelectedDoctor(doc)}
+                        onClick={() => {
+                          setSelectedDoctor(doc);
+                          setActiveSpeaker({
+                            id: doc.id,
+                            name: doc.name,
+                            voiceId: doc.voiceId,
+                            specialty: doc.specialty,
+                            department: doc.department,
+                            avatarUrl: doc.avatarUrl,
+                            voiceGender: doc.voiceGender,
+                            voiceEngine: "Kokoro",
+                          });
+                        }}
                         className={`p-5 rounded-2xl bg-white border transition-all cursor-pointer flex flex-col justify-between gap-4 ${
                           isSelected
                             ? "border-cyan-500 ring-2 ring-cyan-400/20 shadow-md"
@@ -1492,7 +1600,17 @@ export default function ConsultPage() {
                         type="button"
                         onClick={() => {
                           setSelectedDoctor(doc);
-                          speakDoctorResponse(`Switched to ${doc.name}, ${doc.department}. How may I evaluate your symptoms?`);
+                          setActiveSpeaker({
+                            id: doc.id,
+                            name: doc.name,
+                            voiceId: doc.voiceId,
+                            specialty: doc.specialty,
+                            department: doc.department,
+                            avatarUrl: doc.avatarUrl,
+                            voiceGender: doc.voiceGender,
+                            voiceEngine: "Kokoro",
+                          });
+                          speakDoctorResponse(`Switched to ${doc.name}, ${doc.department}. How may I evaluate your symptoms?`, doc.id);
                         }}
                         className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex-shrink-0 ${
                           isSelected
@@ -1551,7 +1669,7 @@ export default function ConsultPage() {
               </div>
               <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
                 <span className={audioState === "DOCTOR_SPEAKING" ? "text-emerald-700 font-bold animate-pulse" : audioState === "PATIENT_LISTENING" ? "text-cyan-700 font-bold" : "text-slate-500"}>
-                  {audioState === "DOCTOR_SPEAKING" ? `● ${selectedDoctor.name.split(" ")[1] || "Doctor"} Speaking` : audioState === "PATIENT_LISTENING" ? "● Listening to Voice" : "● Acoustic Standby"}
+                  {audioState === "DOCTOR_SPEAKING" ? `● ${activeSpeaker.name.split(" ")[1] || "Doctor"} Speaking (${activeSpeaker.voiceId})` : audioState === "PATIENT_LISTENING" ? "● Listening to Voice" : "● Acoustic Standby"}
                 </span>
               </div>
             </div>
@@ -1656,13 +1774,32 @@ export default function ConsultPage() {
 
             </div>
 
+            {/* LIVE VOICE PERSONA IDENTITY HUD */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono shadow-xs">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${audioState === "DOCTOR_SPEAKING" ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-slate-500"}`} />
+                <span className="font-bold text-white tracking-wide">{activeSpeaker.name.toUpperCase()}</span>
+                <span className="text-slate-600">•</span>
+                <span className="text-cyan-300 font-semibold">Voice: {activeSpeaker.voiceId}</span>
+                <span className="text-slate-600">•</span>
+                <span className="text-emerald-400 font-semibold">Engine: {activeSpeaker.voiceEngine}</span>
+              </div>
+              {audioState === "DOCTOR_SPEAKING" && (
+                <span className="text-[10px] text-emerald-400 font-bold tracking-wider animate-pulse flex items-center gap-1">
+                  <Volume2 className="w-3 h-3" /> SYNTHESIZED PLAYBACK
+                </span>
+              )}
+            </div>
+
             {/* UNIFIED PHYSICAL VOICE PILL CONTROL */}
-            <div className="pt-3 border-t border-slate-200/80">
+            <div className="pt-2 border-t border-slate-200/80">
               <VoicePill
                 state={voicePillState}
                 transcriptSnippet={transcriptText}
                 typedValue={typedInput}
                 onTypedChange={setTypedInput}
+                speakerName={activeSpeaker.name}
+                speakerVoiceId={activeSpeaker.voiceId}
                 onSubmitText={(text) => {
                   setTypedInput("");
                   if (audioState === "DOCTOR_SPEAKING") {

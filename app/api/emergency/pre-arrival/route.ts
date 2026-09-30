@@ -5,6 +5,8 @@ import {
   generatePreArrivalDirectives,
   EmergencyDispatchReceipt,
 } from "@/lib/emergency/dispatch";
+import { logAuditEvent } from "@/lib/audit/audit-logger";
+import { getAuthContext } from "@/lib/auth/rbac";
 
 // Simulated receiving hospital in-memory pre-arrival telemetry board
 const activeDispatches: EmergencyDispatchReceipt[] = [];
@@ -63,6 +65,22 @@ export async function POST(request: Request) {
     // Store in receiving hospital telemetry board
     activeDispatches.unshift(receipt);
     if (activeDispatches.length > 50) activeDispatches.pop();
+
+    const auth = await getAuthContext(request);
+    logAuditEvent({
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: "EMERGENCY_DISPATCH",
+      resourceType: "dispatch",
+      resourceId: dispatchId,
+      status: "SUCCESS",
+      metadata: {
+        hospitalName: payload.targetHospitalName,
+        assignedBay: bay,
+        esiScore: payload.esiScore,
+        auditHash,
+      },
+    });
 
     return NextResponse.json({
       success: true,

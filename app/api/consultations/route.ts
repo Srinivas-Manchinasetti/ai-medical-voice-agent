@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/config/db";
 import { consultationsTable } from "@/config/schema";
 import { desc, eq } from "drizzle-orm";
-import { currentUser } from "@clerk/nextjs/server";
+import { getAuthContext, hasPermission } from "@/lib/auth/rbac";
+import { logAuditEvent } from "@/lib/audit/audit-logger";
 
 // Fallback in-memory store if database is initializing or during local evaluation
 export const memoryConsultations: any[] = [
@@ -97,17 +98,48 @@ export const memoryConsultations: any[] = [
 
 export async function GET(request: Request) {
   try {
+    const auth = await getAuthContext(request);
     const { searchParams } = new URL(request.url);
     const userIdParam = searchParams.get("userId");
 
-    let user = null;
-    try {
-      user = await currentUser();
-    } catch {
-      // Clerk optional if not logged in
+    // RBAC: Patients can only view their own consultations.
+    // Doctors, Auditors, and Admins have permission to query records broadly.
+    const canReadAll = hasPermission(auth.role, "consultations:read:all");
+    if (!canReadAll && userIdParam && userIdParam !== auth.userId) {
+      logAuditEvent({
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: "ACCESS_DENIED",
+        resourceType: "consultation",
+        resourceId: userIdParam,
+        status: "DENIED",
+        metadata: {
+          reason: "Patient attempted to access another user's clinical records",
+          attemptedUserId: userIdParam,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Forbidden: You are only authorized to access your own clinical consultation records.",
+        },
+        { status: 403 }
+      );
     }
 
-    const targetUserId = userIdParam || user?.id;
+    // Determine target user scope based on RBAC permissions
+    const targetUserId = canReadAll ? userIdParam : auth.userId;
+
+    logAuditEvent({
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: "CONSULTATION_ACCESSED",
+      resourceType: "consultation",
+      resourceId: targetUserId || "all_records",
+      status: "SUCCESS",
+      metadata: { targetUserId: targetUserId || "all", canReadAll },
+    });
 
     // Try fetching from Neon database
     const dbClient = getDb();
@@ -134,14 +166,14 @@ export async function GET(request: Request) {
       }
     }
 
-    // Fallback to local array
+    // Fallback to local memory store
     const filtered = targetUserId
       ? memoryConsultations.filter((c) => c.userId === targetUserId)
       : memoryConsultations;
 
     return NextResponse.json({
       success: true,
-      consultations: filtered.slice().reverse()
+      consultations: filtered.slice().reverse(),
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -153,6 +185,26 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const auth = await getAuthContext(request);
+
+    // RBAC: Verify permission to create clinical consultation
+    if (!hasPermission(auth.role, "consultations:create")) {
+      logAuditEvent({
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: "ACCESS_DENIED",
+        resourceType: "consultation",
+        resourceId: "new_record",
+        status: "DENIED",
+        metadata: { requiredPermission: "consultations:create", role: auth.role },
+      });
+
+      return NextResponse.json(
+        { success: false, error: "Forbidden: Role not authorized to record clinical consultations." },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const {
       id = `MED-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -178,9 +230,12 @@ export async function POST(request: Request) {
       durationSeconds = 0,
     } = body;
 
+    // In demo mode allow the simulated client userId; otherwise enforce the verified session userId
+    const effectiveUserId = auth.isDemoMode && userId ? userId : auth.userId;
+
     const newRecord = {
       id,
-      userId: userId || "anon-user",
+      userId: effectiveUserId,
       patientName,
       patientAge: patientAge ? String(patientAge) : undefined,
       patientGender,
@@ -200,8 +255,24 @@ export async function POST(request: Request) {
       recommendedSpecialists,
       recommendedAction,
       durationSeconds,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
+
+    // Append to tamper-evident cryptographic audit ledger
+    logAuditEvent({
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: "CONSULTATION_CREATED",
+      resourceType: "consultation",
+      resourceId: id,
+      status: "SUCCESS",
+      metadata: {
+        triageLevel,
+        specialty,
+        effectiveUserId,
+        icd10Count: icd10Codes.length,
+      },
+    });
 
     // Store in Neon DB if configured
     const dbClient = getDb();
@@ -220,7 +291,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       consultation: newRecord,
-      note: "Saved to clinical consultation session buffer."
+      note: "Saved to clinical consultation session buffer with tamper-evident audit record.",
     });
   } catch (error: any) {
     return NextResponse.json(

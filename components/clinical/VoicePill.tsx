@@ -15,6 +15,8 @@ export interface VoicePillProps {
   onTypedChange?: (val: string) => void;
   onSubmitText?: (val: string) => void;
   className?: string;
+  speakerName?: string;
+  speakerVoiceId?: string;
 }
 
 export function VoicePill({
@@ -26,6 +28,8 @@ export function VoicePill({
   onTypedChange,
   onSubmitText,
   className = "",
+  speakerName,
+  speakerVoiceId,
 }: VoicePillProps) {
   const isListening = state === "listening";
   const isResponding = state === "responding";
@@ -121,12 +125,17 @@ export function VoicePill({
         {isResponding && (
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
               <span className="text-xs font-semibold text-white truncate">
-                Dr. Sarah Chen is speaking...
+                {speakerName || "Doctor"} is speaking...
               </span>
+              {speakerVoiceId && (
+                <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/70 text-emerald-300 border border-emerald-500/30 flex-shrink-0">
+                  {speakerVoiceId}
+                </span>
+              )}
             </div>
-            <span className="text-[11px] font-mono text-cyan-300 hidden sm:inline">
+            <span className="text-[11px] font-mono text-cyan-300 hidden sm:inline flex-shrink-0">
               Speak aloud to interrupt
             </span>
           </div>

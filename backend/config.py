@@ -13,11 +13,14 @@ class Settings(BaseSettings):
     # Server Settings
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", 8000))
+    # Strict CORS Origins: parse from ALLOWED_ORIGINS or default to trusted dev/prod origins (NO '*' with credentials)
     CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "*"
+        origin.strip()
+        for origin in os.getenv(
+            "ALLOWED_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000"
+        ).split(",")
+        if origin.strip() and origin.strip() != "*"
     ]
     
     # FREE / Low-Cost Cloud LLM API Keys
