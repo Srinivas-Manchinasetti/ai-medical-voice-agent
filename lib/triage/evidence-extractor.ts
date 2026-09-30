@@ -1,0 +1,440 @@
+/**
+ * EVIDENCE EXTRACTOR & CLINICAL SEMANTIC NORMALIZER
+ * 
+ * Invariants:
+ * 1. ZERO RAW UTTERANCE LEAKS: Never stores user speech strings (e.g. "Uh, nothing much...") as clinical facts.
+ * 2. Explicit Status: Facts are marked "present", "absent", or "unknown".
+ *    "fever = absent" means denied by patient; "fever = unknown" means not yet assessed.
+ * 3. Multi-Domain Entity Coverage: ENT, Respiratory, Cardiac, Neurological, GI, Constitutional.
+ * 4. Pivot Signal: Flags when patient introduces a new unexpected finding (e.g. voice change)
+ *    so the question planner pivots to characterize it before continuing routine checklists.
+ */
+
+import {
+  ClinicalFact,
+  ClinicalInterviewStateV2,
+  RedFlagDomainAssessment,
+} from "./clinical-state";
+
+export interface ExtractedEvidenceResult {
+  rawUtterance: string;
+  intent: "symptom_report" | "answer_question" | "denial" | "clarification" | "repetition_objection" | "small_talk";
+  newFacts: ClinicalFact[];
+  updatedChiefComplaint?: ClinicalFact;
+  symptomProfileUpdates: Partial<ClinicalInterviewStateV2["symptomProfile"]>;
+  associatedSymptomsUpdates: ClinicalFact[];
+  redFlagAssessments: Partial<Record<string, RedFlagDomainAssessment>>;
+  deniedTopics: string[];
+  newFindingsDetected: string[];
+  isReaffirmation: boolean;
+  requiresClarification: boolean;
+}
+
+export class EvidenceExtractor {
+  /**
+   * Extract normalized clinical facts from a patient utterance
+   */
+  public extract(
+    utterance: string,
+    state: ClinicalInterviewStateV2,
+    lastDoctorQuestion?: string,
+    lastTarget?: string
+  ): ExtractedEvidenceResult {
+    const text = utterance.trim();
+    const lower = text.toLowerCase();
+    const turnId = state.turnCount + 1;
+    const timestamp = new Date().toISOString();
+
+    const newFacts: ClinicalFact[] = [];
+    const symptomProfileUpdates: Partial<ClinicalInterviewStateV2["symptomProfile"]> = {};
+    const associatedSymptomsUpdates: ClinicalFact[] = [];
+    const redFlagAssessments: Partial<Record<string, RedFlagDomainAssessment>> = {};
+    const deniedTopics: string[] = [];
+    const newFindingsDetected: string[] = [];
+
+    let isReaffirmation = false;
+    let intent: ExtractedEvidenceResult["intent"] = "symptom_report";
+
+    // 1. Detect Repetition / Objection Intent ("I already said", "I insist", "We already talked")
+    const isObjectionOrInsist = /\b(i\s+insist|already\s+said|like\s+i\s+said|told\s+you|why\s+are\s+you\s+asking\s+again|we\s+already)\b/i.test(lower);
+    if (isObjectionOrInsist) {
+      isReaffirmation = true;
+      intent = "repetition_objection";
+    }
+
+    // 2. Detect Pure Denials ("No", "Nope", "None", "Nothing much", "Neither")
+    const isNegativeStatement = /^(?:no|nope|none|nothing|nothing\s+else|nothing\s+much|not\s+really|neither|no\s+fever|no\s+pain)[.!?\s]*$/i.test(lower) ||
+      /\b(nothing\s+much|nothing\s+else|no\s+trouble\s+swallowing|no\s+fever|no\s+ear\s+pain|no\s+shortness\s+of\s+breath)\b/i.test(lower);
+    if (isNegativeStatement && intent !== "repetition_objection") {
+      intent = "denial";
+    }
+
+    // 3. ENT & THROAT SYMPTOMS
+    const hasThroatPain = /\b(throat\s+pain|sore\s+throat|throat\s+is\s+paining|throat\s+hurts?|throat\s+is\s+hurting|burning\s+throat|scratchy\s+throat)\b/i.test(lower);
+    if (hasThroatPain) {
+      const fact: ClinicalFact = {
+        id: `fact-throat-pain-${turnId}`,
+        name: "throat_pain",
+        label: "Throat pain / Sore throat",
+        category: "chief_complaint",
+        status: "present",
+        value: true,
+        normalizedText: "Present (Throat pain)",
+        confidence: 0.98,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+    }
+
+    // Voice change / Hoarseness
+    const hasVoiceChange = /\b(voice\s+has\s+been\s+ruined|voice\s+changed|voice\s+is\s+different|lost\s+my\s+voice|hoarse|hoarseness|raspy\s+voice|hard\s+to\s+speak|difficulty\s+producing\s+voice)\b/i.test(lower);
+    if (hasVoiceChange) {
+      const isHoarse = /\b(hoarse|raspy|husky)\b/i.test(lower);
+      const isLost = /\b(lost|cannot\s+speak|whisper|weak)\b/i.test(lower);
+      const voiceDetail = isHoarse ? "Hoarseness / raspy quality" : isLost ? "Aphonia / marked vocal weakness" : "Voice changed / ruined";
+
+      const fact: ClinicalFact = {
+        id: `fact-voice-change-${turnId}`,
+        name: "voice_change",
+        label: "Voice change",
+        category: "associated_symptom",
+        status: "present",
+        value: voiceDetail,
+        normalizedText: voiceDetail,
+        confidence: 0.96,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+
+      if (!state.associatedSymptoms.some(s => s.name === "voice_change")) {
+        newFindingsDetected.push("voice_change");
+      }
+    }
+
+    // Swallowing difficulty / Dysphagia
+    const mentionsSwallowing = /\b(swallow|swallowing|dysphagia|drink|liquids|saliva)\b/i.test(lower);
+    if (mentionsSwallowing) {
+      const isDenied = /\b(no|nope|not|neither|without|don'?t\s+have|can\s+swallow\s+fine|no\s+trouble)\b/i.test(lower);
+      const status = isDenied ? "absent" : "present";
+      const normalizedText = isDenied ? "Denied (No difficulty swallowing)" : "Present (Difficulty swallowing)";
+
+      const fact: ClinicalFact = {
+        id: `fact-dysphagia-${turnId}`,
+        name: "swallowing_difficulty",
+        label: "Swallowing difficulty (Dysphagia)",
+        category: "red_flag",
+        status,
+        value: !isDenied,
+        normalizedText,
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      if (isDenied) deniedTopics.push("swallowing_difficulty");
+
+      redFlagAssessments.swallowing = {
+        domain: "swallowing",
+        label: "Swallowing & saliva management",
+        assessed: true,
+        status: isDenied ? "clear" : "concerning",
+        finding: normalizedText,
+      };
+    }
+
+    // Fever / Chills
+    const mentionsFever = /\b(fever|chills|temperature|hot\s+and\s+cold|feverish|sweats?)\b/i.test(lower);
+    if (mentionsFever) {
+      const isDenied = /\b(no|nope|not|neither|without|no\s+fever|haven'?t\s+had\s+fever)\b/i.test(lower);
+      const status = isDenied ? "absent" : "present";
+      const normalizedText = isDenied ? "Denied (No fever)" : "Present (Fever / chills)";
+
+      const fact: ClinicalFact = {
+        id: `fact-fever-${turnId}`,
+        name: "fever",
+        label: "Fever / Pyrexia",
+        category: "associated_symptom",
+        status,
+        value: !isDenied,
+        normalizedText,
+        confidence: 0.94,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+      if (isDenied) deniedTopics.push("fever");
+    }
+
+    // Ear pain / Otalgia
+    const mentionsEarPain = /\b(ear\s+pain|earache|ears?\s+hurts?|ear\s+is\s+(?:hurting|aching|paining)|pain\s+spreads?\s+to\s+ears?|my\s+ear\s+hurts?)\b/i.test(lower);
+    if (mentionsEarPain) {
+      const isDenied = /\b(no|nope|not|neither|no\s+ear\s+pain)\b/i.test(lower);
+      const status = isDenied ? "absent" : "present";
+      const normalizedText = isDenied ? "Denied (No ear pain)" : "Present (Referred ear pain)";
+
+      const fact: ClinicalFact = {
+        id: `fact-ear-pain-${turnId}`,
+        name: "ear_pain",
+        label: "Ear pain (Otalgia)",
+        category: "associated_symptom",
+        status,
+        value: !isDenied,
+        normalizedText,
+        confidence: 0.94,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+      if (isDenied) deniedTopics.push("ear_pain");
+    }
+
+    // Airway / Stridor / Breathing difficulty
+    const mentionsAirway = /\b(stridor|gasp|breathing|hard\s+to\s+breathe|throat\s+closing|choking|airway)\b/i.test(lower);
+    if (mentionsAirway) {
+      const isCritical = /\b(closing|stridor|choking|gasping|cannot\s+breathe)\b/i.test(lower);
+      const isDenied = /\b(no|fine|breathing\s+is\s+fine|no\s+trouble\s+breathing)\b/i.test(lower);
+
+      redFlagAssessments.airway = {
+        domain: "airway",
+        label: "Airway & breathing",
+        assessed: true,
+        status: isCritical ? "critical" : isDenied ? "clear" : "concerning",
+        finding: isCritical ? "Airway distress reported" : isDenied ? "Airway clear" : "Breathing concern",
+      };
+    }
+
+    // 4. CARDIOVASCULAR & CHEST SYMPTOMS
+    const mentionsChest = /\b(chest|heart|sternum|angina)\b/i.test(lower);
+    if (mentionsChest) {
+      const isDenied = /\b(no|not|neither)\s+chest\s+pain\b/i.test(lower);
+      if (!isDenied) {
+        const fact: ClinicalFact = {
+          id: `fact-chest-pain-${turnId}`,
+          name: "chest_pain",
+          label: "Chest discomfort",
+          category: "chief_complaint",
+          status: "present",
+          value: true,
+          normalizedText: "Present (Chest discomfort)",
+          confidence: 0.96,
+          source: "patient",
+          turnId,
+          timestamp,
+        };
+        newFacts.push(fact);
+      }
+
+      const charMatch = lower.match(/\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/i);
+      if (charMatch) {
+        const fact: ClinicalFact = {
+          id: `fact-chest-char-${turnId}`,
+          name: "character",
+          label: "Chest sensation",
+          category: "symptom_profile",
+          status: "present",
+          value: charMatch[0],
+          normalizedText: `${charMatch[0].charAt(0).toUpperCase() + charMatch[0].slice(1)} sensation`,
+          confidence: 0.95,
+          source: "patient",
+          turnId,
+          timestamp,
+        };
+        newFacts.push(fact);
+        symptomProfileUpdates.character = fact;
+      }
+    }
+
+    // Diaphoresis / Cold sweats
+    const mentionsDiaphoresis = /\b(cold\s+sweats?|sweating|clammy|diaphoresis)\b/i.test(lower) && !/\b(no|not|neither)\s+(?:cold\s+)?sweats?\b/i.test(lower);
+    if (mentionsDiaphoresis) {
+      const fact: ClinicalFact = {
+        id: `fact-diaphoresis-${turnId}`,
+        name: "diaphoresis",
+        label: "Diaphoresis / Cold sweats",
+        category: "associated_symptom",
+        status: "present",
+        value: true,
+        normalizedText: "Present (Cold sweats / diaphoresis)",
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+    }
+
+    // 5. NEUROLOGICAL SYMPTOMS (BE-FAST)
+    if (/\b(droop|face.*droop|facial.*asymmetry)\b/i.test(lower)) {
+      const isDenied = /\b(no|none|never)\b/i.test(lower);
+      redFlagAssessments.neurological = {
+        domain: "neurological",
+        label: "Focal neurological deficit (BE-FAST)",
+        assessed: true,
+        status: isDenied ? "clear" : "critical",
+        finding: isDenied ? "No facial droop" : "Acute facial droop reported",
+      };
+      if (isDenied) deniedTopics.push("facial_droop");
+    }
+
+    // 6. TIMELINE, ONSET & COURSE (STRICT NORMALIZATION - NO UTTERANCE LEAKS)
+    // Extract Onset
+    const timeMatch = lower.match(/\b(?:since|from|about|approx\.?|roughly)?\s*(\d+\s*(?:minutes?|hours?|days?|weeks?)|morning\s+\d+\s+days?\s+ago|\d+\s+days?\s+ago|yesterday|this\s+morning|an?\s+hour|two\s+days|three\s+days)\b/i);
+    if (timeMatch) {
+      const cleanTime = timeMatch[0].replace(/^(?:since|from|about|roughly)\s*/i, "").trim();
+      const onsetFact: ClinicalFact = {
+        id: `fact-onset-${turnId}`,
+        name: "onset",
+        label: "Onset time",
+        category: "symptom_profile",
+        status: "present",
+        value: cleanTime,
+        normalizedText: cleanTime.startsWith("~") ? cleanTime : `~${cleanTime}`,
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(onsetFact);
+      symptomProfileUpdates.onset = onsetFact;
+
+      // Duration can also be inferred if framed as "for X days"
+      if (/\bfor\s+\d+\s+days?\b/i.test(lower) || /\bfor\s+two\s+days\b/i.test(lower)) {
+        const durFact: ClinicalFact = {
+          id: `fact-duration-${turnId}`,
+          name: "duration",
+          label: "Duration",
+          category: "symptom_profile",
+          status: "present",
+          value: cleanTime,
+          normalizedText: `~${cleanTime}`,
+          confidence: 0.94,
+          source: "patient",
+          turnId,
+          timestamp,
+        };
+        newFacts.push(durFact);
+        symptomProfileUpdates.duration = durFact;
+      }
+    }
+
+    // Extract Course (Sudden vs Gradual / Worsening)
+    const hasGradual = /\b(gradual(?:ly)?|slowly|built\s+up|over\s+time|increased\s+by\s+the\s+next\s+day)\b/i.test(lower);
+    const hasSudden = /\b(sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere|all\s+at\s+once)\b/i.test(lower);
+    const hasWorsening = /\b(gradually\s+increased|got\s+worse|worsened|worse\s+today|increasing)\b/i.test(lower);
+
+    if (hasGradual || hasSudden || hasWorsening) {
+      let courseText = "Gradually worsening";
+      if (hasSudden) courseText = "Sudden onset";
+      else if (hasGradual && hasWorsening) courseText = "Gradually worsening over 24-48 hours";
+      else if (hasGradual) courseText = "Gradual onset";
+
+      const courseFact: ClinicalFact = {
+        id: `fact-course-${turnId}`,
+        name: "course",
+        label: "Symptom course",
+        category: "symptom_profile",
+        status: "present",
+        value: courseText,
+        normalizedText: courseText,
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(courseFact);
+      symptomProfileUpdates.course = courseFact;
+    }
+
+    // 7. SEVERITY (0-10 or Mild/Moderate/Severe)
+    const severityNumMatch = lower.match(/\b([0-9]|10)\s*(?:out\s+of\s+10|\/10)?\b/i);
+    const hasQualSeverity = /\b(mild|moderate|severe|unbearable|excruciating|tolerable)\b/i.test(lower);
+
+    if (severityNumMatch && lastTarget === "severity") {
+      const sevVal = `${severityNumMatch[1]}/10`;
+      const sevFact: ClinicalFact = {
+        id: `fact-severity-${turnId}`,
+        name: "severity",
+        label: "Pain severity",
+        category: "symptom_profile",
+        status: "present",
+        value: parseInt(severityNumMatch[1], 10),
+        normalizedText: sevVal,
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(sevFact);
+      symptomProfileUpdates.severity = sevFact;
+    } else if (hasQualSeverity) {
+      const qualMatch = lower.match(/\b(mild|moderate|severe|unbearable)\b/i);
+      if (qualMatch) {
+        const sevFact: ClinicalFact = {
+          id: `fact-severity-${turnId}`,
+          name: "severity",
+          label: "Pain severity",
+          category: "symptom_profile",
+          status: "present",
+          value: qualMatch[0],
+          normalizedText: `${qualMatch[0].charAt(0).toUpperCase() + qualMatch[0].slice(1)} severity`,
+          confidence: 0.92,
+          source: "patient",
+          turnId,
+          timestamp,
+        };
+        newFacts.push(sevFact);
+        symptomProfileUpdates.severity = sevFact;
+      }
+    }
+
+    // 8. Handle "Nothing much" answering previous question
+    if (isNegativeStatement && lastTarget && !mentionsSwallowing && !mentionsFever && !mentionsEarPain) {
+      deniedTopics.push(lastTarget);
+      if (lastTarget === "swallowing_difficulty") {
+        redFlagAssessments.swallowing = {
+          domain: "swallowing",
+          label: "Swallowing & saliva management",
+          assessed: true,
+          status: "clear",
+          finding: "Denied / Normal",
+        };
+      }
+    }
+
+    // Chief complaint assignment
+    let updatedChiefComplaint: ClinicalFact | undefined = undefined;
+    if (!state.chiefComplaint) {
+      const primarySymptom = newFacts.find(f => f.category === "chief_complaint");
+      if (primarySymptom) {
+        updatedChiefComplaint = primarySymptom;
+      }
+    }
+
+    return {
+      rawUtterance: text,
+      intent,
+      newFacts,
+      updatedChiefComplaint,
+      symptomProfileUpdates,
+      associatedSymptomsUpdates,
+      redFlagAssessments,
+      deniedTopics,
+      newFindingsDetected,
+      isReaffirmation,
+      requiresClarification: false,
+    };
+  }
+}
+
+export const evidenceExtractor = new EvidenceExtractor();

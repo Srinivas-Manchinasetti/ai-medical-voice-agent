@@ -4,6 +4,9 @@ import { PreArbiterResult } from "./pre-arbiter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 
 export type PlanGoal =
+  | "CONFIRM_CORRECTION_AND_PROCEED"
+  | "ACKNOWLEDGE_AND_ADVANCE"
+  | "GENTLE_CLARIFICATION"
   | "RESOLVE_OBJECTION_REPETITION"
   | "VALIDATE_EMOTION_BEFORE_INQUIRY"
   | "ADDRESS_ACCESS_BARRIER"
@@ -88,6 +91,18 @@ export class ResponsePlanner {
         };
       }
 
+      const isThroatOrVoiceRepetition = /\b(throat|voice|insist)\b/i.test(textLower) ||
+        state.slots.known_facts.some(f => /throat|voice/i.test(f));
+      if (isThroatOrVoiceRepetition) {
+        return {
+          primaryGoal: "RESOLVE_OBJECTION_REPETITION",
+          conversationalFocus: "Acknowledge patient's reaffirmed symptoms (throat pain and voice change) with humility. Reassure them that these are noted, and ask a single unasked safety or severity question without repeating previous questions.",
+          mustAvoidAsking: [...memory.questionsAlreadyAsked, "voice change", "how long", "onset"],
+          bedsideTone: "empathic_and_calm",
+          suggestedSpokenReply: "Understood, and we have the throat pain and voice change clearly recorded. On a scale from zero to ten, how severe is the throat pain right now?",
+        };
+      }
+
       const known = memory.confirmedFacts.length > 0
         ? memory.confirmedFacts.slice(0, 3).join(", ")
         : "the symptoms we've covered";
@@ -101,6 +116,41 @@ export class ResponsePlanner {
         mustAvoidAsking: [...memory.questionsAlreadyAsked, "frequency", "known heart disease", "onset"],
         bedsideTone: "empathic_and_calm",
         suggestedSpokenReply: `You're right — I don't want to make you repeat yourself. I have noted ${refSnippet}. What part are you feeling like we're retreading, or is there a specific concern you'd like us to focus on?`,
+      };
+    }
+
+    // 2.5 PATIENT CONTRADICTION / CORRECTION ("Actually it started yesterday", "No, left arm")
+    if (semantic.intent === "correction" || semantic.isCorrection) {
+      const detail = semantic.correctedDetail || "your updated information";
+      const slot = semantic.correctedSlot || "corrected_fact";
+      return {
+        primaryGoal: "CONFIRM_CORRECTION_AND_PROCEED",
+        conversationalFocus: `Acknowledge the patient's correction (${detail}) with clarity, gratitude, and reassurance. Do not ask for the old or new value again; confirm the updated fact and continue clinical intake.`,
+        mustAvoidAsking: [...memory.questionsAlreadyAsked, slot, "onset", "when did it start"],
+        bedsideTone: "attentive_and_methodical",
+        suggestedSpokenReply: `Got it, thank you for clarifying — noted ${detail}. Has the discomfort been getting worse, improving, or staying about the same?`,
+      };
+    }
+
+    // 2.6 UNCERTAINTY / PATIENT SAYS "I DON'T KNOW"
+    if (semantic.intent === "uncertainty_or_unknown" || semantic.isUncertainty) {
+      return {
+        primaryGoal: "ACKNOWLEDGE_AND_ADVANCE",
+        conversationalFocus: "Acknowledge that the patient does not know or is unsure with warm reassurance, avoid badgering them for that detail, and move smoothly to the next unasked clinical question.",
+        mustAvoidAsking: [...memory.questionsAlreadyAsked, state.pendingQuestion?.targetSlot || "unknown_topic"],
+        bedsideTone: "empathic_and_calm",
+        suggestedSpokenReply: "That's completely fine — you don't have to know for sure. Let's focus on what you're noticing right now. Does it feel constant, or does it come and go?",
+      };
+    }
+
+    // 2.7 VAGUE ANSWER ("a bit", "kind of")
+    if (semantic.intent === "vague_answer") {
+      return {
+        primaryGoal: "GENTLE_CLARIFICATION",
+        conversationalFocus: "Gently clarify the patient's vague response without sounding interrogative.",
+        mustAvoidAsking: memory.questionsAlreadyAsked,
+        bedsideTone: "empathic_and_calm",
+        suggestedSpokenReply: "Take your time. Does it feel constant throughout the day, or does it come and go?",
       };
     }
 
@@ -262,11 +312,53 @@ export class ResponsePlanner {
         };
       }
     } else {
-      if (!state.slots.onset && !askedQuestions.has("onset")) {
+      const hasVoiceChange = /\b(voice\s+has\s+been\s+ruined|voice\s+changed|voice\s+is\s+different|lost\s+my\s+voice|hoarse|hoarseness)\b/i.test(patientUtterance) ||
+        state.slots.associated_symptoms.some(s => /voice/i.test(s));
+      const hasThroat = /\b(throat|swallow)\b/i.test(patientUtterance) ||
+        state.slots.known_facts.some(f => /throat/i.test(f));
+
+      // Pivot to new voice change finding if just reported
+      if (hasVoiceChange && !askedQuestions.has("voice_character")) {
+        nextInquiry = {
+          topic: "voice_character",
+          clinicalRationale: "Patient communicated a voice change. Differentiate hoarseness / laryngitis from aphonia or upper airway difficulty.",
+          suggestedPhrasing: "The voice change is useful to know. Is it more like hoarseness, weakness, or difficulty producing your voice?",
+        };
+      } else if (!state.slots.onset && !askedQuestions.has("onset")) {
         nextInquiry = {
           topic: "onset",
           clinicalRationale: "Establish symptom timeline and progression.",
           suggestedPhrasing: "Could you tell me when this began, and whether it started suddenly or built up gradually?",
+        };
+      } else if (hasThroat && !state.slots.known_facts.some(f => /course/i.test(f)) && !askedQuestions.has("course")) {
+        nextInquiry = {
+          topic: "course",
+          clinicalRationale: "Establish course and progression of throat symptoms.",
+          suggestedPhrasing: "Has the throat pain been getting worse, improving, or staying about the same?",
+        };
+      } else if (hasThroat && !askedQuestions.has("swallowing_difficulty")) {
+        nextInquiry = {
+          topic: "swallowing_difficulty",
+          clinicalRationale: "Screen for red-flag dysphagia, peritonsillar abscess, and upper airway compromise.",
+          suggestedPhrasing: "Have you had any difficulty swallowing liquids or your own saliva?",
+        };
+      } else if (hasThroat && !askedQuestions.has("fever")) {
+        nextInquiry = {
+          topic: "fever",
+          clinicalRationale: "Screen for systemic infection and bacterial pharyngitis.",
+          suggestedPhrasing: "Have you had a fever or chills?",
+        };
+      } else if (!state.slots.severity && !askedQuestions.has("severity")) {
+        nextInquiry = {
+          topic: "severity",
+          clinicalRationale: "Quantify symptom pain intensity.",
+          suggestedPhrasing: "How severe is the throat pain right now on a scale from zero to ten?",
+        };
+      } else if (hasThroat && !askedQuestions.has("ear_pain")) {
+        nextInquiry = {
+          topic: "ear_pain",
+          clinicalRationale: "Screen for referred otalgia.",
+          suggestedPhrasing: "Are you feeling any ear pain or pain radiating to your ears?",
         };
       }
     }

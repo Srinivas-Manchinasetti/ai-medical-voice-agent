@@ -2,15 +2,14 @@ import { KokoroTTS } from "kokoro-js";
 
 /**
  * Deterministic Doctor Profile to Kokoro Voice Mapping
- * Primary Invariant:
- * Dr. Sarah Chen is the SOLE audible patient-facing clinician voice (af_heart).
+ * Redesigned around voice character, regional accent, and calibrated speed.
  */
 export const DOCTOR_KOKORO_VOICES: Record<string, string> = {
-  "dr-sarah-chen": "af_heart", // Empathetic, clear, warm female voice (Grade A)
-  "dr-marcus-vance": "am_michael", // Authoritative, focused male cardiologist
-  "dr-elena-rostova": "af_bella", // Gentle, compassionate pediatrician
-  "dr-arthur-pendelton": "bm_george", // Methodical British neurologist
-  "dr-priya-patel": "af_nicole", // Crisp, friendly dermatologist
+  "dr-sarah-chen": "af_sarah", // Warm, conversational, calm American female
+  "dr-marcus-vance": "am_michael", // Authoritative, focused American male cardiologist
+  "dr-elena-rostova": "bf_emma", // Gentle, compassionate British female pediatrician
+  "dr-arthur-pendelton": "bm_george", // Methodical, analytical British male neurologist
+  "dr-priya-patel": "af_nicole", // Crisp, friendly American female dermatologist
 };
 
 export function resolveAuthoritativeVoice(doctorId?: string): string {
@@ -20,7 +19,21 @@ export function resolveAuthoritativeVoice(doctorId?: string): string {
   return DEFAULT_PATIENT_FACING_VOICE;
 }
 
-export const DEFAULT_PATIENT_FACING_VOICE = "af_heart";
+export function resolveAuthoritativeSpeed(doctorId?: string): number {
+  const SPEED_MAP: Record<string, number> = {
+    "dr-sarah-chen": 0.96,
+    "dr-marcus-vance": 0.92,
+    "dr-elena-rostova": 0.97,
+    "dr-arthur-pendelton": 0.90,
+    "dr-priya-patel": 0.98,
+  };
+  if (doctorId && SPEED_MAP[doctorId]) {
+    return SPEED_MAP[doctorId];
+  }
+  return 0.96;
+}
+
+export const DEFAULT_PATIENT_FACING_VOICE = "af_sarah";
 
 export interface SynthesisResult {
   buffer: Buffer;
@@ -138,9 +151,13 @@ class KokoroService {
       } | Voice: ${selectedVoice}`
     );
 
+    const selectedSpeed = typeof options.speed === "number" && options.speed > 0
+      ? options.speed
+      : resolveAuthoritativeSpeed(options.doctorId);
+
     const rawAudio = await tts.generate(cleanText, {
       voice: selectedVoice as any,
-      speed: options.speed || 1.0,
+      speed: selectedSpeed,
     });
 
     const latencyMs = Date.now() - t0;

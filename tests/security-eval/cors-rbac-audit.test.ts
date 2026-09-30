@@ -149,15 +149,15 @@ async function runSecurityAndAuditTestSuite() {
   // TEST 5: Doctor Voice Persona Identity Invariants
   console.log("\n[Test Suite 5] Immutable Doctor Voice Persona Invariants");
   {
-    const { DOCTOR_PROFILES, getDoctorById } = await import("../../config/doctors");
-    const { DOCTOR_KOKORO_VOICES, resolveAuthoritativeVoice } = await import("../../lib/audio/kokoro-service");
+    const { DOCTOR_PROFILES, DOCTOR_VOICE_PROFILES, getDoctorById } = await import("../../config/doctors");
+    const { DOCTOR_KOKORO_VOICES, resolveAuthoritativeVoice, resolveAuthoritativeSpeed } = await import("../../lib/audio/kokoro-service");
 
-    const EXPECTED_VOICES: Record<string, { voiceId: string; gender: "female" | "male" }> = {
-      "dr-sarah-chen": { voiceId: "af_heart", gender: "female" },
-      "dr-marcus-vance": { voiceId: "am_michael", gender: "male" },
-      "dr-elena-rostova": { voiceId: "af_bella", gender: "female" },
-      "dr-arthur-pendelton": { voiceId: "bm_george", gender: "male" },
-      "dr-priya-patel": { voiceId: "af_nicole", gender: "female" },
+    const EXPECTED_VOICES: Record<string, { voiceId: string; gender: "female" | "male"; speed: number; provider: string }> = {
+      "dr-sarah-chen": { voiceId: "af_sarah", gender: "female", speed: 0.96, provider: "kokoro" },
+      "dr-marcus-vance": { voiceId: "am_michael", gender: "male", speed: 0.92, provider: "kokoro" },
+      "dr-elena-rostova": { voiceId: "bf_emma", gender: "female", speed: 0.97, provider: "kokoro" },
+      "dr-arthur-pendelton": { voiceId: "bm_george", gender: "male", speed: 0.90, provider: "kokoro" },
+      "dr-priya-patel": { voiceId: "af_nicole", gender: "female", speed: 0.98, provider: "kokoro" },
     };
 
     assert(DOCTOR_PROFILES.length === 5, "5 distinct clinical personas defined");
@@ -167,13 +167,18 @@ async function runSecurityAndAuditTestSuite() {
       assert(!!expected, `Doctor profile '${doc.id}' registered in expected voices matrix`);
       assert(doc.voiceId === expected.voiceId, `Doctor '${doc.name}' (${doc.id}) has immutable voiceId: '${expected.voiceId}'`);
       assert(doc.voiceGender === expected.gender, `Doctor '${doc.name}' has matching voiceGender: '${expected.gender}'`);
-      assert(DOCTOR_KOKORO_VOICES[doc.id] === expected.voiceId, `Kokoro service mapping confirms '${doc.id}' -> '${expected.voiceId}'`);
+      assert(doc.voiceProfile.speed === expected.speed, `Doctor '${doc.name}' has calibrated prosody speed: ${expected.speed}`);
       
+      if (expected.provider === "kokoro") {
+        assert(DOCTOR_KOKORO_VOICES[doc.id] === expected.voiceId, `Kokoro service mapping confirms '${doc.id}' -> '${expected.voiceId}'`);
+        const authoritativeVoice = resolveAuthoritativeVoice(doc.id);
+        assert(authoritativeVoice === expected.voiceId, `resolveAuthoritativeVoice returns '${expected.voiceId}' for ${doc.id}`);
+        const authoritativeSpeed = resolveAuthoritativeSpeed(doc.id);
+        assert(authoritativeSpeed === expected.speed, `resolveAuthoritativeSpeed returns '${expected.speed}' for ${doc.id}`);
+      }
+
       const resolved = getDoctorById(doc.id);
       assert(resolved.voiceId === expected.voiceId, `getDoctorById resolves voiceId '${expected.voiceId}' for ${doc.name}`);
-
-      const authoritativeVoice = resolveAuthoritativeVoice(doc.id);
-      assert(authoritativeVoice === expected.voiceId, `resolveAuthoritativeVoice returns '${expected.voiceId}' for ${doc.id}`);
     }
 
     // Anti-Spoofing & Client Override Rejection Test
@@ -182,14 +187,15 @@ async function runSecurityAndAuditTestSuite() {
       // Attempt: Client requests Dr. Priya Patel (female) with Dr. Marcus's voice (male)
       const spoofedAttemptDoctorId = "dr-priya-patel";
       const spoofedRequestedVoice = "am_michael";
-      const enforcedVoice = resolveAuthoritativeVoice(spoofedAttemptDoctorId);
+      const profile = DOCTOR_VOICE_PROFILES[spoofedAttemptDoctorId];
+      const enforcedVoice = profile.voiceId;
 
       assert(enforcedVoice === "af_nicole", "Server strictly enforces af_nicole for Dr. Priya Patel, rejecting spoofed am_michael");
       assert(enforcedVoice !== spoofedRequestedVoice, "Server-authoritative voice does NOT honor unauthorized client voice override");
 
       // Attempt: Unknown / manipulated doctor ID
       const fallbackVoice = resolveAuthoritativeVoice("invalid-manipulated-doctor-id");
-      assert(fallbackVoice === "af_heart", "Unknown doctor ID defaults safely to lead clinician voice (af_heart), preventing arbitrary synthesis");
+      assert(fallbackVoice === "af_sarah", "Unknown doctor ID defaults safely to lead clinician voice (af_sarah), preventing arbitrary synthesis");
     }
   }
 

@@ -77,6 +77,7 @@ interface ChatMessage {
   timestamp: string;
   doctorName?: string;
   doctorSpecialty?: string;
+  doctorId?: string;
   wasInterrupted?: boolean;
   isBargeIn?: boolean;
 }
@@ -109,6 +110,7 @@ interface LiveTriageData {
   isEmergency?: boolean;
   arbiterOverride?: boolean;
   overrideRationale?: string;
+  redFlagsTriggered?: string[];
   detectedSymptoms: string[];
   icdCodes: string[];
   recommendedAction: string;
@@ -319,7 +321,29 @@ function formatClinicalFact(raw: string): string {
     }
 
     if (key === "ONSET") {
-      return `Onset: approx. ${val}`;
+      const cleanVal = val.replace(/^(?:approx\.?|roughly|about)\s*/i, "").trim();
+      return `Started ~${cleanVal}`;
+    }
+
+    if (key === "DURATION") {
+      const cleanVal = val.replace(/^(?:approx\.?|roughly|about)\s*/i, "").trim();
+      return `Duration: ~${cleanVal}`;
+    }
+
+    if (key === "COURSE") {
+      return `Course: ${val}`;
+    }
+
+    if (key === "VOICE_CHANGE" || key === "VOICE CHANGE") {
+      return "Voice change present";
+    }
+
+    if (key === "THROAT_PAIN" || key === "THROAT PAIN") {
+      return "Throat pain present";
+    }
+
+    if (key === "DENIED") {
+      return `Denied: ${val}`;
     }
 
     if (key === "ASSOCIATED") {
@@ -353,7 +377,7 @@ export default function ConsultPage() {
     department: string;
     avatarUrl: string;
     voiceGender: "female" | "male";
-    voiceEngine: "Kokoro" | "Browser Fallback" | "Text Only";
+    voiceEngine: string;
   }>({
     id: DOCTOR_PROFILES[0].id,
     name: DOCTOR_PROFILES[0].name,
@@ -482,18 +506,20 @@ export default function ConsultPage() {
     },
     {
       id: "step-deliberation",
-      label: "Multi-specialist clinical board deliberation",
+      label: "Multi-specialist clinical review",
       detail: boardData?.opinions && boardData.opinions.length > 0
         ? `${boardData.opinions.length} specialist evaluations synthesized`
-        : "Cardiology, neurology, and triage swarm reviewing",
-      status: boardData?.phase === "deliberating" || boardData?.phase === "decided" || (boardData?.opinions && boardData.opinions.length > 1) ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+        : (boardData?.deliberation_messages && boardData.deliberation_messages.length > 0)
+        ? `${boardData.deliberation_messages.length} specialist assessments active`
+        : "Cardiology, neurology, and internal medicine monitoring",
+      status: (boardData?.opinions && boardData.opinions.length > 0) || (boardData?.deliberation_messages && boardData.deliberation_messages.length > 0) ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
     },
     {
       id: "step-esi",
       label: "ESI triage urgency assessment",
       detail: triageData?.esiScore
         ? `Assigned ESI-${triageData.esiScore} (${triageData.triageLevel.toUpperCase()})`
-        : "Evaluating life-threat invariants & algorithmic guardrails",
+        : "Awaiting history completeness for disposition lock",
       status: triageData?.esiScore ? "completed" : "pending"
     },
     {
@@ -570,6 +596,7 @@ export default function ConsultPage() {
   const preferredFemaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const preferredMaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackSessionTokenRef = useRef<number>(0);
 
   // Natural conversational voice intake refs
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -690,6 +717,9 @@ export default function ConsultPage() {
   // Immediate Barge-In: cleanly halts doctor TTS and starts listening
   const triggerBargeIn = useCallback((customPhrase?: string) => {
     console.log("⚡ Interrupting doctor speech immediately.");
+    // Invalidate any in-flight async TTS generation so late-arriving audio is suppressed
+    playbackSessionTokenRef.current += 1;
+
     if (activeAudioRef.current) {
       try {
         activeAudioRef.current.pause();
@@ -724,14 +754,19 @@ export default function ConsultPage() {
     }
   }, []);
 
-  // Text-To-Speech with Kokoro-first Neural Audio and deterministic persona-safe fallback
-  const speakDoctorResponse = useCallback(async (text: string, doctorId?: string) => {
+  // Text-To-Speech with Kokoro-first Neural Audio, regional accent variation & race-safe playback
+  const speakDoctorResponse = useCallback(async (text: string, doctorId: string, expectedToken?: number) => {
     const cleanText = text.replace(/[*_#`\[\]()]/g, "").trim();
     if (!cleanText) return;
 
-    // 1. Resolve immutable doctor persona for this response
-    const targetDocId = doctorId || selectedDoctor.id;
-    const targetDoctor = getDoctorById(targetDocId) || selectedDoctor;
+    // 1. Resolve immutable doctor persona strictly from doctorId (server-authoritative)
+    const targetDoctor = getDoctorById(doctorId);
+
+    // 2. Playback Session Token Guard
+    if (expectedToken === undefined) {
+      playbackSessionTokenRef.current += 1;
+    }
+    const token = expectedToken ?? playbackSessionTokenRef.current;
 
     // Synchronize active speaker identity across UI components
     setActiveSpeaker({
@@ -745,7 +780,7 @@ export default function ConsultPage() {
       voiceEngine: "Kokoro",
     });
 
-    // 2. Halt any ongoing audio and speech intake immediately
+    // 3. Halt any ongoing audio and speech intake immediately
     stopSpeechRecognitionListening();
 
     if (activeAudioRef.current) {
@@ -764,6 +799,8 @@ export default function ConsultPage() {
     setAudioState("DOCTOR_SPEAKING");
 
     const handleSpeechEnd = () => {
+      if (playbackSessionTokenRef.current !== token) return;
+
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         try { window.speechSynthesis.cancel(); } catch {}
       }
@@ -772,7 +809,7 @@ export default function ConsultPage() {
       if (callActiveRef.current) {
         // Safe 300ms buffer so room acoustic decay completes before re-arming patient mic
         setTimeout(() => {
-          if (callActiveRef.current) {
+          if (callActiveRef.current && playbackSessionTokenRef.current === token) {
             startSpeechRecognitionListeningRef.current?.();
           }
         }, 300);
@@ -781,9 +818,10 @@ export default function ConsultPage() {
       }
     };
 
-    // Helper for deterministic, persona-safe browser TTS fallback (Only used on genuine Kokoro failure)
-    const playBrowserFallback = () => {
-      console.warn(`[MedVoice Audio Fallback] Kokoro TTS unavailable for ${targetDoctor.name} (voiceId: ${targetDoctor.voiceId}). Attempting deterministic fallback...`);
+    // Helper for deterministic, persona-safe browser TTS fallback (Only used when primary neural provider is offline/unconfigured)
+    const playBrowserFallback = (targetLocale?: string) => {
+      if (playbackSessionTokenRef.current !== token) return;
+      console.warn(`[MedVoice Audio Fallback] Primary TTS engine unavailable for ${targetDoctor.name} (${targetDoctor.voiceProfile?.provider} / ${targetDoctor.voiceId}). Attempting deterministic fallback...`);
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
         setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Text Only" }));
         handleSpeechEnd();
@@ -791,33 +829,57 @@ export default function ConsultPage() {
       }
 
       const isFemale = targetDoctor.voiceGender === "female";
+      const isBritish = targetDoctor.voiceProfile?.accent === "british";
+      const isIndian = targetDoctor.voiceProfile?.accent === "indian" || targetLocale === "en-IN";
       const voices = window.speechSynthesis.getVoices();
       const englishVoices = voices.filter((v) => v.lang.startsWith("en"));
 
+      // Regional accent matching
+      let candidateVoices = englishVoices;
+      if (isIndian) {
+        const indianVoices = englishVoices.filter((v) => v.lang.includes("IN") || /India|Heera|Veena|Kavya|Priya|Hindi/i.test(v.name));
+        if (indianVoices.length > 0) candidateVoices = indianVoices;
+      } else if (isBritish) {
+        const britishVoices = englishVoices.filter((v) => v.lang.includes("GB") || /UK|British|George|Hazel|Oliver|Victoria/i.test(v.name));
+        if (britishVoices.length > 0) candidateVoices = britishVoices;
+      } else {
+        const americanVoices = englishVoices.filter((v) => v.lang.includes("US") || /US|American|Samantha|David|Zira|Jenny/i.test(v.name));
+        if (americanVoices.length > 0) candidateVoices = americanVoices;
+      }
+
       // Per-doctor specific preferred voice name patterns
       const DOCTOR_FALLBACK_PATTERNS: Record<string, RegExp> = {
-        "dr-sarah-chen": /Samantha|Zira|Jenny|Aria|Victoria/i,
-        "dr-marcus-vance": /David|Guy|Alex|Mark|George|Male/i,
-        "dr-elena-rostova": /Hazel|Samantha|Jenny|Victoria|Female/i,
-        "dr-arthur-pendelton": /George|Oliver|Daniel|David|Male/i,
-        "dr-priya-patel": /Heera|Zira|Samantha|Google UK English Female|Female/i,
+        "dr-sarah-chen": /Samantha|Zira|Jenny|Aria/i,
+        "dr-marcus-vance": /David|Guy|Alex|Mark|Male/i,
+        "dr-elena-rostova": /Hazel|Victoria|Emma|Libby|Female/i,
+        "dr-arthur-pendelton": /George|Oliver|Daniel|Male/i,
+        "dr-priya-patel": /Heera|Veena|Kavya|India|Female/i,
       };
 
       const pattern = DOCTOR_FALLBACK_PATTERNS[targetDoctor.id];
       let chosenVoice: SpeechSynthesisVoice | undefined;
 
-      if (pattern && englishVoices.length > 0) {
-        chosenVoice = englishVoices.find((v) => pattern.test(v.name));
+      if (pattern && candidateVoices.length > 0) {
+        chosenVoice = candidateVoices.find((v) => pattern.test(v.name));
       }
 
       // Strict gender preservation: NEVER play cross-gender voice
-      if (!chosenVoice && englishVoices.length > 0) {
+      if (!chosenVoice && candidateVoices.length > 0) {
         if (isFemale) {
           chosenVoice =
-            englishVoices.find((v) => /female|woman|zira|samantha|victoria|jenny|karen/i.test(v.name)) ||
-            englishVoices.find((v) => !/male|david|mark|george|alex|daniel|guy/i.test(v.name));
+            candidateVoices.find((v) => /female|woman|zira|samantha|victoria|jenny|karen|hazel|emma|heera|veena|kavya/i.test(v.name)) ||
+            candidateVoices.find((v) => !/male|david|mark|george|alex|daniel|guy|oliver/i.test(v.name));
         } else {
-          chosenVoice = englishVoices.find((v) => /male|man|david|mark|george|guy|alex|daniel/i.test(v.name));
+          chosenVoice = candidateVoices.find((v) => /male|man|david|mark|george|guy|alex|daniel|oliver/i.test(v.name));
+        }
+      }
+
+      // If still no voice from regional pool, check general english voices with gender constraint
+      if (!chosenVoice && englishVoices.length > 0) {
+        if (isFemale) {
+          chosenVoice = englishVoices.find((v) => /female|woman/i.test(v.name)) || englishVoices.find((v) => !/male/i.test(v.name));
+        } else {
+          chosenVoice = englishVoices.find((v) => /male|man/i.test(v.name));
         }
       }
 
@@ -838,15 +900,18 @@ export default function ConsultPage() {
         return;
       }
 
-      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Browser Fallback" }));
+      const engineLabel = isIndian ? "Browser Fallback (en-IN Dev Mode)" : "Browser Fallback";
+      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: engineLabel }));
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.voice = chosenVoice;
-      utterance.rate = 1.0;
-      utterance.pitch = isFemale ? 1.05 : 0.95;
+      utterance.rate = targetDoctor.voiceProfile?.speed || 1.0;
+      utterance.pitch = 1.0; // Clean prosody: character derives from voice identity and rate, not pitch distortion
 
       utterance.onstart = () => {
-        setAudioState("DOCTOR_SPEAKING");
+        if (playbackSessionTokenRef.current === token) {
+          setAudioState("DOCTOR_SPEAKING");
+        }
       };
       utterance.onend = handleSpeechEnd;
       utterance.onerror = handleSpeechEnd;
@@ -854,24 +919,47 @@ export default function ConsultPage() {
       window.speechSynthesis.speak(utterance);
     };
 
-    // 3. Primary Path: Kokoro Neural Audio (/api/voice/tts)
+    // 4. Primary Path: Multi-Provider Neural Audio Dispatcher (/api/voice/tts)
     try {
-      console.log(`[MedVoice Audio] Synthesizing speech via Kokoro (voice: ${targetDoctor.voiceId}) for ${targetDoctor.name}...`);
+      console.log(`[MedVoice Audio] Requesting speech via TTS Dispatcher (provider: ${targetDoctor.voiceProfile?.provider || "kokoro"}, voice: ${targetDoctor.voiceId}) for ${targetDoctor.name}...`);
       const response = await fetch("/api/voice/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: cleanText,
           doctorId: targetDoctor.id,
-          voice: targetDoctor.voiceId,
+          speed: targetDoctor.voiceProfile?.speed || 0.96,
         }),
       });
 
+      if (playbackSessionTokenRef.current !== token) {
+        console.log(`[MedVoice Audio] Discarding in-flight TTS result for ${targetDoctor.name} (token mismatch).`);
+        return;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+
+      // Check if server indicated fallback (e.g. cloud provider credentials missing in dev)
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data.fallbackRequired) {
+          console.info(`[MedVoice Audio] Server returned development fallback signal for ${targetDoctor.name}: ${data.reason}`);
+          playBrowserFallback(data.locale);
+          return;
+        }
+      }
+
       if (!response.ok) {
-        throw new Error(`Kokoro TTS route returned status ${response.status}`);
+        throw new Error(`TTS route returned status ${response.status}`);
       }
 
       const blob = await response.blob();
+      if (playbackSessionTokenRef.current !== token) {
+        return;
+      }
+
+      const engineHeader = response.headers.get("X-TTS-Engine") || (targetDoctor.voiceProfile?.provider === "azure-speech" ? "Azure Speech" : "Kokoro");
+
       const audioUrl = URL.createObjectURL(blob);
       const audio = new Audio(audioUrl);
       activeAudioRef.current = audio;
@@ -886,17 +974,97 @@ export default function ConsultPage() {
         console.error("[MedVoice Audio] Audio playback error:", e);
         URL.revokeObjectURL(audioUrl);
         activeAudioRef.current = null;
-        playBrowserFallback();
+        if (playbackSessionTokenRef.current === token) {
+          playBrowserFallback(targetDoctor.voiceProfile?.locale);
+        }
       };
 
       await audio.play();
-      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Kokoro" }));
-      console.log(`[MedVoice Audio] Kokoro ${targetDoctor.voiceId} audio playback started successfully for ${targetDoctor.name}.`);
+      setActiveSpeaker((prev) => ({ ...prev, voiceEngine: engineHeader }));
+      console.log(`[MedVoice Audio] ${engineHeader} audio playback started successfully for ${targetDoctor.name}.`);
     } catch (err: any) {
-      console.warn(`[MedVoice Audio] Kokoro synthesis route error for ${targetDoctor.name} (${targetDoctor.voiceId}):`, err.message);
-      playBrowserFallback();
+      console.warn(`[MedVoice Audio] Synthesis route error for ${targetDoctor.name} (${targetDoctor.voiceId}):`, err.message);
+      if (playbackSessionTokenRef.current === token) {
+        playBrowserFallback(targetDoctor.voiceProfile?.locale);
+      }
     }
-  }, [selectedDoctor, stopSpeechRecognitionListening]);
+  }, [stopSpeechRecognitionListening]);
+
+  // Active Consultation Speaker Transition Handler
+  const handleSelectDoctor = useCallback((doc: DoctorProfile) => {
+    if (selectedDoctor.id === doc.id) return;
+
+    if (sessionMode !== "ACTIVE_CONSULTATION" || !callActiveRef.current) {
+      setSelectedDoctor(doc);
+      setActiveSpeaker({
+        id: doc.id,
+        name: doc.name,
+        voiceId: doc.voiceId,
+        specialty: doc.specialty,
+        department: doc.department,
+        avatarUrl: doc.avatarUrl,
+        voiceGender: doc.voiceGender,
+        voiceEngine: "Kokoro",
+      });
+      return;
+    }
+
+    // Active consultation speaker handover
+    // 1. Halt existing audio and intake immediately
+    if (activeAudioRef.current) {
+      try {
+        activeAudioRef.current.pause();
+        activeAudioRef.current.src = "";
+        activeAudioRef.current = null;
+      } catch {}
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try { window.speechSynthesis.cancel(); } catch {}
+    }
+    stopSpeechRecognitionListening();
+
+    // 2. Invalidate any in-flight async TTS generation
+    playbackSessionTokenRef.current += 1;
+    const currentToken = playbackSessionTokenRef.current;
+
+    // 3. Update active doctor and speaker state
+    setSelectedDoctor(doc);
+    setActiveSpeaker({
+      id: doc.id,
+      name: doc.name,
+      voiceId: doc.voiceId,
+      specialty: doc.specialty,
+      department: doc.department,
+      avatarUrl: doc.avatarUrl,
+      voiceGender: doc.voiceGender,
+      voiceEngine: "Kokoro",
+    });
+
+    // 4. Create explicit system announcement and new doctor greeting in the transcript
+    const timeNow = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const systemNotice: ChatMessage = {
+      id: `sys-switch-${Date.now()}`,
+      role: "system",
+      text: `${doc.name} (${doc.department}) has joined the consultation.`,
+      timestamp: timeNow,
+    };
+
+    const greetingText = `I am ${doc.name}, ${doc.department}. I've reviewed the clinical information gathered so far. How can I assist with your symptoms?`;
+    const doctorMessage: ChatMessage = {
+      id: `doc-switch-${Date.now() + 1}`,
+      role: "doctor",
+      text: greetingText,
+      timestamp: timeNow,
+      doctorName: doc.name,
+      doctorSpecialty: doc.department,
+      doctorId: doc.id,
+    };
+
+    setMessages((prev) => [...prev, systemNotice, doctorMessage]);
+
+    // 5. Synthesize intro using new doctor's authoritative voice
+    speakDoctorResponse(greetingText, doc.id, currentToken);
+  }, [selectedDoctor.id, sessionMode, stopSpeechRecognitionListening, speakDoctorResponse]);
 
   // Speech Recognition with Continuous Intake & Natural Silence Detection
   const startSpeechRecognitionListening = useCallback(() => {
@@ -1321,19 +1489,7 @@ export default function ConsultPage() {
                       <button
                         key={doc.id}
                         type="button"
-                        onClick={() => {
-                          setSelectedDoctor(doc);
-                          setActiveSpeaker({
-                            id: doc.id,
-                            name: doc.name,
-                            voiceId: doc.voiceId,
-                            specialty: doc.specialty,
-                            department: doc.department,
-                            avatarUrl: doc.avatarUrl,
-                            voiceGender: doc.voiceGender,
-                            voiceEngine: "Kokoro",
-                          });
-                        }}
+                        onClick={() => handleSelectDoctor(doc)}
                         className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
                           isSelected
                             ? "bg-slate-950 text-white shadow-sm ring-2 ring-cyan-500/30"
@@ -1423,19 +1579,7 @@ export default function ConsultPage() {
                     return (
                       <div
                         key={doc.id}
-                        onClick={() => {
-                          setSelectedDoctor(doc);
-                          setActiveSpeaker({
-                            id: doc.id,
-                            name: doc.name,
-                            voiceId: doc.voiceId,
-                            specialty: doc.specialty,
-                            department: doc.department,
-                            avatarUrl: doc.avatarUrl,
-                            voiceGender: doc.voiceGender,
-                            voiceEngine: "Kokoro",
-                          });
-                        }}
+                        onClick={() => handleSelectDoctor(doc)}
                         className={`p-5 rounded-2xl bg-white border transition-all cursor-pointer flex flex-col justify-between gap-4 ${
                           isSelected
                             ? "border-cyan-500 ring-2 ring-cyan-400/20 shadow-md"
@@ -1598,20 +1742,7 @@ export default function ConsultPage() {
                       <button
                         key={doc.id}
                         type="button"
-                        onClick={() => {
-                          setSelectedDoctor(doc);
-                          setActiveSpeaker({
-                            id: doc.id,
-                            name: doc.name,
-                            voiceId: doc.voiceId,
-                            specialty: doc.specialty,
-                            department: doc.department,
-                            avatarUrl: doc.avatarUrl,
-                            voiceGender: doc.voiceGender,
-                            voiceEngine: "Kokoro",
-                          });
-                          speakDoctorResponse(`Switched to ${doc.name}, ${doc.department}. How may I evaluate your symptoms?`, doc.id);
-                        }}
+                        onClick={() => handleSelectDoctor(doc)}
                         className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex-shrink-0 ${
                           isSelected
                             ? "bg-cyan-500 text-white shadow-xs font-bold"
@@ -1726,9 +1857,24 @@ export default function ConsultPage() {
                   <div
                     key={msg.id}
                     className={`flex flex-col gap-1.5 ${
-                      msg.role === "doctor" ? "items-start" : "items-end"
+                      msg.role === "system"
+                        ? "items-center w-full my-3"
+                        : msg.role === "doctor"
+                        ? "items-start"
+                        : "items-end"
                     }`}
                   >
+                    {/* System Handover / Event Divider */}
+                    {msg.role === "system" && (
+                      <div className="w-full flex items-center justify-center my-2">
+                        <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-slate-100/90 border border-slate-200/80 text-xs font-semibold text-slate-700 shadow-2xs">
+                          <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                          <span>{msg.text}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">· {msg.timestamp}</span>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Doctor Message */}
                     {msg.role === "doctor" && (
                       <>
@@ -2237,15 +2383,14 @@ export default function ConsultPage() {
                       spotlightColor="rgba(20, 184, 166, 0.12)"
                       className="p-5 sm:p-6 bg-white border border-slate-200/90 shadow-2xs flex flex-col gap-5"
                     >
-                      
-                      {/* Context Header: Eyebrow, Title & Subtitle + Percentage */}
+                      {/* Context Header: Title & History Completeness */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex flex-col gap-1.5">
                           <span className="text-xs font-mono font-bold uppercase tracking-wider text-teal-700">
-                            CONTEXT
+                            CLINICAL CONTEXT
                           </span>
                           <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-                            {contextTitle}
+                            History Completeness
                           </h3>
                           <p className="text-xs sm:text-sm text-slate-600 font-medium flex items-center gap-1.5">
                             {(audioState === "PATIENT_LISTENING" || audioState === "PROCESSING_PATIENT" || audioState === "PROCESSING_INTERRUPTION") && (
@@ -2257,8 +2402,11 @@ export default function ConsultPage() {
 
                         <div className="text-right shrink-0">
                           <span className="text-2xl sm:text-3xl font-bold font-mono text-slate-900">
-                            <CountUp to={completenessPercent} duration={1.0} />%
+                            <CountUp to={completenessPercent} duration={0.8} />%
                           </span>
+                          <p className="text-xs font-mono text-slate-600 mt-0.5">
+                            {hasContextFacts ? `${contextKnownFacts.length} elements confirmed` : "0 elements"}
+                          </p>
                         </div>
                       </div>
 
@@ -2272,11 +2420,37 @@ export default function ConsultPage() {
                         />
                       </div>
 
-                      {/* Section 1: WHAT WE KNOW / CONFIRMED */}
-                      <div className="pt-3.5 border-t border-slate-200/70 flex flex-col gap-2.5">
+                      {/* Section 0: CURRENT COMPLAINT */}
+                      {hasContextFacts && (
+                        <div className="p-3 rounded-xl bg-teal-50/60 border border-teal-200/80 flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-xs font-mono font-bold uppercase tracking-wider text-teal-900">
+                              CURRENT COMPLAINT
+                            </span>
+                          </div>
+                          <p className="text-xs sm:text-sm text-slate-900 font-bold ml-4.5">
+                            {formatClinicalFact(
+                              contextKnownFacts.find(f => /throat|chest|headache|pain|dizz|weak/i.test(f)) ||
+                              contextKnownFacts[0]
+                            )}
+                          </p>
+                          {contextKnownFacts.some(f => /course|onset|duration/i.test(f)) && (
+                            <p className="text-xs text-slate-600 ml-4.5">
+                              {contextKnownFacts
+                                .filter(f => /onset|duration|course/i.test(f))
+                                .map(f => formatClinicalFact(f))
+                                .join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Section 1: ESTABLISHED CLINICAL FINDINGS */}
+                      <div className="pt-2 border-t border-slate-200/70 flex flex-col gap-2.5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700">
-                            WHAT WE KNOW {hasContextFacts ? `(${contextKnownFacts.length})` : ""}
+                            ESTABLISHED FINDINGS {hasContextFacts ? `(${contextKnownFacts.length})` : ""}
                           </span>
                         </div>
 
@@ -2286,41 +2460,48 @@ export default function ConsultPage() {
                               No clinical information captured yet.
                             </p>
                             <p className="text-xs text-slate-600 font-normal leading-relaxed">
-                              Start the consultation to build the patient's clinical context.
+                              Start the consultation to establish the patient's presenting symptoms.
                             </p>
                           </div>
                         ) : (
                           <AnimatedContent contentKey={contextKnownFacts.length}>
-                            <div className="flex flex-col gap-2 max-h-52 overflow-y-auto pr-1">
-                              {contextKnownFacts.map((fact: string, idx: number) => (
-                                <div
-                                  key={idx}
-                                  className="flex items-start gap-2.5 p-2.5 rounded-lg bg-teal-50/50 border border-teal-200/70 text-xs sm:text-sm text-slate-900 font-medium leading-relaxed"
-                                >
-                                  <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
-                                  <span>{formatClinicalFact(fact)}</span>
-                                </div>
-                              ))}
+                            <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                              {contextKnownFacts.map((fact: string, idx: number) => {
+                                const isDenied = /denied|none/i.test(fact);
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs sm:text-sm font-medium leading-relaxed ${
+                                      isDenied
+                                        ? "bg-slate-50 border-slate-200 text-slate-700"
+                                        : "bg-teal-50/50 border-teal-200/70 text-slate-900"
+                                    }`}
+                                  >
+                                    <CheckCircle2 className={`w-4 h-4 shrink-0 mt-0.5 ${isDenied ? "text-slate-500" : "text-teal-600"}`} />
+                                    <span>{formatClinicalFact(fact)}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </AnimatedContent>
                         )}
                       </div>
 
-                      {/* Section 2: WHAT'S STILL NEEDED / STILL NEEDED */}
-                      <div className="pt-3.5 border-t border-slate-200/70 flex flex-col gap-2.5">
+                      {/* Section 2: STILL TO ESTABLISH */}
+                      <div className="pt-2 border-t border-slate-200/70 flex flex-col gap-2.5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700">
-                            WHAT'S STILL NEEDED {contextMissingDimensions.length > 0 ? `(${contextMissingDimensions.length})` : ""}
+                            STILL TO ESTABLISH {contextMissingDimensions.length > 0 ? `(${contextMissingDimensions.length})` : ""}
                           </span>
                         </div>
 
                         {contextMissingDimensions.length === 0 ? (
                           <div className="flex items-center gap-2.5 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs sm:text-sm text-emerald-900 font-medium">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>Clinical context sufficient for diagnostic evaluation</span>
+                            <span>Clinical context sufficient for diagnostic disposition</span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-2 max-h-52 overflow-y-auto pr-1">
+                          <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">
                             {contextMissingDimensions.map((dim: string, idx: number) => (
                               <div
                                 key={idx}
@@ -2334,10 +2515,52 @@ export default function ConsultPage() {
                         )}
                       </div>
 
+                      {/* Section 3: RED-FLAG SAFETY SCREEN (INDEPENDENT) */}
+                      <div className="pt-2 border-t border-slate-200/70 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-700">
+                            RED-FLAG SAFETY SCREEN
+                          </span>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-mono font-bold uppercase ${
+                            triageData?.isEmergency || (triageData?.redFlagsTriggered && triageData.redFlagsTriggered.length > 0)
+                              ? "bg-red-100 text-red-800 border border-red-200"
+                              : hasContextFacts
+                              ? "bg-amber-50 text-amber-800 border border-amber-200"
+                              : "bg-slate-100 text-slate-600"
+                          }`}>
+                            {triageData?.isEmergency
+                              ? "⚠ Emergency Triggered"
+                              : hasContextFacts
+                              ? "Screening In Progress"
+                              : "Pending Intake"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">
+                          {triageData?.isEmergency
+                            ? "Immediate safety intervention active. Contact emergency dispatch."
+                            : "Airway, swallowing safety, and hemodynamic red flags monitored independently of history completeness."}
+                        </p>
+                      </div>
+
+                      {/* Section 4: NEXT BEST QUESTION / CLINICAL TARGET */}
+                      {boardData?.pending_question && (
+                        <div className="p-3 rounded-xl bg-cyan-50/70 border border-cyan-200/80 flex flex-col gap-1.5">
+                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-cyan-900">
+                            NEXT BEST QUESTION
+                          </span>
+                          <p className="text-xs sm:text-sm text-slate-900 font-semibold italic">
+                            "{boardData.pending_question.question}"
+                          </p>
+                          <p className="text-xs text-cyan-800">
+                            Purpose: {boardData.pending_question.purpose}
+                          </p>
+                        </div>
+                      )}
+
                       {/* Footer Guidance Note */}
-                      <div className="pt-3.5 border-t border-slate-200/70 flex items-center gap-2 text-xs text-slate-600 font-medium">
+                      <div className="pt-2 border-t border-slate-200/70 flex items-center gap-2 text-xs text-slate-600 font-medium">
                         <Info className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                        <span>Context will update automatically as Dr. Sarah Chen learns more.</span>
+                        <span>Clinical facts and completeness update dynamically after each patient answer.</span>
                       </div>
 
                     </SpotlightCard>

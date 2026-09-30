@@ -275,13 +275,37 @@ export class ConversationManager {
         const hasGradual = /\b(?:gradual(?:ly)?|slowly|built\s+up|over\s+time)\b/i.test(textLower);
         const timeMatch = textLower.match(/\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|an?\s+hour|twenty\s+minutes|thirty\s+minutes|this\s+morning|yesterday|a\s+week)\b/i);
 
-        let onsetVal = timeMatch ? timeMatch[0] : (hasSudden ? "sudden" : hasGradual ? "gradual" : text);
-        const acuteWorsening = /\b(?:worse|worsened|got\s+worse|severe\s+today|worse\s+suddenly)\b/i.test(textLower);
+        if (timeMatch || hasSudden || hasGradual) {
+          let onsetVal = timeMatch ? timeMatch[0] : (hasSudden ? "sudden" : "gradual");
+          const acuteWorsening = /\b(?:worse|worsened|got\s+worse|severe\s+today|worse\s+suddenly)\b/i.test(textLower);
+
+          return {
+            intent: "answer_question",
+            resolvedSlot: "onset",
+            resolvedValue: onsetVal + (acuteWorsening ? " (acute worsening)" : "")
+          };
+        }
+      }
+
+      // B.2 COURSE & PROGRESSION
+      if (slot === "course") {
+        const hasWorsening = /\b(?:worse|worsened|increasing|increased|getting\s+worse|built\s+up)\b/i.test(textLower);
+        const hasImproving = /\b(?:better|improving|improved|getting\s+better|less|easing)\b/i.test(textLower);
+        const hasSame = /\b(?:same|unchanged|about\s+the\s+same|constant|stable)\b/i.test(textLower);
+        const hasGradual = /\b(?:gradual(?:ly)?|slowly|over\s+time)\b/i.test(textLower);
+        const hasSudden = /\b(?:sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere)\b/i.test(textLower);
+
+        let courseVal = "gradually worsening";
+        if (hasImproving) courseVal = "improving";
+        else if (hasSame) courseVal = "staying about the same (stable)";
+        else if (hasSudden) courseVal = "sudden onset";
+        else if (hasWorsening && hasGradual) courseVal = "gradually worsening over time";
+        else if (hasWorsening) courseVal = "getting worse";
 
         return {
           intent: "answer_question",
-          resolvedSlot: "onset",
-          resolvedValue: onsetVal + (acuteWorsening ? " (acute worsening)" : "")
+          resolvedSlot: "course",
+          resolvedValue: courseVal,
         };
       }
 
@@ -301,7 +325,6 @@ export class ConversationManager {
         if (charMatch) {
           return { intent: "answer_question", resolvedSlot: "character", resolvedValue: charMatch[0] };
         }
-        return { intent: "answer_question", resolvedSlot: "character", resolvedValue: text };
       }
 
       // E. ASSOCIATED SYMPTOMS
@@ -312,6 +335,7 @@ export class ConversationManager {
         if (/\b(nausea|vomit|queasy|sick)\b/i.test(textLower)) found.push("nausea");
         if (/\b(dizz|lightheaded|faint|presyncope|syncope|black\s*out)\b/i.test(textLower)) found.push("dizziness");
         if (/\b(headache|head\s+hurts)\b/i.test(textLower)) found.push("headache");
+        if (/\b(voice\s+change|hoarse|hoarseness)\b/i.test(textLower)) found.push("voice change");
 
         if (found.length > 0) {
           return { intent: "answer_question", resolvedSlot: "associated_symptoms", resolvedValue: found };
@@ -319,6 +343,38 @@ export class ConversationManager {
         if (/\b(no|none|neither|nothing\s+else)\b/i.test(textLower)) {
           return { intent: "answer_question", resolvedSlot: "associated_symptoms", resolvedValue: ["none reported"] };
         }
+      }
+
+      // F. VOICE CHARACTER
+      if (slot === "voice_character") {
+        const isHoarse = /\b(hoarse|raspy|husky|scratchy)\b/i.test(textLower);
+        const isLoss = /\b(hard|cannot|can't|loss|lost|producing|struggling|whisper|weak)\b/i.test(textLower);
+        const val = isHoarse ? "hoarseness" : isLoss ? "difficulty producing voice" : "voice change / hoarse quality";
+        return { intent: "answer_question", resolvedSlot: "voice_character", resolvedValue: val };
+      }
+
+      // G. SWALLOWING DIFFICULTY
+      if (slot === "swallowing_difficulty") {
+        const isDenied = /\b(no|nope|not|neither|nothing|nothing\s+much|nothing\s+really|none|no\s+trouble|can\s+swallow|fine|without)\b/i.test(textLower);
+        return { intent: "answer_question", resolvedSlot: "swallowing_difficulty", resolvedValue: isDenied ? "denied" : "difficulty swallowing reported" };
+      }
+
+      // H. FEVER
+      if (slot === "fever") {
+        const isDenied = /\b(no|nope|not|neither|nothing|nothing\s+much|nothing\s+really|none|haven'?t|no\s+fever)\b/i.test(textLower);
+        return { intent: "answer_question", resolvedSlot: "fever", resolvedValue: isDenied ? "denied" : "fever reported" };
+      }
+
+      // I. SEVERITY
+      if (slot === "severity") {
+        const numMatch = textLower.match(/\b([0-9]|10)\b/);
+        return { intent: "answer_question", resolvedSlot: "severity", resolvedValue: numMatch ? `${numMatch[0]}/10` : text };
+      }
+
+      // J. EAR PAIN
+      if (slot === "ear_pain") {
+        const isDenied = /\b(no|nope|not|neither|nothing|nothing\s+much|nothing\s+really|none|no\s+ear\s+pain)\b/i.test(textLower);
+        return { intent: "answer_question", resolvedSlot: "ear_pain", resolvedValue: isDenied ? "denied" : "ear pain reported" };
       }
 
       // F. NEUROLOGICAL SIGNS
@@ -474,9 +530,193 @@ export class ConversationManager {
       mem.patientConcerns.push("fear / anxiety");
     }
 
+    // Contradiction / Correction check
+    if (semantic.isCorrection && semantic.correctedSlot && semantic.correctedValue) {
+      const slot = semantic.correctedSlot;
+      const val = semantic.correctedValue;
+      (state.slots as any)[slot] = val;
+      state.slots.known_facts = state.slots.known_facts.filter(f => !f.toUpperCase().startsWith(`${slot.toUpperCase()}:`));
+      state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
+      mem.patientCorrections.push({ target: slot, value: val });
+      state.caseVersion++;
+    }
+
+    // Opportunistic extraction from transcript before response planning
+    this.extractOpportunisticFacts(state);
+
+    // If an existing pending question was answered, resolve it before planning the next action
+    if (state.pendingQuestion && state.pendingQuestion.status === "pending") {
+      const interpretation = this.interpretUtterance(cleanMsg, state.pendingQuestion, state);
+      if ((interpretation.intent === "answer_question" && interpretation.resolvedSlot) || (semantic.intent === "answer_pending_question" && semantic.resolvedSlot)) {
+        const slot = interpretation.resolvedSlot || semantic.resolvedSlot!;
+        const val = interpretation.resolvedValue || semantic.resolvedValue!;
+
+        if (val === "denied" || val === "negative") {
+          const questionText = state.pendingQuestion?.question?.toLowerCase() || "";
+          const deniedList: string[] = [];
+          if (/droop/i.test(questionText)) deniedList.push("facial drooping");
+          if (/speech|words|speak|slur/i.test(questionText)) deniedList.push("speech difficulty");
+          if (/vision|see|blurry/i.test(questionText)) deniedList.push("vision changes");
+          if (/weakness|arms?\s+or\s+legs?/i.test(questionText)) deniedList.push("unilateral weakness");
+          if (/numbness/i.test(questionText)) deniedList.push("numbness");
+          if (/sweat|clammy/i.test(questionText)) deniedList.push("cold sweating");
+          if (/shortness\s+of\s+breath|breathing/i.test(questionText)) deniedList.push("shortness of breath");
+          if (/nausea|vomit/i.test(questionText)) deniedList.push("nausea");
+          if (/swallow/i.test(questionText) || slot === "swallowing_difficulty") deniedList.push("swallowing_difficulty");
+          if (/fever|chills/i.test(questionText) || slot === "fever") deniedList.push("fever");
+          if (/ear/i.test(questionText) || slot === "ear_pain") deniedList.push("ear_pain");
+
+          if (deniedList.length === 0) {
+            deniedList.push(slot);
+          }
+
+          deniedList.forEach(d => {
+            if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(d)) {
+              state.conversationMemory.deniedSymptoms.push(d);
+            }
+            if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(d)) {
+              state.conversationMemory.questionsAlreadyAsked.push(d);
+            }
+          });
+
+          const fact = `Denied: ${deniedList.join(", ")}`;
+          if (!state.slots.known_facts.includes(fact)) {
+            state.slots.known_facts.push(fact);
+          }
+        } else if (slot === "associated_symptoms" && Array.isArray(val)) {
+          state.slots.associated_symptoms = Array.from(new Set([...state.slots.associated_symptoms, ...val]));
+          state.slots.known_facts.push(`Associated: ${val.join(", ")}`);
+        } else if (slot === "neurological_signs" && Array.isArray(val)) {
+          state.slots.neurological_signs = Array.from(new Set([...state.slots.neurological_signs, ...val]));
+          state.slots.known_facts.push(`Neurological: ${val.join(", ")}`);
+        } else {
+          (state.slots as any)[slot] = val;
+          state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
+        }
+
+        state.resolvedQuestions.push({
+          questionId: state.pendingQuestion.id,
+          askedBy: state.pendingQuestion.askedBy,
+          question: state.pendingQuestion.question,
+          patientAnswer: cleanMsg,
+          resolvedSlot: slot,
+          slotValue: String(val)
+        });
+        state.pendingQuestion.status = "resolved";
+        state.pendingQuestion = null;
+
+        state.agentRequests.forEach(r => {
+          if (r.targetSlot === slot && r.status === "pending") {
+            r.status = "resolved";
+          }
+        });
+
+        state.caseVersion++;
+      } else if (interpretation.intent === "confirmation" || semantic.isConfirmationOrRepetition || semantic.intent === "confirmation_or_correction") {
+        const confirmedSlot = interpretation.resolvedSlot || semantic.resolvedSlot || (state.pendingQuestion ? state.pendingQuestion.targetSlot : "information");
+        const confirmedVal = interpretation.resolvedValue || semantic.resolvedValue || (state.slots as any)[confirmedSlot] || "noted";
+        if (state.pendingQuestion) {
+          state.pendingQuestion.status = "resolved";
+          state.pendingQuestion = null;
+        }
+        state.caseVersion++;
+        state.agentRequests.forEach(r => {
+          if (r.targetSlot === confirmedSlot && r.status === "pending") r.status = "resolved";
+        });
+      }
+    }
+
+    // Refresh opportunistic facts after resolving pending answer
+    this.extractOpportunisticFacts(state);
+
     // --- STEP 1.5: RESPONSE PLANNER EXECUTION ---
     const plan = responsePlanner.plan(cleanMsg, semantic, state, preArbiterResult, [], localeConfig);
     state.responsePlan = plan;
+
+    // Handle high-priority non-intake conversational goals:
+    if (plan.primaryGoal === "CONFIRM_CORRECTION_AND_PROCEED") {
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: "req-confirm-correction",
+        targetSlot: "course",
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: "Acknowledge correction and clarify course",
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
+        state,
+        preArbiterResult
+      };
+    }
+
+    if (plan.primaryGoal === "ACKNOWLEDGE_AND_ADVANCE") {
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: "req-acknowledge-advance",
+        targetSlot: "timing_pattern",
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: "Acknowledge uncertainty and advance to timing pattern",
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
+        state,
+        preArbiterResult
+      };
+    }
+
+    if (plan.primaryGoal === "GENTLE_CLARIFICATION") {
+      state.phase = "active_inquiring";
+      state.informationState = "insufficient";
+      state.pendingQuestion = {
+        id: "req-gentle-clarification",
+        targetSlot: "timing_pattern",
+        askedBy: "sarah",
+        doctorName: "Dr. Sarah Chen, MD",
+        patientFacingSpeaker: "sarah",
+        question: plan.suggestedSpokenReply,
+        purpose: "Gently clarify vague symptom description",
+        required: true,
+        priority: "normal",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        caseVersion: state.caseVersion
+      };
+
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: plan.suggestedSpokenReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Chief of Internal Medicine",
+        state,
+        preArbiterResult
+      };
+    }
 
     // Handle high-priority non-intake conversational goals:
     if (plan.primaryGoal === "RESOLVE_OBJECTION_REPETITION") {
@@ -626,6 +866,9 @@ export class ConversationManager {
         if (/sweat|clammy/i.test(questionText)) deniedList.push("cold sweating");
         if (/shortness\s+of\s+breath|breathing/i.test(questionText)) deniedList.push("shortness of breath");
         if (/nausea|vomit/i.test(questionText)) deniedList.push("nausea");
+        if (/swallow/i.test(questionText) || slot === "swallowing_difficulty") deniedList.push("swallowing_difficulty");
+        if (/fever|chills/i.test(questionText) || slot === "fever") deniedList.push("fever");
+        if (/ear/i.test(questionText) || slot === "ear_pain") deniedList.push("ear_pain");
 
         if (deniedList.length === 0) {
           deniedList.push(slot);
@@ -690,56 +933,7 @@ export class ConversationManager {
     }
 
     // Opportunistic extraction from transcript
-    if (!state.slots.duration) {
-      const durMatch = state.cumulativeTranscript.match(/\b(?:for\s+)?(\d+\s*(?:minutes?|hours?|seconds?|days?)|a\s+minute|few\s+seconds|few\s+minutes)\b/i);
-      if (durMatch) {
-        state.slots.duration = `approx. ${durMatch[0]}`;
-        if (state.conversationMemory) state.conversationMemory.durationPattern = `approx. ${durMatch[0]}`;
-        const fact = `Duration: approx. ${durMatch[0]}`;
-        if (!state.slots.known_facts.includes(fact)) {
-          state.slots.known_facts.push(fact);
-        }
-      }
-    }
-    if (!state.slots.character) {
-      const charMatch = state.cumulativeTranscript.match(/\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/i);
-      if (charMatch) {
-        state.slots.character = charMatch[0];
-        if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
-          state.slots.known_facts.push(`CHARACTER: ${charMatch[0]}`);
-        }
-      } else if (/\b(dizzy|dizziness|lightheaded)\b/i.test(state.cumulativeTranscript)) {
-        const isPostural = /\b(when\s+i\s+stand|after\s+i\s+sat|standing\s+up|getting\s+up|sitting\s+for\s+long)\b/i.test(state.cumulativeTranscript);
-        state.slots.character = isPostural ? "postural dizziness upon standing after sitting" : "dizziness";
-        if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
-          state.slots.known_facts.push(`CHARACTER: ${state.slots.character}`);
-        }
-      }
-    }
-    if (!state.slots.onset) {
-      const onsetMatch = state.cumulativeTranscript.match(/\b(\d+\s*(?:minutes?|hours?|days?|weeks?)|twenty\s+minutes|thirty\s+minutes|a\s+week)\b/i);
-      if (onsetMatch) {
-        state.slots.onset = onsetMatch[0];
-        if (!state.slots.known_facts.some(f => f.startsWith("ONSET"))) {
-          state.slots.known_facts.push(`ONSET: ${onsetMatch[0]}`);
-        }
-      } else if (/\b(when\s+i\s+stand|standing\s+up|after\s+i\s+sat)\b/i.test(state.cumulativeTranscript)) {
-        state.slots.onset = "intermittent upon standing after sitting";
-        if (!state.slots.known_facts.some(f => f.startsWith("ONSET"))) {
-          state.slots.known_facts.push(`ONSET: ${state.slots.onset}`);
-        }
-      }
-    }
-    if (/\b(weak|weakness|numb|numbness)\b/i.test(state.cumulativeTranscript) && !state.slots.neurological_signs.includes("transient weakness and numbness")) {
-      state.slots.neurological_signs.push("transient weakness and numbness");
-      const fact = "Reported: transient weakness and numbness";
-      if (!state.slots.known_facts.includes(fact)) {
-        state.slots.known_facts.push(fact);
-      }
-      if (state.conversationMemory && !state.conversationMemory.uncertainties.includes("weakness_distribution")) {
-        state.conversationMemory.uncertainties.push("distribution of weakness/numbness (unilateral vs bilateral)");
-      }
-    }
+    this.extractOpportunisticFacts(state);
 
     // --- STEP 3: SPECIALISTS OBSERVE BLACKBOARD & EMIT AGENT REQUESTS ---
     const patientCase: PatientCase = {
@@ -967,6 +1161,86 @@ export class ConversationManager {
       state,
       preArbiterResult
     };
+  }
+
+  public extractOpportunisticFacts(state: ClinicalInterviewState): void {
+    if (!state.slots.duration) {
+      const durMatch = state.cumulativeTranscript.match(/\b(?:for\s+)?(\d+\s*(?:minutes?|hours?|seconds?|days?)|(?:one|two|three|four|five|six|seven)\s+days?|a\s+minute|few\s+seconds|few\s+minutes)\b/i);
+      if (durMatch) {
+        const cleanDur = durMatch[0].replace(/^for\s+/i, "").trim();
+        state.slots.duration = `approx. ${cleanDur}`;
+        if (state.conversationMemory) state.conversationMemory.durationPattern = `approx. ${cleanDur}`;
+        const fact = `Duration: approx. ${cleanDur}`;
+        if (!state.slots.known_facts.includes(fact)) {
+          state.slots.known_facts.push(fact);
+        }
+      }
+    }
+    if (!state.slots.character) {
+      const charMatch = state.cumulativeTranscript.match(/\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/i);
+      if (charMatch) {
+        state.slots.character = charMatch[0];
+        if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
+          state.slots.known_facts.push(`CHARACTER: ${charMatch[0]}`);
+        }
+      } else if (/\b(dizzy|dizziness|lightheaded)\b/i.test(state.cumulativeTranscript)) {
+        const isPostural = /\b(when\s+i\s+stand|after\s+i\s+sat|standing\s+up|getting\s+up|sitting\s+for\s+long)\b/i.test(state.cumulativeTranscript);
+        state.slots.character = isPostural ? "postural dizziness upon standing after sitting" : "dizziness";
+        if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
+          state.slots.known_facts.push(`CHARACTER: ${state.slots.character}`);
+        }
+      }
+    }
+    if (!state.slots.onset) {
+      const onsetMatch = state.cumulativeTranscript.match(/\b(?:since|from|about|approx\.?|roughly)?\s*(\d+\s*(?:minutes?|hours?|days?|weeks?)|morning\s+\d+\s+days?\s+ago|\d+\s+days?\s+ago|yesterday|this\s+morning|an?\s+hour|(?:one|two|three|four|five|six|seven)\s+days?|twenty\s+minutes|thirty\s+minutes|a\s+week)\b/i);
+      if (onsetMatch) {
+        const cleanTime = onsetMatch[0].replace(/^(?:since|from|about|roughly)\s*/i, "").trim();
+        state.slots.onset = cleanTime;
+        if (!state.slots.known_facts.some(f => f.startsWith("ONSET"))) {
+          state.slots.known_facts.push(`ONSET: ${cleanTime}`);
+        }
+      } else if (/\b(when\s+i\s+stand|standing\s+up|after\s+i\s+sat)\b/i.test(state.cumulativeTranscript)) {
+        state.slots.onset = "intermittent upon standing after sitting";
+        if (!state.slots.known_facts.some(f => f.startsWith("ONSET"))) {
+          state.slots.known_facts.push(`ONSET: ${state.slots.onset}`);
+        }
+      }
+    }
+
+    // Opportunistic ENT, Voice Change & Course extraction
+    if (/\b(throat\s+pain|sore\s+throat|throat\s+is\s+paining|throat\s+hurts?)\b/i.test(state.cumulativeTranscript)) {
+      if (!state.slots.known_facts.some(f => /throat/i.test(f))) {
+        state.slots.known_facts.push("THROAT_PAIN: present");
+        if (state.structuredHistory) state.structuredHistory.chiefComplaint = "Throat pain";
+      }
+    }
+    if (/\b(voice\s+has\s+been\s+ruined|voice\s+changed|voice\s+is\s+different|lost\s+my\s+voice|hoarse|hoarseness)\b/i.test(state.cumulativeTranscript)) {
+      if (!state.slots.associated_symptoms.includes("voice change")) {
+        state.slots.associated_symptoms.push("voice change");
+      }
+      if (!state.slots.known_facts.some(f => /voice/i.test(f))) {
+        state.slots.known_facts.push("VOICE_CHANGE: present");
+      }
+    }
+    if (/\b(gradual(?:ly)?\s+increased|got\s+worse|built\s+up)\b/i.test(state.cumulativeTranscript)) {
+      if (!state.slots.known_facts.some(f => /course/i.test(f))) {
+        state.slots.known_facts.push("COURSE: gradually worsening");
+      }
+    }
+
+    // Deduplicate known facts
+    state.slots.known_facts = Array.from(new Set(state.slots.known_facts));
+
+    if (/\b(weak|weakness|numb|numbness)\b/i.test(state.cumulativeTranscript) && !state.slots.neurological_signs.includes("transient weakness and numbness")) {
+      state.slots.neurological_signs.push("transient weakness and numbness");
+      const fact = "Reported: transient weakness and numbness";
+      if (!state.slots.known_facts.includes(fact)) {
+        state.slots.known_facts.push(fact);
+      }
+      if (state.conversationMemory && !state.conversationMemory.uncertainties.includes("weakness_distribution")) {
+        state.conversationMemory.uncertainties.push("distribution of weakness/numbness (unilateral vs bilateral)");
+      }
+    }
   }
 
   /**

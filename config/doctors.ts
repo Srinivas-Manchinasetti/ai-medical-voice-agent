@@ -1,3 +1,16 @@
+export type TTSProviderType = "kokoro" | "azure-speech" | "google-tts" | "browser-fallback";
+
+export interface DoctorVoiceProfile {
+  doctorId: string;
+  provider: TTSProviderType;
+  voiceId: string;
+  locale: string;
+  accent: "american" | "british" | "indian";
+  speed: number;
+  pitch?: number;
+  style: "warm" | "authoritative" | "gentle" | "analytical" | "friendly";
+}
+
 export interface DoctorProfile {
   id: string;
   name: string;
@@ -7,7 +20,8 @@ export interface DoctorProfile {
   experience: string;
   avatarUrl: string;
   voiceGender: "female" | "male";
-  voiceId: "af_heart" | "am_michael" | "af_bella" | "bm_george" | "af_nicole" | string;
+  voiceId: string;
+  voiceProfile: DoctorVoiceProfile;
   voiceTone: string;
   badgeColor: string;
   accentBg: string;
@@ -15,6 +29,54 @@ export interface DoctorProfile {
   systemPrompt: string;
   clinicalFocus: string[];
 }
+
+export const DOCTOR_VOICE_PROFILES: Record<string, DoctorVoiceProfile> = {
+  "dr-sarah-chen": {
+    doctorId: "dr-sarah-chen",
+    provider: "kokoro",
+    voiceId: "af_sarah",
+    locale: "en-US",
+    accent: "american",
+    speed: 0.96,
+    style: "warm"
+  },
+  "dr-marcus-vance": {
+    doctorId: "dr-marcus-vance",
+    provider: "kokoro",
+    voiceId: "am_michael",
+    locale: "en-US",
+    accent: "american",
+    speed: 0.92,
+    style: "authoritative"
+  },
+  "dr-elena-rostova": {
+    doctorId: "dr-elena-rostova",
+    provider: "kokoro",
+    voiceId: "bf_emma",
+    locale: "en-GB",
+    accent: "british",
+    speed: 0.97,
+    style: "gentle"
+  },
+  "dr-arthur-pendelton": {
+    doctorId: "dr-arthur-pendelton",
+    provider: "kokoro",
+    voiceId: "bm_george",
+    locale: "en-GB",
+    accent: "british",
+    speed: 0.90,
+    style: "analytical"
+  },
+  "dr-priya-patel": {
+    doctorId: "dr-priya-patel",
+    provider: "kokoro",
+    voiceId: "af_nicole",
+    locale: "en-US",
+    accent: "american",
+    speed: 0.98,
+    style: "friendly"
+  },
+};
 
 export const DOCTOR_PROFILES: DoctorProfile[] = [
   {
@@ -26,8 +88,9 @@ export const DOCTOR_PROFILES: DoctorProfile[] = [
     experience: "14+ Years Clinical Experience",
     avatarUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
-    voiceId: "af_heart",
-    voiceTone: "Empathetic, clear, and reassuring",
+    voiceId: "af_sarah",
+    voiceProfile: DOCTOR_VOICE_PROFILES["dr-sarah-chen"],
+    voiceTone: "Warm, conversational, and reassuring",
     badgeColor: "bg-teal-500/10 text-teal-400 border-teal-500/20",
     accentBg: "from-teal-500/20 to-emerald-500/5",
     greeting: "Hello, I'm Dr. Sarah Chen. I'm here to listen to what you're experiencing today. Please tell me about your symptoms and how long you've felt this way.",
@@ -50,7 +113,8 @@ Your primary goals:
     avatarUrl: "https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&w=400&q=80",
     voiceGender: "male",
     voiceId: "am_michael",
-    voiceTone: "Authoritative, calm, and acutely focused",
+    voiceProfile: DOCTOR_VOICE_PROFILES["dr-marcus-vance"],
+    voiceTone: "Deep, authoritative, and acutely focused",
     badgeColor: "bg-rose-500/10 text-rose-400 border-rose-500/20",
     accentBg: "from-rose-500/20 to-red-500/5",
     greeting: "Good day, I am Dr. Marcus Vance from Cardiology. If you are experiencing chest discomfort, palpitations, or shortness of breath, please describe it in detail.",
@@ -71,11 +135,12 @@ Your primary goals:
     experience: "11+ Years Pediatric Care",
     avatarUrl: "https://images.unsplash.com/photo-1651008376811-b90baee60c1f?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
-    voiceId: "af_bella",
-    voiceTone: "Gentle, compassionate, and family-friendly",
+    voiceId: "bf_emma",
+    voiceProfile: DOCTOR_VOICE_PROFILES["dr-elena-rostova"],
+    voiceTone: "Warm, gentle, and family-friendly",
     badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     accentBg: "from-amber-500/20 to-orange-500/5",
-    greeting: "Hello, I'm Dr. Elena Rostova. I specialize in child health. How is your little one feeling today, and what symptoms have you noticed?",
+    greeting: "Hello, I'm Dr. Elena Rostova. I specialize in child and adolescent health. How is your little one feeling today, and what symptoms have you noticed?",
     systemPrompt: `You are Dr. Elena Rostova, MD, FAAP, a caring and meticulous Pediatrician.
 Your primary goals:
 1. Assess symptoms in infants, children, and teenagers with compassionate guidance for parents/guardians.
@@ -93,10 +158,11 @@ Your primary goals:
     avatarUrl: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=400&q=80",
     voiceGender: "male",
     voiceId: "bm_george",
+    voiceProfile: DOCTOR_VOICE_PROFILES["dr-arthur-pendelton"],
     voiceTone: "Methodical, observant, and reassuring",
     badgeColor: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
     accentBg: "from-indigo-500/20 to-purple-500/5",
-    greeting: "Greetings, I am Dr. Arthur Pendelton. Please describe any headaches, dizziness, numbness, or neurological sensations you have been feeling.",
+    greeting: "Greetings, I am Dr. Arthur Pendelton from Neurology. Please describe any headaches, dizziness, numbness, or neurological sensations you have been feeling.",
     systemPrompt: `You are Dr. Arthur Pendelton, MD, PhD, a consultant neurologist.
 Your primary goals:
 1. Screen for acute neurological emergencies using BE-FAST stroke criteria (Balance, Eyes, Face drooping, Arm weakness, Speech difficulty, Time).
@@ -113,11 +179,12 @@ Your primary goals:
     experience: "9+ Years Clinical Dermatology",
     avatarUrl: "https://images.unsplash.com/photo-1614608682850-e0d6ed316d47?auto=format&fit=crop&w=400&q=80",
     voiceGender: "female",
-    voiceId: "af_nicole",
-    voiceTone: "Friendly, analytical, and attentive",
+    voiceId: DOCTOR_VOICE_PROFILES["dr-priya-patel"].voiceId,
+    voiceProfile: DOCTOR_VOICE_PROFILES["dr-priya-patel"],
+    voiceTone: "Crisp, friendly, analytical, and attentive",
     badgeColor: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
     accentBg: "from-cyan-500/20 to-blue-500/5",
-    greeting: "Hello, I'm Dr. Priya Patel. I help evaluate skin conditions, lesions, and allergic reactions. Where on your body is the rash or irritation located?",
+    greeting: "Hello, I'm Dr. Priya Patel from Dermatology. Where on your body is the rash or irritation located, and how long has it been present?",
     systemPrompt: `You are Dr. Priya Patel, MD, an expert Dermatologist.
 Your primary goals:
 1. Inquire about skin lesion morphology, color, itchiness/pain, triggers, previous treatments, and systemic symptoms (fever, mucosal involvement, breathing changes).

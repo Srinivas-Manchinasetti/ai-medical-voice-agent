@@ -13,6 +13,10 @@ export type PatientIntent =
   | "memory_inquiry"
   | "meta_inquiry"
   | "closing"
+  | "correction"
+  | "uncertainty_or_unknown"
+  | "vague_answer"
+  | "unrelated_statement"
   | "small_talk";
 
 export interface SemanticInterpretation {
@@ -23,6 +27,11 @@ export interface SemanticInterpretation {
   resolvedValue?: string;
   isConfirmationOrRepetition: boolean;
   isObjectionRepetition?: boolean;
+  isCorrection?: boolean;
+  correctedSlot?: string;
+  correctedValue?: string;
+  correctedDetail?: string;
+  isUncertainty?: boolean;
   isEmergencyInquiry: boolean;
   isExplanatoryInquiry?: boolean;
   isMemoryInquiry?: boolean;
@@ -154,9 +163,9 @@ export class ConversationInterpreter {
       };
     }
 
-    // 3.8 Detect Patient Repetition Objection ("We already talked about it?", "I already answered that", "Didn't I already say...", "a minute like i said before?")
+    // 3.8 Detect Patient Repetition Objection ("We already talked about it?", "I already answered that", "Didn't I already say...", "a minute like i said before?", "I insist...")
     const repetitionObjectionPattern =
-      /\b(we\s+already\s+(?:talked|spoke|discussed|went\s+over|covered|said|cleared)|i\s+already\s+(?:said|told\s+you|answered|mentioned)|why\s+(?:do\s+you|are\s+you)\s+(?:ask|asking)\s+(?:again|that\s+again)|didn'?t\s+i\s+already|already\s+answered|you\s+already\s+asked|like\s+i\s+said(?:\s+before)?|as\s+i\s+said(?:\s+before)?)\b/i;
+      /\b(i\s+insist|we\s+already\s+(?:talked|spoke|discussed|went\s+over|covered|said|cleared)|i\s+already\s+(?:said|told\s+you|answered|mentioned)|why\s+(?:do\s+you|are\s+you)\s+(?:ask|asking)\s+(?:again|that\s+again)|didn'?t\s+i\s+already|already\s+answered|you\s+already\s+asked|like\s+i\s+said(?:\s+before)?|as\s+i\s+said(?:\s+before)?)\b/i;
     const isRepetitionObjection = repetitionObjectionPattern.test(lower);
 
     if (isRepetitionObjection && !isEmergencyQuestion) {
@@ -267,6 +276,73 @@ export class ConversationInterpreter {
       };
     }
 
+    // 3.13 Detect Patient Contradiction / Correction ("Actually it started yesterday, not 2 days ago", "No wait, my left arm")
+    const isCorrectionPattern =
+      /\b(actually\s+(?:it|it's|it\s+started|i\s+meant|not)|no\s+(?:wait|actually|i\s+meant)|wait\s+(?:no|actually)|instead\s+of|scratch\s+that|i\s+mean|correction)\b/i;
+    if (isCorrectionPattern.test(lower)) {
+      let correctedSlot: string | undefined = undefined;
+      let correctedValue: string | undefined = undefined;
+      let correctedDetail: string = "your updated details";
+
+      const timeCorrection = lower.match(/\b(yesterday|today|this\s+morning|\d+\s*(?:minutes?|hours?|days?|weeks?))\b/i);
+      const radCorrection = lower.match(/\b(left\s+arm|right\s+arm|arm|jaw|neck|back|shoulder|head)\b/i);
+
+      if (timeCorrection) {
+        correctedSlot = "onset";
+        correctedValue = timeCorrection[0];
+        correctedDetail = `that it started ${timeCorrection[0]}`;
+      } else if (radCorrection) {
+        correctedSlot = "radiation";
+        correctedValue = radCorrection[0];
+        correctedDetail = `that it moves to your ${radCorrection[0]}`;
+      }
+
+      return {
+        rawUtterance: text,
+        intent: "correction",
+        isConfirmationOrRepetition: true,
+        isCorrection: true,
+        isEmergencyInquiry: false,
+        correctedSlot,
+        correctedValue,
+        correctedDetail,
+        newEvidence: correctedSlot && correctedValue ? [{ slot: correctedSlot, value: correctedValue }] : [],
+        ambiguities: [],
+        confidence: 0.95,
+      };
+    }
+
+    // 3.14 Detect Uncertainty / Unknown ("I don't know", "Not really sure", "Hard to tell")
+    const isUncertainty =
+      /^(?:i\s+don'?t\s+know|not\s+sure|hard\s+to\s+tell|no\s+idea|can'?t\s+remember|not\s+really\s+sure)[.!?\s]*$/i.test(lower) ||
+      /\b(i\s+don'?t\s+know|not\s+really\s+sure|hard\s+to\s+say|cannot\s+tell)\b/i.test(lower);
+    if (isUncertainty) {
+      return {
+        rawUtterance: text,
+        intent: "uncertainty_or_unknown",
+        isConfirmationOrRepetition: false,
+        isUncertainty: true,
+        isEmergencyInquiry: false,
+        newEvidence: [],
+        ambiguities: [],
+        confidence: 0.93,
+      };
+    }
+
+    // 3.15 Detect Vague Answers ("a bit", "kind of", "sort of", "a little")
+    const isVague = /^(?:a\s+bit|kind\s+of|sort\s+of|a\s+little|somewhat|maybe|not\s+much)[.!?\s]*$/i.test(lower);
+    if (isVague) {
+      return {
+        rawUtterance: text,
+        intent: "vague_answer",
+        isConfirmationOrRepetition: false,
+        isEmergencyInquiry: false,
+        newEvidence: [],
+        ambiguities: ["Symptom intensity / character is unquantified"],
+        confidence: 0.88,
+      };
+    }
+
     // 4. Detect Confirmation / Repetition / Clarification of already stated fact
     const isConfirmation =
       /^(i\s+said|like\s+i\s+said|as\s+i\s+said|already\s+told\s+you|i\s+told\s+you|yes\s+head|i\s+said\s+head\??)\b/i.test(lower) ||
@@ -360,12 +436,91 @@ export class ConversationInterpreter {
           };
         }
       }
+
+      // Check Voice Character slot
+      if (targetSlot === "voice_character") {
+        const isHoarse = /\b(hoarse|raspy|husky|scratchy)\b/i.test(lower);
+        const isLoss = /\b(hard|cannot|can't|loss|lost|producing|struggling|whisper|weak)\b/i.test(lower);
+        const val = isHoarse ? "hoarseness" : isLoss ? "difficulty producing voice" : text;
+        return {
+          rawUtterance: text,
+          intent: "answer_pending_question",
+          resolvedQuestionId: pendingQuestion.id,
+          resolvedSlot: "voice_character",
+          resolvedValue: val,
+          isConfirmationOrRepetition: false,
+          isEmergencyInquiry: false,
+          newEvidence: [{ slot: "voice_character", value: val }],
+          ambiguities: [],
+          confidence: 0.94,
+        };
+      }
+
+      // Check Swallowing Difficulty slot
+      if (targetSlot === "swallowing_difficulty") {
+        const isDenied = /\b(no|nope|not|neither|no\s+trouble|can\s+swallow|fine)\b/i.test(lower);
+        const val = isDenied ? "denied" : "difficulty swallowing";
+        return {
+          rawUtterance: text,
+          intent: "answer_pending_question",
+          resolvedQuestionId: pendingQuestion.id,
+          resolvedSlot: "swallowing_difficulty",
+          resolvedValue: val,
+          isConfirmationOrRepetition: false,
+          isEmergencyInquiry: false,
+          newEvidence: [{ slot: "swallowing_difficulty", value: val }],
+          ambiguities: [],
+          confidence: 0.95,
+        };
+      }
+
+      // Check Fever slot
+      if (targetSlot === "fever") {
+        const isDenied = /\b(no|nope|not|neither|haven'?t|no\s+fever)\b/i.test(lower);
+        const val = isDenied ? "denied" : "fever reported";
+        return {
+          rawUtterance: text,
+          intent: "answer_pending_question",
+          resolvedQuestionId: pendingQuestion.id,
+          resolvedSlot: "fever",
+          resolvedValue: val,
+          isConfirmationOrRepetition: false,
+          isEmergencyInquiry: false,
+          newEvidence: [{ slot: "fever", value: val }],
+          ambiguities: [],
+          confidence: 0.95,
+        };
+      }
+
+      // Check Severity slot
+      if (targetSlot === "severity") {
+        const numMatch = lower.match(/\b([0-9]|10)\b/);
+        const val = numMatch ? `${numMatch[0]}/10` : text;
+        return {
+          rawUtterance: text,
+          intent: "answer_pending_question",
+          resolvedQuestionId: pendingQuestion.id,
+          resolvedSlot: "severity",
+          resolvedValue: val,
+          isConfirmationOrRepetition: false,
+          isEmergencyInquiry: false,
+          newEvidence: [{ slot: "severity", value: val }],
+          ambiguities: [],
+          confidence: 0.93,
+        };
+      }
     }
 
     // 6. Generic Symptom Report
     const extracted: Array<{ slot: string; value: string }> = [];
     if (/chest|tightness|pressure|crushing|squeezing/i.test(lower)) {
       extracted.push({ slot: "character", value: "tightness/pressure" });
+    }
+    if (/throat\s+pain|sore\s+throat|throat\s+is\s+paining|throat\s+hurts?/i.test(lower)) {
+      extracted.push({ slot: "chief_complaint", value: "throat pain" });
+    }
+    if (/voice\s+has\s+been\s+ruined|voice\s+changed|voice\s+is\s+different|lost\s+my\s+voice|hoarse|hoarseness/i.test(lower)) {
+      extracted.push({ slot: "associated_symptoms", value: "voice change" });
     }
     if (/sweat|clammy|diaphoresis/i.test(lower)) {
       extracted.push({ slot: "associated_symptoms", value: "cold sweats/diaphoresis" });
