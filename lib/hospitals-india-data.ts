@@ -122,7 +122,6 @@ export function calculateDistanceKm(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c * 10) / 10; // Round to 1 decimal place
 }
-
 export const INDIAN_HOSPITALS_DATASET: Hospital[] = [
   // --- GUNTUR & ANDHRA PRADESH ---
   {
@@ -986,6 +985,8 @@ export const INDIAN_HOSPITALS_DATASET: Hospital[] = [
     cancerSpecialistsAvailable: true,
   },
 ];
+
+export const ALL_INDIA_HOSPITALS: Hospital[] = INDIAN_HOSPITALS_DATASET;
 
 export interface RegionPresetItem {
   name: string;

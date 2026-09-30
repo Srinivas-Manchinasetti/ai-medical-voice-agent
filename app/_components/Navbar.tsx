@@ -22,6 +22,7 @@ import {
   Bookmark,
   Mic,
   Bell,
+  PhoneCall,
 } from "lucide-react";
 import { PillNav } from "@/components/motion/PillNav";
 
@@ -34,8 +35,9 @@ interface NavLinkItem {
 const NAV_LINKS: NavLinkItem[] = [
   { href: "/", label: "Home", alt: "OVERVIEW" },
   { href: "/consult", label: "Consult", alt: "DELIBERATION" },
-  { href: "/dashboard", label: "SOAP", alt: "CHARTS" },
   { href: "/care", label: "Care", alt: "HOSPITALS" },
+  { href: "/appointments/call", label: "Book Call", alt: "HOTLINE" },
+  { href: "/dashboard", label: "SOAP", alt: "CHARTS" },
   { href: "/privacy", label: "Privacy", alt: "SECURITY" },
 ];
 
@@ -264,6 +266,20 @@ export function Navbar() {
                             <span>Hospital Routing (ABDM)</span>
                           </div>
                           <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700" />
+                        </Link>
+
+                        <Link
+                          href="/appointments/call"
+                          onClick={() => setDropdownOpen(false)}
+                          className="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-100 text-xs font-semibold text-slate-800 transition-colors group cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <PhoneCall className="w-4 h-4 text-cyan-600" />
+                            <span>AI Reception Hotline</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 font-bold">
+                            Voice
+                          </span>
                         </Link>
 
                         <Link

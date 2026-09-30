@@ -93,5 +93,41 @@ export const consultationsTable = pgTable("consultations", {
   createdAt: timestamp("created_at").defaultNow()
 });
 
+/**
+ * Hospital Appointment Booking Records
+ */
+export const appointmentsTable = pgTable("appointments", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  userId: varchar("user_id", { length: 128 }),
+  patientName: varchar("patient_name", { length: 128 }).notNull(),
+  patientPhone: varchar("patient_phone", { length: 64 }).notNull(),
+  patientEmail: varchar("patient_email", { length: 128 }),
+  
+  hospitalId: varchar("hospital_id", { length: 128 }).notNull(),
+  hospitalName: varchar("hospital_name", { length: 255 }).notNull(),
+  hospitalAddress: text("hospital_address"),
+  hospitalPhone: varchar("hospital_phone", { length: 64 }),
+  
+  department: varchar("department", { length: 128 }).notNull(),
+  doctorName: varchar("doctor_name", { length: 128 }).notNull(),
+  
+  appointmentDate: varchar("appointment_date", { length: 64 }).notNull(),
+  appointmentTime: varchar("appointment_time", { length: 64 }).notNull(),
+  
+  chiefComplaint: text("chief_complaint"),
+  urgency: varchar("urgency", { length: 32 }).default("routine"),
+  status: varchar("status", { length: 32 }).default("confirmed"),
+  
+  notificationChannels: jsonb("notification_channels").$type<string[]>(), // e.g. ["whatsapp", "sms", "email"]
+  dispatchStatus: jsonb("dispatch_status").$type<{
+    whatsappSent?: boolean;
+    smsSent?: boolean;
+    emailSent?: boolean;
+    sentAt?: string;
+  }>(),
+  
+  createdAt: timestamp("created_at").defaultNow()
+});
+
 
 

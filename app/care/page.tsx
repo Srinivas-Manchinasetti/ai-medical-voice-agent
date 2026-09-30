@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   MapPin,
   LocateFixed,
@@ -13,6 +14,7 @@ import {
   Building2,
   Clock,
   Car,
+  Calendar,
   Filter,
   CheckCircle2,
   ChevronLeft,
@@ -953,23 +955,33 @@ export default function CarePage() {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 pt-1">
-                  <a
-                    href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                <div className="flex flex-col gap-2 pt-1">
+                  <Link
+                    href={`/appointments/call?hospitalId=${selectedHospital.id}`}
+                    className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
                   >
-                    <PhoneCall className="w-3.5 h-3.5" />
-                    <span>Call ED</span>
-                  </a>
-                  <a
-                    href={currentGoogleMapsUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-                  >
-                    <Navigation className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Directions</span>
-                  </a>
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Book via AI Call (OPD Desk)</span>
+                  </Link>
+
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                    >
+                      <PhoneCall className="w-3.5 h-3.5" />
+                      <span>Call ED</span>
+                    </a>
+                    <a
+                      href={currentGoogleMapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                    >
+                      <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Directions</span>
+                    </a>
+                  </div>
                 </div>
               </div>
             )}
@@ -1200,11 +1212,20 @@ export default function CarePage() {
                             <span>Live road-network route active on map</span>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              href={`/appointments/call?hospitalId=${hosp.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                            >
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>Book via AI Call</span>
+                            </Link>
+
                             <a
                               href={`tel:${hosp.emergencyPhone || hosp.phone}`}
                               onClick={(e) => e.stopPropagation()}
-                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
                             >
                               <PhoneCall className="w-3.5 h-3.5" />
                               <span>Call Emergency ({hosp.emergencyPhone || "108"})</span>
