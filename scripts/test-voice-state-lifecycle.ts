@@ -118,7 +118,7 @@ async function runVoiceStateLifecycleTests() {
 
     cancelVoiceRecording();
 
-    assert(audioState === "IDLE", "Stop button returns audioState directly to IDLE");
+    assert((audioState as AudioState) === "IDLE", "Stop button returns audioState directly to IDLE");
     assert(audioChunks.length === 0, "Stop button completely discards recorded audio buffers");
     assert(transcriptText === "", "Stop button clears accumulated interim transcripts");
     assert(!whisperCalled, "Stop button NEVER dispatches request to /api/voice/stt");
@@ -145,11 +145,11 @@ async function runVoiceStateLifecycleTests() {
     };
 
     simulateSttFailure(callActive);
-    assert(audioState === "PATIENT_LISTENING", "STT failure during active call returns to PATIENT_LISTENING (not stuck in transcribing)");
+    assert((audioState as AudioState) === "PATIENT_LISTENING", "STT failure during active call returns to PATIENT_LISTENING (not stuck in transcribing)");
 
     audioState = "PROCESSING_TRANSCRIPTION";
     simulateSttFailure(false);
-    assert(audioState === "IDLE", "STT failure when call inactive returns cleanly to IDLE");
+    assert((audioState as AudioState) === "IDLE", "STT failure when call inactive returns cleanly to IDLE");
   }
 
   // [Suite 4] Clinical Chat Route Failure Recovery (No Stuck State)
@@ -172,11 +172,11 @@ async function runVoiceStateLifecycleTests() {
     };
 
     simulateChatFailure(callActive);
-    assert(audioState === "PATIENT_LISTENING", "Chat failure during active call returns to PATIENT_LISTENING (not stuck in reviewing/transcribing)");
+    assert((audioState as AudioState) === "PATIENT_LISTENING", "Chat failure during active call returns to PATIENT_LISTENING (not stuck in reviewing/transcribing)");
 
     audioState = "PROCESSING_CLINICAL";
     simulateChatFailure(false);
-    assert(audioState === "IDLE", "Chat failure when call inactive returns cleanly to IDLE");
+    assert((audioState as AudioState) === "IDLE", "Chat failure when call inactive returns cleanly to IDLE");
   }
 
   // [Suite 5] Canonical Whisper ASR vs Browser Interim Invariant

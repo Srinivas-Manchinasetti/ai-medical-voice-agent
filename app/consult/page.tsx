@@ -354,6 +354,10 @@ function formatClinicalFact(raw: string): string {
       return `Course: ${val}`;
     }
 
+    if (key === "ONSET_TYPE" || key === "ONSET TYPE") {
+      return val.toLowerCase() === "sudden" ? "Onset: sudden" : "Onset: gradual";
+    }
+
     if (key === "VOICE_CHANGE" || key === "VOICE CHANGE") {
       return "Voice change present";
     }
