@@ -21,6 +21,7 @@
   - [8. HL7® FHIR® R4 Bundle Export & Provenance](#8-hl7-fhir-r4-bundle-export--provenance)
   - [9. Geospatial Emergency Facility Discovery & Road Routing](#9-geospatial-emergency-facility-discovery--road-routing)
   - [10. Monotonic Barge-in Interruption](#10-monotonic-barge-in-interruption)
+  - [11. Code Reality & Audit Concordance Matrix (20-Point Specification)](#11-code-reality--audit-concordance-matrix-20-point-specification)
 - [Technology Stack](#-technology-stack)
 - [Repository Structure](#-repository-structure)
 - [Verification & Test Suites](#-verification--test-suites)
@@ -138,6 +139,33 @@ This specification documents the verified codebase implementation across clinica
 ### 10. Monotonic Barge-in Interruption
 * **Session Invalidation**: Interactive speech playback utilizes monotonic playback-session token counters.
 * **Low-Latency Cancellation**: When new user speech or VAD interruption is detected, the audio controller invalidates the current playback token, immediately pausing audio output and clearing queued buffers before new transcription begins.
+
+### 11. Code Reality & Audit Concordance Matrix (20-Point Specification)
+
+The following matrix documents the verified technical alignment across all 20 evaluated dimensions between prior claims, codebase reality, and adopted specifications (detailed in [docs/PAPER.md](docs/PAPER.md)):
+
+| # | Topic | Status | Code Reality & Verification | Adopted Specification & Paper Language |
+|:---:|:---|:---:|:---|:---|
+| **1** | Multi-Agent Board | 🟢 | Software decision modules with bounded execution rounds; not autonomous physicians. | Bounded multi-specialist clinical decision architecture comprising generalist and specialty modules orchestrated within a constrained clinical board. |
+| **2** | Shared Blackboard | 🟢 | In-memory blackboard coordinating specialist observations with bounded execution rounds. | Bounded asynchronous in-memory clinical blackboard coordinating specialist observations and synthesis. |
+| **3** | Diagnostic Tools | 🟢 | Rule tools evaluate patient-reported symptoms and telemetry; no direct ECG acquisition. | Clinical scoring tools evaluate patient-reported signs and available telemetry; ECG scoring does not imply direct 12-lead hardware acquisition. |
+| **4** | Dual-Arbiter Shield | 🟢 | Deterministic pre/post arbiters enforce emergency floor, missing-vs-denied semantics, and non-downgrade. | Retained as primary safety guarantee enforcing $\text{ESI}_{\text{final}} = \min(\text{ESI}_{\text{pre}}, \text{ESI}_{\text{llm}})$. |
+| **5** | Triage Concordance | 🟡 | 35-case benchmark harness (22 emergency, 13 controls). | Achieved 100% emergency sensitivity (22/22) on the evaluated 35-case benchmark; no claim of universal population accuracy. |
+| **6** | Arbiter Latency | 🟢 | Node.js v22 CPU benchmark measurements. | Mean safety-arbiter latency was 0.39 ms in the local Node.js benchmark; P50 was 0.14 ms. |
+| **7** | Kokoro-82M TTFA | 🔴 | Engine-level 5-word is ~0.93–0.96 s P50. Adaptive first-chunk synthesis gives 1.1–1.6 s TTFA (61.4% drop) with 0 ms starvation. | Kokoro-82M q4 CPU engine-level synthesis latency was approximately 0.93–0.96 s P50 for short 5-word inputs. Adaptive first-chunk synthesis reduced compound-turn TTFA by 61.4% (1.1–1.6 s) with 0 ms starvation. |
+| **8** | Turn-Taking | 🟡 | Short responses are sub-second; compound responses are 1.1–1.6 s TTFA. | Low-latency local interactive voice consultation, with sub-second turnaround for short responses and ~1.1–1.6 s TTFA for compound turns. |
+| **9** | Paralinguistic DSP | 🟢 | Live MediaStream PCM, 25 ms/10 ms framing, RMS/dBFS VAD, pause statistics, and autocorrelation $f_0$. | Browser runtime extracts short-term acoustic features as observational telemetry only; not used as autonomous diagnostic biomarkers. |
+| **10** | MedlinePlus RAG | 🟢 | 2,112 processed passages + curated guidelines loaded locally. | Offline MedlinePlus XML-derived passages indexed locally alongside curated clinical practice guidelines. |
+| **11** | RAG Math | 🔴 | Replaced Eq. 8 (no BM25 or DPR). Deterministic lexical, domain, section, and authority formula. | Evaluated with implemented formula: $S(d, q) = (L_{\text{multi-field}}(d, q) + \Delta_{\text{domain}}) \times \gamma_{\text{section}} + \alpha_{\text{auth}}$. |
+| **12** | Medication Routing | 🟡 | Local curated reference categories without live external APIs. | Task-aware retrieval routes queries over locally curated, pre-indexed source-tagged content corresponding to RxNorm, DailyMed, and openFDA categories. |
+| **13** | SHA-256 Ledger | 🟢 | Durable SHA-256 chained audit records with Neon PostgreSQL persistence. | Durable SHA-256 chained audit ledger provides tamper-evident event integrity and traceability. |
+| **14** | Reasoning Logging | 🟡 | Internal CoT is isolated from permanent medical records. | Records auditable clinical state transitions, triage dispositions, arbiter decisions, and associated provenance. |
+| **15** | HL7 FHIR Export | 🟢 | FHIR R4 document bundle generation validated by automated tests (43/43 passed). | Generates FHIR R4 bundles validated by automated serialization, provenance, and structural tests. |
+| **16** | Paralinguistic FHIR | 🟡 | Speech observations documented in SOAP/Composition, not separate clinical observations. | FHIR bundles include structured clinical observations (e.g., ESI acuity); runtime acoustic telemetry is documented as descriptive intake metadata. |
+| **17** | Emergency Dispatch | 🟡 | Care Network provides facility discovery & road routing; gated 5-state location FSM. | Geospatial Emergency Facility Discovery & Road Routing; decoupled from public 911 dispatch. |
+| **18** | Barge-in Latency | 🟡 | Monotonic playback token invalidation passing browser acceptance. | Low-latency barge-in cancellation using monotonic playback-session invalidation, verified by automated acceptance tests. |
+| **19** | Anti-Leakage | 🟢 | Sanitizers strip internal prompt tokens and unverified diagnostic labels. | Clinical output sanitization prevents selected internal/unsupported details from leaking into patient-facing responses. |
+| **20** | Diagnostic Scope | 🟢 | Framed as clinical decision support/triage intake prototype. | The system is designed for AI-assisted intake, triage, and clinical decision support and does not autonomously diagnose patients. |
 
 ---
 
