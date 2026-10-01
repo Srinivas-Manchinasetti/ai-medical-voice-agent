@@ -89,6 +89,51 @@ export function floatTo16BitPCM(float32Array: Float32Array, sampleRate = 24000):
 class KokoroService {
   private ttsInstance: KokoroTTS | null = null;
   private loadingPromise: Promise<KokoroTTS> | null = null;
+  private modelLoadTimeMs: number | null = null;
+  private warmupPromise: Promise<void> | null = null;
+  private isWarmedUp: boolean = false;
+
+  public isReady(): boolean {
+    return this.ttsInstance !== null && this.isWarmedUp;
+  }
+
+  public getModelLoadTimeMs(): number | null {
+    return this.modelLoadTimeMs;
+  }
+
+  /**
+   * Non-blocking background warmup: loads model singleton, populates ONNX memory buffers,
+   * and loads voice tensor so the first clinical response achieves immediate sub-second TTFA.
+   */
+  public async warmup(doctorId: string = "dr-sarah-chen"): Promise<{ warm: boolean; latencyMs: number }> {
+    if (this.isWarmedUp) {
+      return { warm: true, latencyMs: 0 };
+    }
+
+    if (this.warmupPromise) {
+      await this.warmupPromise;
+      return { warm: true, latencyMs: 0 };
+    }
+
+    const t0 = performance.now();
+    this.warmupPromise = (async () => {
+      try {
+        const tts = await this.getModel();
+        const voice = resolveAuthoritativeVoice(doctorId);
+        // Fast 1-word dummy inference forces ONNX kernel compilation, allocator initialization, and voice tensor load
+        await tts.generate("ready", { voice: voice as any, speed: 1.0 });
+        this.isWarmedUp = true;
+        console.log(`[Kokoro TTS Singleton] Background warmup complete in ${(performance.now() - t0).toFixed(1)}ms (Voice: ${voice})`);
+      } catch (err) {
+        console.warn("[Kokoro TTS Singleton] Background warmup non-fatal notice:", err);
+      } finally {
+        this.warmupPromise = null;
+      }
+    })();
+
+    await this.warmupPromise;
+    return { warm: true, latencyMs: Math.round(performance.now() - t0) };
+  }
 
   public async getModel(): Promise<KokoroTTS> {
     if (this.ttsInstance) {
@@ -99,15 +144,17 @@ class KokoroService {
       return this.loadingPromise;
     }
 
-    console.log("[Kokoro TTS Singleton] Initializing Kokoro-82M model in-memory cache...");
+    const dtype = (process.env.KOKORO_DTYPE as any) || "q4";
+    console.log(`[Kokoro TTS Singleton] Initializing Kokoro-82M model in-memory cache (dtype: ${dtype}, device: cpu)...`);
     const t0 = Date.now();
 
     this.loadingPromise = KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
-      dtype: "q8",
+      dtype,
       device: "cpu",
     }).then((model) => {
       this.ttsInstance = model;
-      console.log(`[Kokoro TTS Singleton] Kokoro-82M model ready in ${Date.now() - t0}ms`);
+      this.modelLoadTimeMs = Date.now() - t0;
+      console.log(`[Kokoro TTS Singleton] Kokoro-82M model ready in ${this.modelLoadTimeMs}ms (dtype: ${dtype})`);
       return model;
     });
 

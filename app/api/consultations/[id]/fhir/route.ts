@@ -48,10 +48,11 @@ export async function GET(
       );
     }
 
-    // 2. Fetch record from Neon DB or memory store
+    // 2. Fetch record from Neon DB
     let record: any = null;
-
     const dbClient = getDb();
+    let dbError: any = null;
+
     if (dbClient) {
       try {
         const records = await dbClient
@@ -64,10 +65,58 @@ export async function GET(
           record = records[0];
         }
       } catch (err) {
-        console.warn("DB lookup error for FHIR export:", err);
+        dbError = err;
+        console.error("DB lookup error for FHIR export:", err);
       }
     }
 
+    // In production, database failure must never fall back to synthetic clinical records
+    if (process.env.NODE_ENV === "production") {
+      if (dbError || !dbClient) {
+        return NextResponse.json(
+          {
+            resourceType: "OperationOutcome",
+            issue: [
+              {
+                severity: "fatal",
+                code: "transient",
+                diagnostics: "EHR datastore unavailable. Database connection could not be established.",
+              },
+            ],
+          },
+          {
+            status: 503,
+            headers: {
+              "Content-Type": "application/fhir+json; charset=utf-8",
+              "X-FHIR-Version": "4.0.1",
+            },
+          }
+        );
+      }
+      if (!record) {
+        return NextResponse.json(
+          {
+            resourceType: "OperationOutcome",
+            issue: [
+              {
+                severity: "error",
+                code: "not-found",
+                diagnostics: `Consultation with ID ${id} was not found in the EHR repository.`,
+              },
+            ],
+          },
+          {
+            status: 404,
+            headers: {
+              "Content-Type": "application/fhir+json; charset=utf-8",
+              "X-FHIR-Version": "4.0.1",
+            },
+          }
+        );
+      }
+    }
+
+    // Fallback to memory store strictly for development and test environments
     if (!record) {
       const mem = memoryConsultations.find((c) => c.id === id);
       if (mem) {

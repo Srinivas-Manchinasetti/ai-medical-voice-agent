@@ -53,6 +53,9 @@ export function hasPermission(role: Role, permission: Permission): boolean {
  *    for testing least-privilege UI behavior. A patient can NEVER elevate.
  * 5. Mock role headers are strictly constrained to automated test suites (NODE_ENV === 'test').
  */
+export const INTERNAL_TEST_SECRET_HEADER = "x-test-harness-secret";
+export const DEFAULT_INTERNAL_TEST_SECRET = "medvoice-test-harness-auth-token-9f8a3c2e";
+
 export async function getAuthContext(request?: Request): Promise<AuthContext> {
   // 1. Authoritative Clerk session resolution
   try {
@@ -78,14 +81,30 @@ export async function getAuthContext(request?: Request): Promise<AuthContext> {
   }
 
   // 2. Automated test runner harness ONLY (active when running unit/integration test processes)
+  // Security Invariants:
+  // - NODE_ENV must strictly equal "test" (never active in production or development)
+  // - Request must include an authoritative internal test secret (x-test-harness-secret)
+  //   matching process.env.INTERNAL_TEST_SECRET.
+  // - This ensures that even if a staging container has NODE_ENV=test set accidentally,
+  //   an untrusted external client cannot elevate to admin without the internal secret.
   const isTestHarness = process.env.NODE_ENV === "test";
+  const expectedSecret = process.env.INTERNAL_TEST_SECRET || DEFAULT_INTERNAL_TEST_SECRET;
+  const providedSecret = request?.headers.get(INTERNAL_TEST_SECRET_HEADER);
   const testRoleHeader = request?.headers.get("x-mock-role") as Role | null;
   const testUserHeader = request?.headers.get("x-mock-user-id");
 
-  if (isTestHarness && testRoleHeader && ["patient", "admin"].includes(testRoleHeader)) {
+  if (
+    isTestHarness &&
+    providedSecret === expectedSecret &&
+    testRoleHeader &&
+    ["patient", "admin"].includes(testRoleHeader)
+  ) {
+    const simulatePatient = request?.headers.get("x-simulate-patient-view") === "true";
+    const effectiveRole: Role = testRoleHeader === "admin" && simulatePatient ? "patient" : testRoleHeader;
+
     return {
       userId: testUserHeader || `test-${testRoleHeader}-01`,
-      role: testRoleHeader,
+      role: effectiveRole,
       name: `Test ${testRoleHeader.toUpperCase()}`,
       email: `${testRoleHeader}@test.internal`,
       isDemoMode: true,

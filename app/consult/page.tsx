@@ -1608,6 +1608,30 @@ export default function ConsultPage() {
     startSpeechRecognitionListeningRef.current = startSpeechRecognitionListening;
   }, [startSpeechRecognitionListening]);
 
+  // Non-blocking background model pre-warming on consultation mount:
+  // Preloads Kokoro model and executes initial JIT/memory buffer allocation in the background,
+  // completely decoupled from user UI interactions and microphone arming.
+  useEffect(() => {
+    const tPrewarmStart = performance.now();
+    fetch("/api/voice/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prewarm: true, doctorId: selectedDoctor.id }),
+    })
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          console.log(
+            `%c[MedVoice Audio] Background Kokoro TTS prewarmed in ${(performance.now() - tPrewarmStart).toFixed(0)} ms (Engine latency: ${data.latencyMs} ms)`,
+            "color: #10b981; font-family: monospace; font-size: 11px; font-weight: bold;"
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn("[MedVoice Audio] Background prewarm notice:", err);
+      });
+  }, [selectedDoctor.id]);
+
   // Active Consultation Live Timer Effect
   useEffect(() => {
     if (!callActive) return;
@@ -2975,7 +2999,7 @@ export default function ConsultPage() {
                         {contextMissingDimensions.length === 0 ? (
                           <div className="flex items-center gap-2.5 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs sm:text-sm text-emerald-900 font-medium">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>Clinical context sufficient for diagnostic disposition</span>
+                            <span>Clinical context sufficient for triage acuity and care disposition</span>
                           </div>
                         ) : (
                           <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">

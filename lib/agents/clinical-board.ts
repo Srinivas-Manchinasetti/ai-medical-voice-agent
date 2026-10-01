@@ -203,7 +203,7 @@ export class ClinicalBoard {
       ...(synthResult.consensus.differential.length > 0
         ? synthResult.consensus.differential.map(d => `  - ${d.condition} [Prob: ${d.probability.toUpperCase()}]: ${d.clinical_rationale || "Derived from reported symptoms"}`)
         : ["  - Unspecified acute presentation [Prob: LOW]"]),
-      `• Deterministic Safety Status: ${postResult.arbiter_override_applied ? "OVERRIDE ENFORCED — " + postResult.override_rationale : "NOMINAL VERIFICATION (0 False Negatives Invariant)"}`,
+      `• Deterministic Safety Status: ${postResult.arbiter_override_applied ? "OVERRIDE ENFORCED — " + postResult.override_rationale : "NOMINAL (Safety Arbiter Verified — No Emergency Criteria Met)"}`,
       "• Clinical Governance: Algorithmic triage guidance derived from conversational testimony. Does not replace physical examination by an attending physician.",
     ];
 

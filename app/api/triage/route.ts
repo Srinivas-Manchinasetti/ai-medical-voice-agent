@@ -85,7 +85,10 @@ export async function POST(request: Request) {
       spokenResponse = `I've logged your symptoms for routine outpatient review. ${arbiter.recommendedAction}`;
     }
 
-    const soapSummary = `S: Patient reports: "${transcript}". O: Deterministic clinical features: ${arbiter.detectedSymptoms.join(", ") || "None"}. A: ${arbiter.esiTitle} (ESI ${arbiter.esiScore}, ICD-10: ${arbiter.icd10Codes.join(", ")}). P: ${arbiter.clinicalProtocol}`;
+    const objectiveData = vitals && Object.keys(vitals).length > 0
+      ? `Measured telemetry vitals: ${Object.entries(vitals).map(([k, v]) => `${k}: ${v}`).join(", ")}`
+      : "Not assessed (remote voice consultation; physical vitals unobserved)";
+    const soapSummary = `S: Patient reports: "${transcript}". Reported symptoms: ${arbiter.detectedSymptoms.join(", ") || "None"}. O: ${objectiveData}. A: ${arbiter.esiTitle} (ESI ${arbiter.esiScore}, ICD-10: ${arbiter.icd10Codes.join(", ")}). P: ${arbiter.clinicalProtocol}`;
 
     // Append evaluation to tamper-evident audit ledger
     await logAuditEventAsync({

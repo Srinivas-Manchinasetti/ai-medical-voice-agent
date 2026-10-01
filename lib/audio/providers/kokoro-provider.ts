@@ -24,6 +24,11 @@ export class KokoroTTSProvider implements ITTSProvider {
       voice: result.voice,
       provider: "kokoro",
       locale: profile.locale,
+      modelLoadTimeMs: kokoroService.getModelLoadTimeMs(),
     };
+  }
+
+  public async warmup(profile: DoctorVoiceProfile): Promise<{ warm: boolean; latencyMs: number }> {
+    return kokoroService.warmup(profile.doctorId);
   }
 }

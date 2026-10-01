@@ -17,8 +17,26 @@ const FASTAPI_STT_URL = process.env.FASTAPI_URL
  * If transcription fails or audio is corrupted, returns an explicit error
  * so the client prompts the patient to repeat. NEVER returns fabricated clinical symptoms.
  */
+import {
+  checkRateLimit,
+  getClientIp,
+  buildRateLimitResponse,
+  RESOURCE_LIMITS,
+} from "@/lib/security/rate-limiter";
+
 export async function POST(request: Request) {
   try {
+    // 1. Abuse Protection: Rate limit per client IP
+    const clientIp = getClientIp(request);
+    const rateLimit = checkRateLimit(
+      `voice_stt:${clientIp}`,
+      RESOURCE_LIMITS.VOICE_STT_RATE_LIMIT_PER_MINUTE,
+      60000
+    );
+    if (!rateLimit.allowed) {
+      return buildRateLimitResponse(rateLimit, "/api/voice/stt");
+    }
+
     const formData = await request.formData();
     const file = formData.get("file") as File | Blob | null;
 
@@ -26,6 +44,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Audio buffer is empty. Please speak clearly into the microphone." },
         { status: 400 }
+      );
+    }
+
+    // 2. Abuse Protection: Reject oversized audio uploads before memory buffer / ASR processing
+    if (file instanceof Blob && file.size > RESOURCE_LIMITS.VOICE_STT_MAX_AUDIO_BYTES) {
+      return NextResponse.json(
+        {
+          error: `Audio file exceeds maximum allowed size of ${RESOURCE_LIMITS.VOICE_STT_MAX_AUDIO_BYTES / (1024 * 1024)} MB.`,
+          code: "PAYLOAD_TOO_LARGE",
+        },
+        { status: 413 }
       );
     }
 

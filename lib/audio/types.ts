@@ -9,6 +9,7 @@ export interface TTSAudioResult {
   voice: string;
   provider: TTSProviderType;
   locale: string;
+  modelLoadTimeMs?: number | null;
 }
 
 export interface TTSFallbackSignal {
@@ -30,4 +31,5 @@ export interface ITTSProvider {
   readonly name: TTSProviderType;
   isAvailable(): boolean;
   synthesize(text: string, profile: DoctorVoiceProfile): Promise<TTSAudioResult>;
+  warmup?(profile: DoctorVoiceProfile): Promise<{ warm: boolean; latencyMs: number }>;
 }

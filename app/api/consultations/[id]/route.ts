@@ -36,9 +36,11 @@ export async function GET(
       );
     }
 
-    // 2. Lookup record in Neon database or local memory fallback
+    // 2. Lookup record in Neon database
     let record: any = null;
     const dbClient = getDb();
+    let dbError: any = null;
+
     if (dbClient) {
       try {
         const records = await dbClient
@@ -51,11 +53,32 @@ export async function GET(
           record = records[0];
         }
       } catch (err) {
-        console.warn("DB lookup error:", err);
+        dbError = err;
+        console.error("DB lookup error:", err);
       }
     }
 
-    // Fallback to memory store
+    // In production, database failure must never fall back to synthetic clinical records
+    if (process.env.NODE_ENV === "production") {
+      if (dbError || !dbClient) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Clinical records service unavailable. Database connection could not be established.",
+            code: "SERVICE_UNAVAILABLE",
+          },
+          { status: 503 }
+        );
+      }
+      if (!record) {
+        return NextResponse.json(
+          { success: false, message: "Consultation report not found" },
+          { status: 404 }
+        );
+      }
+    }
+
+    // Fallback to memory store strictly for development and test environments
     if (!record) {
       record = memoryConsultations.find((c) => c.id === id);
     }

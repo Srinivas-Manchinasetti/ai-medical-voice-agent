@@ -95,6 +95,15 @@ class TTSDispatcher {
       };
     }
   }
+
+  public async warmup(doctorId?: string): Promise<{ warm: boolean; latencyMs: number }> {
+    const profile = this.resolveProfile(doctorId);
+    const provider = this.getProvider(profile.provider);
+    if (provider && provider.warmup) {
+      return provider.warmup(profile);
+    }
+    return { warm: true, latencyMs: 0 };
+  }
 }
 
 export const ttsDispatcher = new TTSDispatcher();

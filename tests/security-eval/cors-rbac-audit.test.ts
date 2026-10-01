@@ -14,15 +14,30 @@ import {
   Permission,
   getAuthContext,
   authorizeRequest,
+  INTERNAL_TEST_SECRET_HEADER,
+  DEFAULT_INTERNAL_TEST_SECRET,
 } from "../../lib/auth/rbac";
 import { evaluateSafetyArbiter } from "../../lib/triage/safety-arbiter";
 import { GET as getConsultationById } from "../../app/api/consultations/[id]/route";
 import { GET as getConsultationFhir } from "../../app/api/consultations/[id]/fhir/route";
 import { GET as getEmergencyDispatches, POST as postEmergencyDispatch } from "../../app/api/emergency/pre-arrival/route";
-import { memoryConsultations } from "../../app/api/consultations/route";
+import { memoryConsultations, GET as getConsultations } from "../../app/api/consultations/route";
+import { POST as postVoiceChat } from "../../app/api/voice/chat/route";
+import { POST as postVoiceTTS } from "../../app/api/voice/tts/route";
+import { POST as postVoiceSTT } from "../../app/api/voice/stt/route";
+import { checkRateLimit, resetRateLimitStore } from "../../lib/security/rate-limiter";
 
 // Ensure test environment is explicitly set for test runner
 (process.env as Record<string, string | undefined>).NODE_ENV = "test";
+
+function createTestHeaders(role: string, userId?: string, extra?: Record<string, string>): Record<string, string> {
+  return {
+    "x-mock-role": role,
+    ...(userId ? { "x-mock-user-id": userId } : {}),
+    [INTERNAL_TEST_SECRET_HEADER]: DEFAULT_INTERNAL_TEST_SECRET,
+    ...extra,
+  };
+}
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -76,38 +91,56 @@ async function runSecurityAndAuditTestSuite() {
       assert(unauthContext.userId === "unauthenticated", "Unauthenticated request resolves to userId: 'unauthenticated'");
       assert(unauthContext.role === "patient", "Unauthenticated request strictly assigned non-privileged 'patient' role");
 
-      // Attempting to spoof admin via header in production MUST FAIL
+      // Attempting to spoof admin via header in production MUST FAIL (even if valid test secret is presented)
       const spoofAttemptReq = new Request("https://app.medvoice.org/api/admin/metrics", {
-        headers: { "x-mock-role": "admin" },
+        headers: createTestHeaders("admin"),
       });
       const spoofedContext = await getAuthContext(spoofAttemptReq);
-      assert(spoofedContext.role === "patient", "Client-controlled 'x-mock-role: admin' is strictly rejected in production");
-      assert(spoofedContext.userId === "unauthenticated", "Spoofed client remains unauthenticated");
+      assert(spoofedContext.role === "patient", "Client-controlled 'x-mock-role: admin' is strictly rejected in production even with test secret");
+      assert(spoofedContext.userId === "unauthenticated", "Spoofed client remains unauthenticated in production");
 
       // Verify authorizeRequest returns 401 Unauthorized for unauthenticated callers
       const authResult = await authorizeRequest(spoofAttemptReq, "analytics:read");
-      assert(authResult.authorized === false, "Access correctly denied for spoof attempt");
+      assert(authResult.authorized === false, "Access correctly denied for spoof attempt in production");
       if (!authResult.authorized) {
-        assert(authResult.errorResponse.status === 401, "Unauthenticated spoof attempt returns 401 Unauthorized");
+        assert(authResult.errorResponse.status === 401, "Unauthenticated spoof attempt returns 401 Unauthorized in production");
       }
     } finally {
       (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
     }
 
-    // 2. Test Harness Role Emulation (only available when NODE_ENV === 'test')
-    const testAdminReq = new Request("https://app.medvoice.org/api/admin/metrics", {
+    // 2. Test Harness Role Emulation: Missing or Wrong Secret MUST FAIL (even in NODE_ENV === 'test')
+    const noSecretReq = new Request("https://app.medvoice.org/api/admin/metrics", {
       headers: { "x-mock-role": "admin", "x-mock-user-id": "test-admin-99" },
     });
-    const testAdminContext = await getAuthContext(testAdminReq);
-    assert(testAdminContext.role === "admin", "Automated test harness can emulate admin for unit tests");
+    const noSecretContext = await getAuthContext(noSecretReq);
+    assert(noSecretContext.role === "patient", "x-mock-role is rejected in test harness when x-test-harness-secret is missing");
+    assert(noSecretContext.userId === "unauthenticated", "Mock role without secret remains unauthenticated");
 
-    // 3. Authenticated Admin Down-scoping (Privilege Attenuation)
+    const badSecretReq = new Request("https://app.medvoice.org/api/admin/metrics", {
+      headers: {
+        "x-mock-role": "admin",
+        "x-mock-user-id": "test-admin-99",
+        [INTERNAL_TEST_SECRET_HEADER]: "wrong-unauthorized-secret-token",
+      },
+    });
+    const badSecretContext = await getAuthContext(badSecretReq);
+    assert(badSecretContext.role === "patient", "x-mock-role is rejected in test harness when x-test-harness-secret is invalid");
+
+    // 3. Test Harness Role Emulation: Valid Secret SUCCEEDS (only in NODE_ENV === 'test')
+    const validTestAdminReq = new Request("https://app.medvoice.org/api/admin/metrics", {
+      headers: createTestHeaders("admin", "test-admin-99"),
+    });
+    const testAdminContext = await getAuthContext(validTestAdminReq);
+    assert(testAdminContext.role === "admin", "Automated test harness can emulate admin when valid internal test secret is provided");
+
+    // 4. Authenticated Admin Down-scoping (Privilege Attenuation)
     // When an admin voluntarily requests patient simulation, it down-scopes safely
     const adminDownscopeReq = new Request("https://app.medvoice.org/api/admin/metrics", {
-      headers: { "x-mock-role": "admin", "x-simulate-patient-view": "true" },
+      headers: createTestHeaders("admin", "test-admin-99", { "x-simulate-patient-view": "true" }),
     });
-    // In test harness, x-mock-role creates admin, but x-simulate-patient-view down-scopes
-    // (Note: in production, Clerk provides the verified admin role)
+    const downscopedContext = await getAuthContext(adminDownscopeReq);
+    assert(downscopedContext.role === "patient", "Admin voluntarily down-scopes to patient for UI simulation");
   }
 
   // TEST 2: Tamper-Evident Cryptographic Hash Chain
@@ -312,7 +345,7 @@ async function runSecurityAndAuditTestSuite() {
 
     // 2. IDOR Prevention: Patient Bob attempts to read Patient Alice's consultation
     const bobConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`, {
-      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-bob-456" },
+      headers: createTestHeaders("patient", "patient-bob-456"),
     });
     const bobConsultRes = await getConsultationById(bobConsultReq, {
       params: Promise.resolve({ id: testConsultationId }),
@@ -321,7 +354,7 @@ async function runSecurityAndAuditTestSuite() {
 
     // 3. IDOR Prevention: Patient Bob attempts to export Patient Alice's FHIR bundle
     const bobFhirReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}/fhir`, {
-      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-bob-456" },
+      headers: createTestHeaders("patient", "patient-bob-456"),
     });
     const bobFhirRes = await getConsultationFhir(bobFhirReq, {
       params: Promise.resolve({ id: testConsultationId }),
@@ -330,7 +363,7 @@ async function runSecurityAndAuditTestSuite() {
 
     // 4. Legitimate Patient Owner Access: Alice reads and exports her own consultation
     const aliceConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`, {
-      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123" },
+      headers: createTestHeaders("patient", "patient-alice-123"),
     });
     const aliceConsultRes = await getConsultationById(aliceConsultReq, {
       params: Promise.resolve({ id: testConsultationId }),
@@ -338,7 +371,7 @@ async function runSecurityAndAuditTestSuite() {
     assert(aliceConsultRes.status === 200, "Patient Alice can read her own consultation (200 OK)");
 
     const aliceFhirReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}/fhir`, {
-      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123" },
+      headers: createTestHeaders("patient", "patient-alice-123"),
     });
     const aliceFhirRes = await getConsultationFhir(aliceFhirReq, {
       params: Promise.resolve({ id: testConsultationId }),
@@ -347,7 +380,7 @@ async function runSecurityAndAuditTestSuite() {
 
     // 5. Administrator Oversight: Admin can inspect consultation for compliance
     const adminConsultReq = new Request(`https://medvoice.org/api/consultations/${testConsultationId}`, {
-      headers: { "x-mock-role": "admin", "x-mock-user-id": "admin-super" },
+      headers: createTestHeaders("admin", "admin-super"),
     });
     const adminConsultRes = await getConsultationById(adminConsultReq, {
       params: Promise.resolve({ id: testConsultationId }),
@@ -358,7 +391,7 @@ async function runSecurityAndAuditTestSuite() {
     // Admin role CANNOT initiate patient clinical emergency ambulance dispatch
     const adminDispatchReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
       method: "POST",
-      headers: { "x-mock-role": "admin", "x-mock-user-id": "admin-super", "Content-Type": "application/json" },
+      headers: createTestHeaders("admin", "admin-super", { "Content-Type": "application/json" }),
       body: JSON.stringify({
         consultationId: testConsultationId,
         patientId: "patient-alice-123",
@@ -379,7 +412,7 @@ async function runSecurityAndAuditTestSuite() {
     // Patient CAN initiate emergency ambulance dispatch
     const patientDispatchReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
       method: "POST",
-      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123", "Content-Type": "application/json" },
+      headers: createTestHeaders("patient", "patient-alice-123", { "Content-Type": "application/json" }),
       body: JSON.stringify({
         consultationId: testConsultationId,
         patientId: "patient-alice-123",
@@ -400,17 +433,113 @@ async function runSecurityAndAuditTestSuite() {
     // 7. Hospital ED Telemetry Board Access
     // Patient CANNOT dump all hospital telemetry dispatches
     const patientBoardReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
-      headers: { "x-mock-role": "patient", "x-mock-user-id": "patient-alice-123" },
+      headers: createTestHeaders("patient", "patient-alice-123"),
     });
     const patientBoardRes = await getEmergencyDispatches(patientBoardReq);
     assert(patientBoardRes.status === 403, "Patient cannot dump hospital emergency telemetry board (403 Forbidden)");
 
     // Admin CAN inspect hospital telemetry board
     const adminBoardReq = new Request("https://medvoice.org/api/emergency/pre-arrival", {
-      headers: { "x-mock-role": "admin", "x-mock-user-id": "admin-super" },
+      headers: createTestHeaders("admin", "admin-super"),
     });
     const adminBoardRes = await getEmergencyDispatches(adminBoardReq);
     assert(adminBoardRes.status === 200, "Administrator can inspect hospital emergency telemetry board (200 OK)");
+  }
+
+  // TEST 7: Abuse Protection & Voice Endpoint Resource Limits (OWASP API4:2023)
+  console.log("\n[Test Suite 7] Abuse Protection & Expensive Voice Endpoint Resource Limits");
+  {
+    // 1. Voice Chat: Rejects oversized messages (>1,000 chars) before expensive LLM reasoning
+    const oversizedMessage = "A".repeat(1050);
+    const oversizedChatReq = new Request("https://medvoice.org/api/voice/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: oversizedMessage }),
+    });
+    const chatLimitRes = await postVoiceChat(oversizedChatReq);
+    assert(chatLimitRes.status === 413, "Voice Chat rejects oversized message (>1,000 chars) with 413 Payload Too Large");
+    const chatLimitJson = await chatLimitRes.json();
+    assert(chatLimitJson.code === "PAYLOAD_TOO_LARGE", "Voice Chat returns PAYLOAD_TOO_LARGE error code");
+
+    // 2. Voice Chat: Rejects oversized conversation history (>30 turns)
+    const oversizedHistory = Array.from({ length: 35 }, (_, i) => ({
+      role: i % 2 === 0 ? "patient" : "doctor",
+      text: `Historical turn message ${i}`,
+    }));
+    const oversizedHistoryReq = new Request("https://medvoice.org/api/voice/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Hello doctor", conversationHistory: oversizedHistory }),
+    });
+    const historyLimitRes = await postVoiceChat(oversizedHistoryReq);
+    assert(historyLimitRes.status === 413, "Voice Chat rejects oversized conversation history (>30 turns) with 413");
+
+    // 3. Voice TTS: Rejects oversized text synthesis requests (>1,000 chars)
+    const oversizedTTSReq = new Request("https://medvoice.org/api/voice/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "T".repeat(1200), doctorId: "dr-sarah-chen" }),
+    });
+    const ttsLimitRes = await postVoiceTTS(oversizedTTSReq);
+    assert(ttsLimitRes.status === 413, "Voice TTS rejects oversized text (>1,000 chars) with 413 Payload Too Large");
+
+    // 4. Voice STT: Rejects oversized audio buffer (>10MB) before buffer consumption
+    const oversizedBlob = new Blob([new Uint8Array(11 * 1024 * 1024)], { type: "audio/webm" });
+    const formData = new FormData();
+    formData.append("file", oversizedBlob, "massive-audio.webm");
+    const oversizedSTTReq = new Request("https://medvoice.org/api/voice/stt", {
+      method: "POST",
+      body: formData,
+    });
+    const sttLimitRes = await postVoiceSTT(oversizedSTTReq);
+    assert(sttLimitRes.status === 413, "Voice STT rejects oversized audio (>10MB) with 413 Payload Too Large");
+
+    // 5. Rate Limiter Mechanics: Sliding window triggers 429 Too Many Requests when threshold exceeded
+    resetRateLimitStore();
+    const testIp = "192.168.1.100";
+    const testKey = `test_endpoint:${testIp}`;
+    // Simulate consuming entire quota of 3 requests within 60s
+    const r1 = checkRateLimit(testKey, 3, 60000, true);
+    const r2 = checkRateLimit(testKey, 3, 60000, true);
+    const r3 = checkRateLimit(testKey, 3, 60000, true);
+    assert(r1.allowed && r2.allowed && r3.allowed, "Requests under rate limit threshold are permitted");
+
+    // 4th request must be rejected
+    const r4 = checkRateLimit(testKey, 3, 60000, true);
+    assert(!r4.allowed, "4th request exceeds rate limit threshold and is blocked");
+    assert(r4.retryAfterSec > 0, "Blocked rate limit returns valid retryAfterSec integer");
+  }
+
+  // TEST 8: Production Datastore Failure & Synthetic Demo Fallback Isolation
+  console.log("\n[Test Suite 8] Production Datastore Failure & Synthetic Demo Fallback Isolation");
+  {
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+
+      // 1. In production, GET /api/consultations returns 503 when DB is absent (never returns synthetic records)
+      const prodListReq = new Request("https://medvoice.org/api/consultations");
+      const prodListRes = await getConsultations(prodListReq);
+      assert(prodListRes.status === 503, "Production consultation list returns 503 Service Unavailable when DB is absent");
+      const prodListJson = await prodListRes.json();
+      assert(prodListJson.code === "SERVICE_UNAVAILABLE", "Returns SERVICE_UNAVAILABLE error code");
+
+      // 2. In production, unauthenticated single consultation access returns 401 (blocks synthetic data access)
+      const prodSingleReq = new Request("https://medvoice.org/api/consultations/MED-2026-ACS-8841");
+      const prodSingleRes = await getConsultationById(prodSingleReq, {
+        params: Promise.resolve({ id: "MED-2026-ACS-8841" }),
+      });
+      assert(prodSingleRes.status === 401, "Production single consultation enforces 401 authentication wall (no demo leakage)");
+
+      // 3. In production, unauthenticated FHIR export returns 401 (blocks synthetic FHIR leakage)
+      const prodFhirReq = new Request("https://medvoice.org/api/consultations/MED-2026-ACS-8841/fhir");
+      const prodFhirRes = await getConsultationFhir(prodFhirReq, {
+        params: Promise.resolve({ id: "MED-2026-ACS-8841" }),
+      });
+      assert(prodFhirRes.status === 401, "Production FHIR export enforces 401 authentication wall (no demo leakage)");
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+    }
   }
 
   console.log("\n========================================================");

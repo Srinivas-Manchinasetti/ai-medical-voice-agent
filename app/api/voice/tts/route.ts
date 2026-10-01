@@ -1,13 +1,64 @@
 import { NextResponse } from "next/server";
 import { ttsDispatcher } from "@/lib/audio/tts-dispatcher";
 
+export async function GET() {
+  try {
+    const warmupResult = await ttsDispatcher.warmup("dr-sarah-chen");
+    return NextResponse.json({
+      prewarmed: true,
+      provider: "kokoro",
+      latencyMs: warmupResult.latencyMs,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || "Warmup notice" }, { status: 500 });
+  }
+}
+
+import {
+  checkRateLimit,
+  getClientIp,
+  buildRateLimitResponse,
+  RESOURCE_LIMITS,
+} from "@/lib/security/rate-limiter";
+
 export async function POST(request: Request) {
   try {
+    // 1. Abuse Protection: Rate limit per client IP
+    const clientIp = getClientIp(request);
+    const rateLimit = checkRateLimit(
+      `voice_tts:${clientIp}`,
+      RESOURCE_LIMITS.VOICE_TTS_RATE_LIMIT_PER_MINUTE,
+      60000
+    );
+    if (!rateLimit.allowed) {
+      return buildRateLimitResponse(rateLimit, "/api/voice/tts");
+    }
+
     const body = await request.json();
-    const { text, doctorId = "dr-sarah-chen", speed } = body;
+    const { text, doctorId = "dr-sarah-chen", speed, prewarm } = body;
+
+    // Fast-path: Explicit non-blocking background model pre-warming
+    if (prewarm) {
+      const warmupResult = await ttsDispatcher.warmup(doctorId);
+      return NextResponse.json({
+        prewarmed: true,
+        doctorId,
+        latencyMs: warmupResult.latencyMs,
+      });
+    }
 
     if (!text || typeof text !== "string" || !text.trim()) {
       return NextResponse.json({ error: "Text parameter is required." }, { status: 400 });
+    }
+
+    if (text.length > RESOURCE_LIMITS.VOICE_TTS_MAX_TEXT_CHARS) {
+      return NextResponse.json(
+        {
+          error: `Text exceeds maximum allowed length of ${RESOURCE_LIMITS.VOICE_TTS_MAX_TEXT_CHARS} characters for speech synthesis.`,
+          code: "PAYLOAD_TOO_LARGE",
+        },
+        { status: 413 }
+      );
     }
 
     const dispatchResult = await ttsDispatcher.dispatch(text, doctorId, speed);
@@ -32,6 +83,7 @@ export async function POST(request: Request) {
         "X-TTS-Locale": audio.locale,
         "X-TTS-Latency-Ms": audio.latencyMs.toString(),
         "X-TTS-Duration-Sec": audio.durationSec.toFixed(2),
+        "X-TTS-Model-Warmup-Ms": (audio.modelLoadTimeMs ?? 0).toString(),
         "Cache-Control": "public, max-age=3600, immutable",
       },
     });

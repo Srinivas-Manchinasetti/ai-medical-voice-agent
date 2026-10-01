@@ -547,6 +547,9 @@ export class ConversationManager {
     ) || /\b(unconscious|unresponsive|not\s+breathing|cardiac\s+arrest|collapsed)\b/i.test(state.cumulativeTranscript);
 
     if (hasEmergencyPreemptionFlag) {
+      // Opportunistic extraction before emergency preemption
+      this.extractOpportunisticFacts(state);
+
       // Emergency detected mid-interview (e.g. sudden facial droop, respiratory arrest, anaphylaxis)
       state.caseVersion++;
       state.informationState = "emergency_preempted";
@@ -1354,17 +1357,63 @@ export class ConversationManager {
       }
     }
     if (!state.slots.character) {
-      const charMatch = state.cumulativeTranscript.match(/\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/i);
-      if (charMatch) {
-        state.slots.character = charMatch[0];
-        if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
-          state.slots.known_facts.push(`CHARACTER: ${charMatch[0]}`);
+      // Affirmative character extraction: ensure matched character word is NOT preceded by an active negation in the same clause
+      const charRegex = /\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/gi;
+      let matchedChar: string | null = null;
+      let charExec: RegExpExecArray | null;
+      while ((charExec = charRegex.exec(state.cumulativeTranscript)) !== null) {
+        const word = charExec[1];
+        const startIndex = charExec.index;
+        const preceding = state.cumulativeTranscript.slice(Math.max(0, startIndex - 45), startIndex);
+        const lastBoundary = Math.max(
+          preceding.lastIndexOf('.'),
+          preceding.lastIndexOf(';'),
+          preceding.lastIndexOf('!'),
+          preceding.lastIndexOf('?'),
+          preceding.search(/\b(?:but|however|yet)\b/i)
+        );
+        const clausePrefix = lastBoundary >= 0 ? preceding.slice(lastBoundary) : preceding;
+        const isNegated = /\b(?:no|not|without|neither|never|denies|deny|free\s+of)\b/i.test(clausePrefix);
+        if (!isNegated) {
+          matchedChar = word;
+          break;
         }
-      } else if (/\b(dizzy|dizziness|lightheaded)\b/i.test(state.cumulativeTranscript)) {
-        const isPostural = /\b(when\s+i\s+stand|after\s+i\s+sat|standing\s+up|getting\s+up|sitting\s+for\s+long)\b/i.test(state.cumulativeTranscript);
-        state.slots.character = isPostural ? "postural dizziness upon standing after sitting" : "dizziness";
+      }
+
+      if (matchedChar) {
+        state.slots.character = matchedChar;
         if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
-          state.slots.known_facts.push(`CHARACTER: ${state.slots.character}`);
+          state.slots.known_facts.push(`CHARACTER: ${matchedChar}`);
+        }
+      } else {
+        const dizzyRegex = /\b(dizzy|dizziness|lightheaded)\b/gi;
+        let matchedDizzy: string | null = null;
+        let dizzyExec: RegExpExecArray | null;
+        while ((dizzyExec = dizzyRegex.exec(state.cumulativeTranscript)) !== null) {
+          const word = dizzyExec[1];
+          const startIndex = dizzyExec.index;
+          const preceding = state.cumulativeTranscript.slice(Math.max(0, startIndex - 45), startIndex);
+          const lastBoundary = Math.max(
+            preceding.lastIndexOf('.'),
+            preceding.lastIndexOf(';'),
+            preceding.lastIndexOf('!'),
+            preceding.lastIndexOf('?'),
+            preceding.search(/\b(?:but|however|yet)\b/i)
+          );
+          const clausePrefix = lastBoundary >= 0 ? preceding.slice(lastBoundary) : preceding;
+          const isNegated = /\b(?:no|not|without|neither|never|denies|deny|free\s+of)\b/i.test(clausePrefix);
+          if (!isNegated) {
+            matchedDizzy = word;
+            break;
+          }
+        }
+
+        if (matchedDizzy) {
+          const isPostural = /\b(when\s+i\s+stand|after\s+i\s+sat|standing\s+up|getting\s+up|sitting\s+for\s+long)\b/i.test(state.cumulativeTranscript);
+          state.slots.character = isPostural ? "postural dizziness upon standing after sitting" : "dizziness";
+          if (!state.slots.known_facts.some(f => f.startsWith("CHARACTER"))) {
+            state.slots.known_facts.push(`CHARACTER: ${state.slots.character}`);
+          }
         }
       }
     }

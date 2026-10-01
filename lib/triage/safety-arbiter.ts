@@ -572,9 +572,40 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
   const symptoms: Set<string> = new Set(structuredEvidence.symptomsDetected);
 
   const rawTextLower = (input.rawText || '').toLowerCase();
+  
+  // Consume structured medication evidence from facts, provenance, and structured history
+  const medSources: string[] = [rawTextLower];
+
+  const allFacts = [
+    ...(input.facts || []),
+    ...(input.structuredState?.facts || []),
+  ];
+  for (const f of allFacts) {
+    if (f.value !== undefined && f.value !== null) medSources.push(String(f.value).toLowerCase());
+    if (f.normalizedText) medSources.push(String(f.normalizedText).toLowerCase());
+    if (f.label) medSources.push(String(f.label).toLowerCase());
+    if (f.name) medSources.push(String(f.name).toLowerCase());
+  }
+
+  const allProv = [
+    ...(input.structuredState?.provenanceEvidence || []),
+  ];
+  for (const p of allProv) {
+    if (p.value !== undefined && p.value !== null) medSources.push(String(p.value).toLowerCase());
+    if (p.description) medSources.push(String(p.description).toLowerCase());
+    if (p.label) medSources.push(String(p.label).toLowerCase());
+  }
+
+  const structuredHist = (input.structuredState as any)?.structuredHistory || (input.structuredState as any)?.history;
+  if (structuredHist?.currentMedications && Array.isArray(structuredHist.currentMedications)) {
+    medSources.push(...structuredHist.currentMedications.map((m: any) => String(m).toLowerCase()));
+  }
+
+  const combinedMedText = medSources.join(' ');
+
   const hasNitratePde5Contraindication =
-    (/sildenafil|viagra|tadalafil|cialis/i.test(rawTextLower)) &&
-    (/nitroglycerin|nitrate|nitrostat/i.test(rawTextLower));
+    (/sildenafil|viagra|tadalafil|cialis|vardenafil|levitra/i.test(combinedMedText)) &&
+    (/nitroglycerin|nitrate|nitrostat|isordil|isosorbide/i.test(combinedMedText));
 
   let esiScore: 1 | 2 | 3 | 4 | 5 = 4; // Default baseline: Less Urgent
   let triageLevel: 'emergency' | 'priority' | 'routine' = 'routine';
@@ -605,7 +636,7 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
   else if (
     ((features.chestPain || features.pressureLikePain) &&
     (features.radiationToArm || features.radiationToJaw || features.diaphoresis || features.pressureLikePain)) ||
-    (features.chestPain && hasNitratePde5Contraindication)
+    ((features.chestPain || features.pressureLikePain) && hasNitratePde5Contraindication)
   ) {
     esiScore = 2;
     triageLevel = 'emergency';

@@ -11,8 +11,26 @@ import { hospitalRagService } from "@/lib/care-network/hospital-rag";
 import { buildProvenanceEvidenceFromClinicalState } from "@/lib/agents/provenance";
 import { extractSubfieldState, detectQuestionTargetSlot } from "@/lib/triage/clinical-state";
 
+import {
+  checkRateLimit,
+  getClientIp,
+  buildRateLimitResponse,
+  RESOURCE_LIMITS,
+} from "@/lib/security/rate-limiter";
+
 export async function POST(request: Request) {
   try {
+    // 1. Abuse Protection: Rate limit per client IP
+    const clientIp = getClientIp(request);
+    const rateLimit = checkRateLimit(
+      `voice_chat:${clientIp}`,
+      RESOURCE_LIMITS.VOICE_CHAT_RATE_LIMIT_PER_MINUTE,
+      60000
+    );
+    if (!rateLimit.allowed) {
+      return buildRateLimitResponse(rateLimit, "/api/voice/chat");
+    }
+
     const body = await request.json();
     const {
       doctorId = "dr-sarah-chen",
@@ -27,8 +45,29 @@ export async function POST(request: Request) {
       locationPermission,
     } = body;
 
-    if (!message || !message.trim()) {
-      return NextResponse.json({ error: "Message is required." }, { status: 400 });
+    // 2. Abuse Protection: Enforce strict payload constraints before expensive AI reasoning
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return NextResponse.json({ error: "Message is required and must be text." }, { status: 400 });
+    }
+
+    if (message.length > RESOURCE_LIMITS.VOICE_CHAT_MAX_MESSAGE_CHARS) {
+      return NextResponse.json(
+        {
+          error: `Message exceeds maximum allowed length of ${RESOURCE_LIMITS.VOICE_CHAT_MAX_MESSAGE_CHARS} characters.`,
+          code: "PAYLOAD_TOO_LARGE",
+        },
+        { status: 413 }
+      );
+    }
+
+    if (Array.isArray(conversationHistory) && conversationHistory.length > RESOURCE_LIMITS.VOICE_CHAT_MAX_HISTORY_ITEMS) {
+      return NextResponse.json(
+        {
+          error: `Conversation history exceeds maximum allowed limit of ${RESOURCE_LIMITS.VOICE_CHAT_MAX_HISTORY_ITEMS} turns.`,
+          code: "PAYLOAD_TOO_LARGE",
+        },
+        { status: 413 }
+      );
     }
 
     const doctor = getDoctorById(doctorId);
@@ -270,14 +309,22 @@ export async function POST(request: Request) {
     }
 
     // Conditioned Care Network RAG Trigger:
-    // Only invoke when an access constraint (financial or remote location) is present,
+    // Invoke when an acute emergency/danger is detected (ESI-1/ESI-2),
+    // OR when an access constraint (financial or remote location) is present,
     // OR when the patient specifically mentions outskirts, affordability, or hospital needs.
     const constraints = turnResult.state.structuredHistory?.accessConstraints;
     let nearbyHospitals: any[] = turnResult.state.structuredHistory?.nearbyHospitals || [];
     let careOptions: any[] = [];
     let careNetworkSummary: string | undefined = undefined;
 
+    const hasEmergencyEvidence = Boolean(
+      turnResult.preArbiterResult?.immediate_danger ||
+      (turnResult.preArbiterResult?.pre_safety_flags && turnResult.preArbiterResult.pre_safety_flags.length > 0) ||
+      /\b(stridor|droop|facial\s+droop|slurred\s+speech|cannot\s+breathe|choking|unresponsive|cyanosis|crushing\s+chest|substernal)\b/i.test(turnResult.state.cumulativeTranscript)
+    );
+
     const needsCareRouting = Boolean(
+      hasEmergencyEvidence ||
       constraints?.financial ||
       constraints?.remoteLocation ||
       /\b(outskirts|hospital|far\s+away|remote|village|afford|poor|cost|ambulance)\b/i.test(cleanMsgLower)

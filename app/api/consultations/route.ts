@@ -143,6 +143,7 @@ export async function GET(request: Request) {
 
     // Try fetching from Neon database
     const dbClient = getDb();
+    let dbErrorOccurred = false;
     if (dbClient) {
       try {
         let results;
@@ -162,11 +163,24 @@ export async function GET(request: Request) {
         }
         return NextResponse.json({ success: true, consultations: results });
       } catch (dbErr) {
-        console.warn("Neon DB query fallback to local cache:", dbErr);
+        dbErrorOccurred = true;
+        console.warn("Neon DB query error:", dbErr);
       }
     }
 
-    // Fallback to local memory store
+    // In production, database failure must never fall back to synthetic clinical records
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Clinical records service unavailable. Primary database connection could not be established.",
+          code: "SERVICE_UNAVAILABLE",
+        },
+        { status: 503 }
+      );
+    }
+
+    // Fallback to local memory store strictly for development and test environments
     const filtered = targetUserId
       ? memoryConsultations.filter((c) => c.userId === targetUserId)
       : memoryConsultations;
@@ -281,11 +295,30 @@ export async function POST(request: Request) {
         await dbClient.insert(consultationsTable).values(newRecord as any);
         return NextResponse.json({ success: true, consultation: newRecord });
       } catch (dbErr) {
-        console.warn("Neon DB insert error, saving to memory buffer:", dbErr);
+        console.error("Neon DB insert error:", dbErr);
+        if (process.env.NODE_ENV === "production") {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Failed to persist consultation record to primary clinical datastore.",
+              code: "PERSISTENCE_FAILURE",
+            },
+            { status: 503 }
+          );
+        }
       }
+    } else if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Database configuration unavailable in production environment.",
+          code: "DATABASE_UNCONFIGURED",
+        },
+        { status: 503 }
+      );
     }
 
-    // Save to memory store
+    // Save to memory store strictly for development and test environments
     memoryConsultations.push(newRecord);
 
     return NextResponse.json({
