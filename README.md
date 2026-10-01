@@ -2,6 +2,8 @@
 
 > **A bounded, multi-specialist clinical voice platform with deterministic safety arbitration, local neural audio pipelines, and verifiable audit ledgers.**
 > Designed for AI-assisted intake, triage, and clinical decision support. The system does not autonomously diagnose patients.
+>
+> 📄 **Scientific Research Paper**: Full publication-grade manuscript and audited concordance specification available at [docs/PAPER.md](docs/PAPER.md).
 
 ---
 
