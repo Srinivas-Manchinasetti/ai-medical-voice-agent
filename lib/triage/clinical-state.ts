@@ -15,7 +15,103 @@
  */
 
 export type ClinicalFactStatus = "present" | "absent" | "unknown";
-export type ClinicalFactSource = "patient" | "clinician" | "inferred" | "pre_arbiter";
+export type ClinicalFactSource =
+  | "device"
+  | "device_measured"
+  | "clinician"
+  | "patient"
+  | "patient_reported"
+  | "tool"
+  | "tool_derived"
+  | "inferred"
+  | "ai_inferred"
+  | "agent_inferred"
+  | "pre_arbiter"
+  | "deterministic_pre_arbiter"
+  | "not_assessed";
+
+/**
+ * EVIDENCE PROVENANCE HIERARCHY
+ * DEVICE_MEASURED (5) > CLINICIAN / PRE_ARBITER (4) > PATIENT_REPORTED (3) > TOOL_DERIVED (2) > AI_INFERRED (1) > NOT_ASSESSED (0)
+ */
+export const PROVENANCE_HIERARCHY: Record<string, number> = {
+  device: 5,
+  device_measured: 5,
+  clinician: 4,
+  pre_arbiter: 4,
+  deterministic_pre_arbiter: 4,
+  patient: 3,
+  patient_reported: 3,
+  tool: 2,
+  tool_derived: 2,
+  inferred: 1,
+  ai_inferred: 1,
+  agent_inferred: 1,
+  not_assessed: 0,
+};
+
+export function getProvenanceRank(source?: string): number {
+  if (!source) return 0;
+  return PROVENANCE_HIERARCHY[source.toLowerCase()] ?? 1;
+}
+
+export function isHigherOrEqualProvenance(sourceA?: string, sourceB?: string): boolean {
+  return getProvenanceRank(sourceA) >= getProvenanceRank(sourceB);
+}
+
+export interface FactContradictionResult {
+  winner: ClinicalFact;
+  loser?: ClinicalFact;
+  hasContradiction: boolean;
+  resolutionRationale?: string;
+}
+
+/**
+ * Reconciles conflicting or competing clinical facts regarding the same slot/symptom.
+ * 1. Provenance hierarchy (Device > Clinician > Patient > Tool > AI Inferred)
+ * 2. Temporal precedence (later observation breaks ties)
+ */
+export function reconcileConflictingFacts(existingFact: ClinicalFact, newFact: ClinicalFact): FactContradictionResult {
+  const statusConflict = (existingFact.status === "present" && newFact.status === "absent") ||
+                         (existingFact.status === "absent" && newFact.status === "present");
+
+  if (!statusConflict) {
+    if (getProvenanceRank(newFact.source) >= getProvenanceRank(existingFact.source)) {
+      return { winner: newFact, loser: existingFact, hasContradiction: false };
+    }
+    return { winner: existingFact, loser: newFact, hasContradiction: false };
+  }
+
+  const rankExisting = getProvenanceRank(existingFact.source);
+  const rankNew = getProvenanceRank(newFact.source);
+
+  if (rankNew > rankExisting) {
+    return {
+      winner: newFact,
+      loser: existingFact,
+      hasContradiction: true,
+      resolutionRationale: `Provenance override: ${newFact.source} (rank ${rankNew}) supersedes ${existingFact.source} (rank ${rankExisting}) for ${existingFact.name}.`
+    };
+  } else if (rankNew < rankExisting) {
+    return {
+      winner: existingFact,
+      loser: newFact,
+      hasContradiction: true,
+      resolutionRationale: `Provenance retained: ${existingFact.source} (rank ${rankExisting}) preserved over ${newFact.source} (rank ${rankNew}) for ${existingFact.name}.`
+    };
+  } else {
+    const isNewer = (newFact.turnId || 0) >= (existingFact.turnId || 0);
+    const winner = isNewer ? newFact : existingFact;
+    const loser = isNewer ? existingFact : newFact;
+    return {
+      winner,
+      loser,
+      hasContradiction: true,
+      resolutionRationale: `Temporal precedence: turn ${winner.turnId ?? 0} supersedes earlier turn ${loser.turnId ?? 0} for ${existingFact.name}.`
+    };
+  }
+}
+
 
 export interface ClinicalFact {
   id: string;

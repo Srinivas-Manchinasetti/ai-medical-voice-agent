@@ -13,37 +13,50 @@ function assertEqual(actual: string[], expected: string[], desc: string) {
   }
 }
 
-console.log("=== Speech Chunk Splitter Tests ===");
+console.log("=== Speech Chunk Splitter Tests (Prosody-First) ===");
 
-// 1. Single sentence under max limit
+// 1. Short response (1 chunk)
 assertEqual(
-  splitIntoSpeechChunks("I understand that swallowing has been painful for two days."),
-  ["I understand that swallowing has been painful for two days."],
-  "Single short sentence remains 1 chunk"
+  splitIntoSpeechChunks("Do you have a fever?"),
+  ["Do you have a fever?"],
+  "Short single question remains 1 intact chunk"
 );
 
-// 2. Compound sentence with comma split
+// 2. Medium compound question (1 chunk, preserved natural prosody)
 assertEqual(
-  splitIntoSpeechChunks("When you say it hurts to swallow, are you still able to swallow liquids and saliva normally?"),
-  ["When you say it hurts to swallow,", "are you still able to swallow liquids and saliva normally?"],
-  "Long compound sentence splits at clause boundary"
+  splitIntoSpeechChunks("When did the sore throat begin, and has it been getting better or worse?"),
+  ["When did the sore throat begin, and has it been getting better or worse?"],
+  "Medium compound question remains whole (14 words <= 18 words)"
 );
 
-// 3. Multiple sentences with Dr. honorific
+// 3. Clinical multi-sentence response (2 chunks at sentence boundary)
 assertEqual(
-  splitIntoSpeechChunks("Hello, I am Dr. Sarah Chen. What medical concerns or symptoms brought you in today?"),
-  ["Hello, I am Dr. Sarah Chen.", "What medical concerns or symptoms brought you in today?"],
-  "Honorific 'Dr. Sarah Chen' is preserved without splitting on 'Dr.'"
-);
-
-// 4. Multiple sentences
-assertEqual(
-  splitIntoSpeechChunks("I am documenting your sore throat. Have you experienced any high fever, shortness of breath, or chest tightness?"),
+  splitIntoSpeechChunks("You mentioned that the pain started two days ago. I'd like to clarify whether you're having any difficulty swallowing liquids or saliva."),
   [
-    "I am documenting your sore throat.",
-    "Have you experienced any high fever, shortness of breath, or chest tightness?"
+    "You mentioned that the pain started two days ago.",
+    "I'd like to clarify whether you're having any difficulty swallowing liquids or saliva."
   ],
-  "Two natural sentences split cleanly"
+  "Clinical multi-sentence response splits cleanly along sentence boundary"
 );
 
-console.log("✅ All chunk splitter tests passed successfully!");
+// 4. Complex clinical triage response (2 chunks at sentence boundary)
+assertEqual(
+  splitIntoSpeechChunks("Based on what you've told me, I want to ask a few more questions before we decide what level of care you need. First, are you having any difficulty breathing, swallowing liquids, or managing your saliva?"),
+  [
+    "Based on what you've told me, I want to ask a few more questions before we decide what level of care you need.",
+    "First, are you having any difficulty breathing, swallowing liquids, or managing your saliva?"
+  ],
+  "Complex multi-clause triage response splits at sentence boundary"
+);
+
+// 5. Preserves doctor honorifics
+assertEqual(
+  splitIntoSpeechChunks("Hello, I am Dr. Sarah Chen. What symptoms brought you in today?"),
+  [
+    "Hello, I am Dr. Sarah Chen.",
+    "What symptoms brought you in today?"
+  ],
+  "Doctor honorific Dr. Sarah Chen is preserved"
+);
+
+console.log("✅ All prosody-first chunk splitter tests passed successfully!");

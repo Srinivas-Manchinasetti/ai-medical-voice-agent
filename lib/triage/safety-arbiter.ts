@@ -1,8 +1,14 @@
 import { z } from 'zod';
+import {
+  ClinicalFact,
+  RedFlagDomainAssessment,
+  reconcileConflictingFacts,
+  getProvenanceRank,
+} from './clinical-state';
 
 /**
  * CLINICAL FEATURES SCHEMA
- * Structured representation of symptoms extracted from patient utterances.
+ * Structured representation of symptoms extracted from patient utterances and structured state.
  */
 export const ClinicalFeaturesSchema = z.object({
   // Cardiovascular / Hemodynamic
@@ -68,7 +74,362 @@ export interface ArbiterResult {
   recommendedAction: string;
   icd10Codes: string[];
   detectedSymptoms: string[];
+  unresolvedRedFlags: string[];
+  isScreeningComplete: boolean;
+  provenanceSummary?: {
+    highestProvenance: string;
+    contradictionsResolved: number;
+    resolvedOverrides?: string[];
+  };
   latencyMs: number;
+}
+
+export interface SafetyArbiterStructuredInput {
+  facts?: ClinicalFact[];
+  establishedFacts?: ClinicalFact[];
+  symptomProfile?: Record<string, any>;
+  associatedSymptoms?: ClinicalFact[];
+  redFlags?: Record<string, RedFlagDomainAssessment | any>;
+  slots?: Record<string, any>;
+  vitals?: Record<string, any>;
+  provenanceEvidence?: any[];
+}
+
+export interface EvaluateSafetyArbiterOptions {
+  features?: Partial<ClinicalFeatures>;
+  rawText?: string;
+  llmSuggestedLevel?: string;
+  patientAge?: number;
+  structuredState?: SafetyArbiterStructuredInput;
+  facts?: ClinicalFact[];
+  redFlags?: Record<string, RedFlagDomainAssessment | any>;
+  vitals?: Record<string, any>;
+}
+
+/**
+ * Normalizes symptom/slot name into a standard comparable key.
+ */
+function normalizeSymptomKey(name: string): string {
+  const clean = name.toLowerCase().trim().replace(/[\s-]/g, '_');
+  if (/dysphagia|swallow|swallowing_difficulty/i.test(clean)) return 'swallowing_difficulty';
+  if (/odynophagia|painful_swallowing/i.test(clean)) return 'odynophagia';
+  if (/chest_pain|angina|precordial/i.test(clean)) return 'chest_pain';
+  if (/chest_pressure|pressure_pain|crushing/i.test(clean)) return 'chest_pressure';
+  if (/fever|temperature|pyrexia/i.test(clean)) return 'fever';
+  if (/facial_droop|face_droop/i.test(clean)) return 'facial_droop';
+  if (/arm_weakness|weak_arm|hemiparesis/i.test(clean)) return 'arm_weakness';
+  if (/slurred_speech|speech_difficulty|dysarthria|aphasia/i.test(clean)) return 'speech_difficulty';
+  if (/stridor|high_pitched_breathing/i.test(clean)) return 'stridor';
+  if (/shortness_of_breath|dyspnea|difficulty_breathing/i.test(clean)) return 'severe_dyspnea';
+  if (/vomiting_blood|hematemesis|melena/i.test(clean)) return 'vomiting_blood';
+  if (/rigid_abdomen|board_like/i.test(clean)) return 'rigid_abdomen';
+  if (/right_lower_quadrant|rlq|appendix/i.test(clean)) return 'rlq_pain';
+  return clean;
+}
+
+/**
+ * Parse temperature reading from value or text to detect high fever (>= 39.4 C / 103 F)
+ */
+function isHighFeverReading(val: any, text?: string): boolean {
+  if (typeof val === 'number') {
+    if (val >= 103) return true; // Fahrenheit
+    if (val >= 39.4 && val <= 44) return true; // Celsius
+  }
+  const combined = `${val ?? ''} ${text ?? ''}`.toLowerCase();
+  const matchF = combined.match(/\b(10[3-8](?:\.\d+)?)\s*(?:°|deg|f)?\b/);
+  if (matchF && parseFloat(matchF[1]) >= 103) return true;
+  const matchC = combined.match(/\b(39\.[4-9]|4[0-3](?:\.\d+)?)\s*(?:°|deg|c)?\b/);
+  if (matchC && parseFloat(matchC[1]) >= 39.4) return true;
+  return /high fever|burning up/i.test(combined);
+}
+
+/**
+ * Consolidated structured evidence extractor.
+ * Evaluates structured clinical facts with provenance hierarchy and contradiction resolution.
+ */
+function consolidateStructuredEvidence(
+  structuredState?: SafetyArbiterStructuredInput,
+  directFacts?: ClinicalFact[],
+  directRedFlags?: Record<string, any>,
+  directVitals?: Record<string, any>
+): {
+  featureOverrides: Partial<ClinicalFeatures>;
+  deniedFeatures: Set<keyof ClinicalFeatures>;
+  structuredRedFlags: string[];
+  unresolvedRedFlags: string[];
+  isScreeningComplete: boolean;
+  contradictionOverrides: string[];
+  highestProvenance: string;
+  symptomsDetected: string[];
+} {
+  const featureOverrides: Partial<ClinicalFeatures> = {};
+  const deniedFeatures: Set<keyof ClinicalFeatures> = new Set();
+  const structuredRedFlags: string[] = [];
+  const contradictionOverrides: string[] = [];
+  const symptomsDetected: string[] = [];
+
+  let maxProvenanceRank = 0;
+  let highestProvenance = 'not_assessed';
+
+  // 1. Gather all candidate facts
+  const candidateFacts: ClinicalFact[] = [
+    ...(directFacts || []),
+    ...(structuredState?.facts || []),
+    ...(structuredState?.establishedFacts || []),
+    ...(structuredState?.associatedSymptoms || []),
+  ];
+
+  if (structuredState?.symptomProfile) {
+    for (const [key, val] of Object.entries(structuredState.symptomProfile)) {
+      if (val && typeof val === 'object' && val.name && val.status) {
+        candidateFacts.push(val as ClinicalFact);
+      }
+    }
+  }
+
+  if (structuredState?.provenanceEvidence) {
+    for (const item of structuredState.provenanceEvidence) {
+      if (item && item.source) {
+        candidateFacts.push({
+          id: item.id || `prov-${Math.random().toString(36).substring(7)}`,
+          name: item.id || item.type || 'unknown_evidence',
+          label: item.label || item.description || '',
+          category: 'associated_symptom',
+          status: item.status === 'denied' || item.status === 'absent' ? 'absent' :
+                  item.status === 'present' ? 'present' : 'unknown',
+          value: item.value,
+          normalizedText: item.description || '',
+          confidence: item.confidence ?? 1.0,
+          source: item.source,
+          turnId: item.turnId ?? 1,
+          timestamp: item.timestamp || new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  // 2. Reconcile facts per normalized symptom slot
+  const reconciledFacts = new Map<string, ClinicalFact>();
+  for (const fact of candidateFacts) {
+    const rank = getProvenanceRank(fact.source);
+    if (rank > maxProvenanceRank) {
+      maxProvenanceRank = rank;
+      highestProvenance = fact.source;
+    }
+
+    const key = normalizeSymptomKey(fact.name);
+    const existing = reconciledFacts.get(key);
+    if (!existing) {
+      reconciledFacts.set(key, fact);
+    } else {
+      const outcome = reconcileConflictingFacts(existing, fact);
+      reconciledFacts.set(key, outcome.winner);
+      if (outcome.hasContradiction && outcome.resolutionRationale) {
+        contradictionOverrides.push(outcome.resolutionRationale);
+      }
+    }
+  }
+
+  // 3. Map winning facts to clinical features
+  for (const [key, fact] of reconciledFacts.entries()) {
+    const isPresent = fact.status === 'present';
+    const isAbsent = fact.status === 'absent';
+
+    switch (key) {
+      case 'chest_pain':
+        if (isPresent) {
+          featureOverrides.chestPain = true;
+          symptomsDetected.push(fact.label || 'Chest pain');
+        } else if (isAbsent) {
+          deniedFeatures.add('chestPain');
+        }
+        break;
+      case 'chest_pressure':
+        if (isPresent) {
+          featureOverrides.pressureLikePain = true;
+          featureOverrides.chestPain = true;
+          symptomsDetected.push(fact.label || 'Crushing chest pressure');
+        } else if (isAbsent) {
+          deniedFeatures.add('pressureLikePain');
+        }
+        break;
+      case 'radiation':
+      case 'radiation_arm':
+        if (isPresent) {
+          const text = `${fact.value || ''} ${fact.normalizedText || ''}`.toLowerCase();
+          if (text.includes('arm') || key === 'radiation_arm') {
+            featureOverrides.radiationToArm = true;
+            symptomsDetected.push('Radiation to arm');
+          }
+          if (text.includes('jaw') || text.includes('neck')) {
+            featureOverrides.radiationToJaw = true;
+            symptomsDetected.push('Radiation to jaw');
+          }
+        } else if (isAbsent) {
+          deniedFeatures.add('radiationToArm');
+          deniedFeatures.add('radiationToJaw');
+        }
+        break;
+      case 'fever':
+        if (isPresent) {
+          if (isHighFeverReading(fact.value, fact.normalizedText)) {
+            featureOverrides.highFever = true;
+            symptomsDetected.push('High fever (>103°F / 39.4°C)');
+          } else {
+            symptomsDetected.push(fact.label || 'Fever');
+          }
+        } else if (isAbsent) {
+          deniedFeatures.add('highFever');
+        }
+        break;
+      case 'facial_droop':
+        if (isPresent) {
+          featureOverrides.facialDroop = true;
+          symptomsDetected.push('Facial droop');
+        } else if (isAbsent) {
+          deniedFeatures.add('facialDroop');
+        }
+        break;
+      case 'arm_weakness':
+        if (isPresent) {
+          featureOverrides.armWeakness = true;
+          symptomsDetected.push('Unilateral arm weakness');
+        } else if (isAbsent) {
+          deniedFeatures.add('armWeakness');
+        }
+        break;
+      case 'speech_difficulty':
+        if (isPresent) {
+          featureOverrides.speechDifficulty = true;
+          symptomsDetected.push('Speech difficulty');
+        } else if (isAbsent) {
+          deniedFeatures.add('speechDifficulty');
+        }
+        break;
+      case 'stridor':
+        if (isPresent) {
+          featureOverrides.stridor = true;
+          symptomsDetected.push('Stridor / upper airway obstruction');
+        } else if (isAbsent) {
+          deniedFeatures.add('stridor');
+        }
+        break;
+      case 'severe_dyspnea':
+        if (isPresent) {
+          featureOverrides.severeDyspnea = true;
+          symptomsDetected.push('Severe dyspnea / shortness of breath');
+        } else if (isAbsent) {
+          deniedFeatures.add('severeDyspnea');
+        }
+        break;
+      case 'swallowing_difficulty':
+        if (isPresent) {
+          featureOverrides.throatTightness = true;
+          symptomsDetected.push('Inability to swallow / severe dysphagia');
+        } else if (isAbsent) {
+          deniedFeatures.add('throatTightness');
+        }
+        break;
+      case 'vomiting_blood':
+        if (isPresent) {
+          featureOverrides.vomitingBloodOrMelena = true;
+          symptomsDetected.push('Hematemesis / GI bleed');
+        } else if (isAbsent) {
+          deniedFeatures.add('vomitingBloodOrMelena');
+        }
+        break;
+      case 'rigid_abdomen':
+        if (isPresent) {
+          featureOverrides.rigidAbdomen = true;
+          symptomsDetected.push('Board-like abdominal rigidity');
+        } else if (isAbsent) {
+          deniedFeatures.add('rigidAbdomen');
+        }
+        break;
+      case 'rlq_pain':
+        if (isPresent) {
+          featureOverrides.rightLowerQuadrantPain = true;
+          symptomsDetected.push('Right lower quadrant pain');
+        } else if (isAbsent) {
+          deniedFeatures.add('rightLowerQuadrantPain');
+        }
+        break;
+    }
+  }
+
+  // 4. Process structured red-flag domain assessments
+  const combinedRedFlags: Record<string, any> = {
+    ...(directRedFlags || {}),
+    ...(structuredState?.redFlags || {}),
+  };
+
+  const coreDomains = ['airway', 'breathing', 'cardiac', 'neurological', 'bleeding'];
+  const unresolvedRedFlags: string[] = [];
+
+  for (const domain of coreDomains) {
+    const assessment = combinedRedFlags[domain];
+    if (!assessment || !assessment.assessed || assessment.status === 'pending') {
+      unresolvedRedFlags.push(domain);
+      continue;
+    }
+
+    if (assessment.status === 'critical' || assessment.status === 'concerning') {
+      structuredRedFlags.push(`STRUCTURED_${domain.toUpperCase()}_RED_FLAG`);
+      if (domain === 'airway') {
+        featureOverrides.stridor = true;
+      } else if (domain === 'breathing') {
+        featureOverrides.severeDyspnea = true;
+      } else if (domain === 'cardiac') {
+        featureOverrides.chestPain = true;
+        featureOverrides.pressureLikePain = true;
+      } else if (domain === 'neurological') {
+        featureOverrides.facialDroop = true;
+        featureOverrides.speechDifficulty = true;
+      } else if (domain === 'bleeding') {
+        featureOverrides.vomitingBloodOrMelena = true;
+      }
+    }
+  }
+
+  // 5. Process vitals (only if explicitly supplied; never fabricate)
+  const combinedVitals: Record<string, any> = {
+    ...(directVitals || {}),
+    ...(structuredState?.vitals || {}),
+  };
+
+  if (combinedVitals.temp_c !== undefined || combinedVitals.temperature_c !== undefined || combinedVitals.temp !== undefined) {
+    const rawT = combinedVitals.temp_c ?? combinedVitals.temperature_c ?? combinedVitals.temp;
+    if (isHighFeverReading(rawT)) {
+      featureOverrides.highFever = true;
+      symptomsDetected.push(`High fever measured: ${rawT}`);
+    }
+  }
+  if (combinedVitals.spo2 !== undefined || combinedVitals.pulse_ox !== undefined) {
+    const spo2 = Number(combinedVitals.spo2 ?? combinedVitals.pulse_ox);
+    if (!isNaN(spo2)) {
+      if (spo2 < 90) {
+        featureOverrides.severeDyspnea = true;
+        symptomsDetected.push(`Severe hypoxia: SpO2 ${spo2}%`);
+      }
+      if (spo2 < 85) {
+        featureOverrides.cyanosis = true;
+        symptomsDetected.push(`Critical hypoxia/cyanosis: SpO2 ${spo2}%`);
+      }
+    }
+  }
+
+  const isScreeningComplete = unresolvedRedFlags.length === 0;
+
+  return {
+    featureOverrides,
+    deniedFeatures,
+    structuredRedFlags,
+    unresolvedRedFlags,
+    isScreeningComplete,
+    contradictionOverrides,
+    highestProvenance,
+    symptomsDetected,
+  };
 }
 
 /**
@@ -162,25 +523,48 @@ export function extractClinicalFeatures(text: string, patientAge?: number): Clin
  * Pure rule-based clinical decision engine according to ESI v4.
  * Never delegates emergency/life-threat classification to a probabilistic model.
  */
-export function evaluateSafetyArbiter(input: {
-  features?: Partial<ClinicalFeatures>;
-  rawText?: string;
-  llmSuggestedLevel?: string;
-  patientAge?: number;
-}): ArbiterResult {
+export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): ArbiterResult {
   const start = performance.now();
 
-  // 1. Build consolidated features
-  const textFeatures = input.rawText ? extractClinicalFeatures(input.rawText, input.patientAge) : ({} as ClinicalFeatures);
-  const features: ClinicalFeatures = ClinicalFeaturesSchema.parse({
-    ...textFeatures,
-    ...(input.features || {}),
-  });
+  // 1. Process structured clinical evidence
+  const structuredEvidence = consolidateStructuredEvidence(
+    input.structuredState,
+    input.facts,
+    input.redFlags,
+    input.vitals
+  );
 
-  const redFlags: string[] = [];
+  // 2. Build consolidated features: text regex + structured overrides
+  const textFeatures = input.rawText ? extractClinicalFeatures(input.rawText, input.patientAge) : ({} as ClinicalFeatures);
+  const mergedFeatures: Record<string, boolean> = { ...textFeatures };
+
+  // Explicit structured denials override raw text regex matches
+  for (const deniedKey of structuredEvidence.deniedFeatures) {
+    mergedFeatures[deniedKey as string] = false;
+  }
+
+  // Explicit structured positives override text matches
+  for (const [key, val] of Object.entries(structuredEvidence.featureOverrides)) {
+    if (val !== undefined) {
+      mergedFeatures[key] = Boolean(val);
+    }
+  }
+
+  // Direct manual feature overrides (if supplied)
+  if (input.features) {
+    for (const [key, val] of Object.entries(input.features)) {
+      if (val !== undefined) {
+        mergedFeatures[key] = Boolean(val);
+      }
+    }
+  }
+
+  const features: ClinicalFeatures = ClinicalFeaturesSchema.parse(mergedFeatures);
+
+  const redFlags: string[] = [...structuredEvidence.structuredRedFlags];
   const rules: string[] = [];
   const icd10: Set<string> = new Set();
-  const symptoms: Set<string> = new Set();
+  const symptoms: Set<string> = new Set(structuredEvidence.symptomsDetected);
 
   const rawTextLower = (input.rawText || '').toLowerCase();
   const hasNitratePde5Contraindication =
@@ -189,7 +573,7 @@ export function evaluateSafetyArbiter(input: {
 
   let esiScore: 1 | 2 | 3 | 4 | 5 = 4; // Default baseline: Less Urgent
   let triageLevel: 'emergency' | 'priority' | 'routine' = 'routine';
-  let esiTitle = 'ESI LEVEL 4: LESS URGENT CLINICAL EVALUATION';
+  let esiTitle = 'ESI LEVEL 4: LESS URGENT — Routine Ambulatory Evaluation';
   let protocol = 'Standard outpatient clinical evaluation recommended within 24-48 hours.';
   let action = 'Schedule outpatient consultation or visit general urgent care.';
 
@@ -199,7 +583,7 @@ export function evaluateSafetyArbiter(input: {
   if (features.lossOfConsciousness || features.stridor || (features.throatTightness && features.tongueSwelling)) {
     esiScore = 1;
     triageLevel = 'emergency';
-    esiTitle = 'ESI LEVEL 1: IMMEDIATE RESUSCITATION REQUIRED';
+    esiTitle = 'ESI LEVEL 1: IMMEDIATE RESUSCITATION REQUIRED — Critical Airway / Hemodynamic Compromise';
     redFlags.push('IMMEDIATE_AIRWAY_OR_HEMODYNAMIC_COLLAPSE');
     rules.push('ESI-1.1: Airway obstruction / Unresponsive state / Anaphylactic shock');
     protocol = 'CRITICAL: Call 911 / 108 immediately. Prepare bag-valve-mask, IM Epinephrine 0.3mg if anaphylaxis, continuous cardiac telemetry.';
@@ -220,8 +604,8 @@ export function evaluateSafetyArbiter(input: {
   ) {
     esiScore = 2;
     triageLevel = 'emergency';
-    esiTitle = 'ESI LEVEL 2: EMERGENT — SUSPECTED ACUTE CORONARY SYNDROME (ACS)';
     if (hasNitratePde5Contraindication) {
+      esiTitle = 'ESI LEVEL 2: EMERGENT — Lethal Pharmacotherapy Contraindication Protocol (Nitrates + PDE5 Inhibitors)';
       redFlags.push('LETHAL_DRUG_CONTRAINDICATION_NITRATE_PDE5');
       rules.push('ESI-2.1b: Lethal pharmacotherapy contraindication (Nitrates + PDE-5 inhibitors in acute chest pain)');
       protocol = 'CRITICAL CONTRAINDICATION: DO NOT ADMINISTER NITROGLYCERIN. High risk of refractory hypotension/cardiovascular collapse. Urgent 12-lead ECG, fluid resuscitation, telemetry.';
@@ -229,9 +613,10 @@ export function evaluateSafetyArbiter(input: {
       icd10.add('T46.3X5A');
       symptoms.add('Chest pressure with lethal nitrate/PDE5 drug contraindication');
     } else {
+      esiTitle = 'ESI LEVEL 2: EMERGENT — Suspected Acute Coronary Syndrome (ACS) Protocol';
       redFlags.push('ACS_CHEST_PAIN_WITH_HIGH_RISK_RADIATION_OR_DIAPHORESIS');
       rules.push('ESI-2.1: High-risk ischemic cardiac features (Angina / STEMI equivalent)');
-      protocol = 'Urgent 12-lead ECG within 10 minutes of ED arrival. Serial cardiac troponins. Administer 325mg chewable aspirin if no contraindication. Maintain SpO2 > 90%.';
+      protocol = 'Urgent 12-lead ECG within 10 minutes of ED arrival. Serial cardiac troponins. CHEWABLE ASPIRIN 325mg if no contraindication. Maintain SpO2 > 90%.';
       action = 'Proceed immediately to the nearest Emergency Department equipped with 24/7 Cardiac Cath Lab / PCI.';
       symptoms.add('Crushing substernal chest pressure');
     }
@@ -247,8 +632,8 @@ export function evaluateSafetyArbiter(input: {
   else if (features.facialDroop || features.armWeakness || features.speechDifficulty || features.thunderclapHeadache) {
     esiScore = 2;
     triageLevel = 'emergency';
-    esiTitle = 'ESI LEVEL 2: EMERGENT — ACUTE STROKE / NEUROLOGICAL RED FLAG';
     if (features.thunderclapHeadache) {
+      esiTitle = 'ESI LEVEL 2: EMERGENT — Thunderclap Headache Protocol (Rule Out SAH)';
       redFlags.push('THUNDERCLAP_HEADACHE_SUBARACHNOID_HEMORRHAGE_RISK');
       rules.push('ESI-2.2B: Thunderclap onset headache (< 1 min to peak)');
       protocol = 'Immediate non-contrast head CT to rule out Subarachnoid Hemorrhage (SAH) or cerebral aneurysm rupture. Lumbar puncture if CT negative.';
@@ -256,6 +641,7 @@ export function evaluateSafetyArbiter(input: {
       icd10.add('I60.9'); // Nontraumatic subarachnoid hemorrhage
       symptoms.add('Sudden explosive thunderclap headache');
     } else {
+      esiTitle = 'ESI LEVEL 2: EMERGENT — Acute Neurological Deficit Protocol (BE-FAST Screen)';
       redFlags.push('BE_FAST_ACUTE_ISCHEMIC_STROKE_SYMPTOMS');
       rules.push('ESI-2.2A: Focal neurological deficit within acute thrombolytic window');
       protocol = 'Emergency Code Stroke activation. Non-contrast CT scan within 20 minutes. Evaluate for IV thrombolysis (tPA/TNK) and endovascular thrombectomy. NPO.';
@@ -274,7 +660,7 @@ export function evaluateSafetyArbiter(input: {
   else if (features.severeDyspnea || features.cyanosis || features.inabilityToSpeakFullSentences) {
     esiScore = 2;
     triageLevel = 'emergency';
-    esiTitle = 'ESI LEVEL 2: EMERGENT — ACUTE RESPIRATORY COMPROMISE';
+    esiTitle = 'ESI LEVEL 2: EMERGENT — Acute Respiratory Compromise Protocol';
     redFlags.push('ACUTE_RESPIRATORY_FAILURE_RISK');
     rules.push('ESI-2.3: Severe dyspnea / inability to speak in sentences / hypoxia risk');
     protocol = 'Immediate high-flow oxygen, continuous pulse oximetry, nebulized Albuterol/Ipratropium, prepare for non-invasive positive pressure ventilation (BiPAP) if tiring.';
@@ -291,7 +677,7 @@ export function evaluateSafetyArbiter(input: {
   else if (features.pediatricPatient && (features.infantUnder3Months || (features.highFever && features.lethargyOrInconsolable))) {
     esiScore = 2;
     triageLevel = 'emergency';
-    esiTitle = 'ESI LEVEL 2: EMERGENT — PEDIATRIC HIGH-RISK FEVER / SEPSIS SCREEN';
+    esiTitle = 'ESI LEVEL 2: EMERGENT — Pediatric Febrile / Lethargy Urgent Evaluation Protocol';
     redFlags.push('PEDIATRIC_LETHARGY_OR_NEONATAL_FEVER');
     rules.push('ESI-2.4: Pediatric pyrexia with altered behavior or neonatal age < 90 days');
     protocol = 'Full neonatal/pediatric sepsis workup: blood cultures, urinalysis/culture, rapid viral panel, prompt empiric antibiotic coverage.';
@@ -308,7 +694,7 @@ export function evaluateSafetyArbiter(input: {
   else if (features.severeAbdominalPain || features.rightLowerQuadrantPain || features.rigidAbdomen || features.vomitingBloodOrMelena) {
     esiScore = features.rigidAbdomen || features.vomitingBloodOrMelena ? 2 : 3;
     triageLevel = esiScore === 2 ? 'emergency' : 'priority';
-    esiTitle = esiScore === 2 ? 'ESI LEVEL 2: EMERGENT — ACUTE SURGICAL ABDOMEN / GI BLEED' : 'ESI LEVEL 3: URGENT — ACUTE ABDOMINAL EVALUATION';
+    esiTitle = esiScore === 2 ? 'ESI LEVEL 2: EMERGENT — Acute Surgical Abdomen / Hemorrhage Protocol' : 'ESI LEVEL 3: URGENT — Acute Abdominal Evaluation Protocol';
     if (features.rigidAbdomen || features.vomitingBloodOrMelena) {
       redFlags.push('ACUTE_PERITONITIS_OR_UPPER_GI_HEMORRHAGE');
       rules.push('ESI-2.5: Board-like abdominal rigidity or active hematemesis');
@@ -332,7 +718,7 @@ export function evaluateSafetyArbiter(input: {
   else if (features.chestPain || features.highFever || features.palpitations) {
     esiScore = 3;
     triageLevel = 'priority';
-    esiTitle = 'ESI LEVEL 3: URGENT CLINICAL EVALUATION';
+    esiTitle = 'ESI LEVEL 3: URGENT — Cardiorespiratory / Febrile Diagnostic Workup';
     rules.push('ESI-3.2: Significant clinical complaint requiring multiple diagnostic resources');
     protocol = 'Baseline diagnostic workup (ECG, vitals monitoring, focused lab panel).';
     action = 'Urgent clinical evaluation at an emergency clinic or urgent care facility today.';
@@ -348,7 +734,7 @@ export function evaluateSafetyArbiter(input: {
   else {
     esiScore = features.prescriptionRefill ? 5 : 4;
     triageLevel = 'routine';
-    esiTitle = esiScore === 5 ? 'ESI LEVEL 5: NON-URGENT (Refill / Administrative)' : 'ESI LEVEL 4: LESS URGENT (Single Resource Needed)';
+    esiTitle = esiScore === 5 ? 'ESI LEVEL 5: NON-URGENT — Supportive Care / Medication Refill' : 'ESI LEVEL 4: LESS URGENT — Routine Ambulatory Evaluation';
     rules.push(esiScore === 5 ? 'ESI-5.1: Zero resource medical refill or chronic maintenance' : 'ESI-4.1: Minor localized symptoms suitable for outpatient clinic');
     protocol = 'Routine ambulatory care evaluation. Supportive symptomatic care.';
     action = 'Schedule visit with primary care physician or walk-in outpatient clinic.';
@@ -357,6 +743,12 @@ export function evaluateSafetyArbiter(input: {
     if (features.minorSprainWithoutDeformity) icd10.add('S93.40'); // Ankle sprain
     if (features.prescriptionRefill) icd10.add('Z76.0'); // Repeat prescription
     symptoms.add('Mild non-emergent outpatient complaint');
+  }
+
+  // Missing information != negative information:
+  // If baseline is routine but red-flag screening is incomplete, append clear clinical note
+  if (!structuredEvidence.isScreeningComplete && structuredEvidence.unresolvedRedFlags.length > 0 && esiScore >= 4) {
+    protocol += ` (Screening Note: Core red-flag domains [${structuredEvidence.unresolvedRedFlags.join(', ')}] remain pending/unassessed. Life-threats not definitively excluded until screening completes.)`;
   }
 
   // =========================================================================
@@ -382,6 +774,14 @@ export function evaluateSafetyArbiter(input: {
     recommendedAction: action,
     icd10Codes: Array.from(icd10),
     detectedSymptoms: Array.from(symptoms),
+    unresolvedRedFlags: structuredEvidence.unresolvedRedFlags,
+    isScreeningComplete: structuredEvidence.isScreeningComplete,
+    provenanceSummary: {
+      highestProvenance: structuredEvidence.highestProvenance,
+      contradictionsResolved: structuredEvidence.contradictionOverrides.length,
+      resolvedOverrides: structuredEvidence.contradictionOverrides,
+    },
     latencyMs,
   };
 }
+

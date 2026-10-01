@@ -13,7 +13,11 @@ export async function POST(request: Request) {
       transcript,
       patient_id = "P-1002",
       patient_name = "Anonymous Patient",
-      patient_age
+      patient_age,
+      structured_state,
+      facts,
+      red_flags,
+      vitals,
     } = body;
 
     if (!transcript || typeof transcript !== "string" || !transcript.trim()) {
@@ -40,10 +44,14 @@ export async function POST(request: Request) {
       // FastAPI backend optional
     }
 
-    // Run deterministic ESI v4 safety arbiter (with context-aware negation & override guarantee)
+    // Run deterministic ESI v4 safety arbiter (with structured state & override guarantee)
     const arbiter = evaluateSafetyArbiter({
       rawText: transcript,
       patientAge: patient_age ? Number(patient_age) : undefined,
+      structuredState: structured_state,
+      facts,
+      redFlags: red_flags,
+      vitals,
       llmSuggestedLevel: upstreamTriage?.triage?.triage_level,
     });
 

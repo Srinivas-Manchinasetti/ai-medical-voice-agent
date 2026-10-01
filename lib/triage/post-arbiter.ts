@@ -43,10 +43,27 @@ export function evaluatePostArbiter(
 ): PostArbiterResult {
   const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
 
-  // Evaluate deterministic clinical rule set
+  // Evaluate deterministic clinical rule set with structured state and evidence provenance
   const arbiterResult: ArbiterResult = evaluateSafetyArbiter({
     rawText: patientCase.transcript,
     patientAge: patientCase.demographics?.age,
+    structuredState: {
+      vitals: patientCase.vitals,
+      provenanceEvidence: patientCase.provenance_evidence,
+      facts: patientCase.detected_symptoms?.map((s, idx) => ({
+        id: `symptom-${idx}`,
+        name: s,
+        label: s,
+        category: 'associated_symptom' as const,
+        status: 'present' as const,
+        value: s,
+        normalizedText: s,
+        confidence: 1.0,
+        source: 'patient_reported' as const,
+        turnId: 1,
+        timestamp: new Date().toISOString(),
+      })),
+    },
     llmSuggestedLevel: consensus.recommended_disposition === "emergency_evaluation" ? "emergency" :
                        consensus.recommended_disposition === "urgent_outpatient" ? "priority" : "routine"
   });

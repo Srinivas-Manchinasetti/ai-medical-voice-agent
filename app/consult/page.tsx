@@ -886,11 +886,15 @@ export default function ConsultPage() {
     t_playback_started: number;
     t_text_rendered?: number;
     hardwareOutputLatencyMs?: number | null;
+    bufferLeadTimeMs?: number | null;
   }) => {
     const base = t.t_clinical_received ?? t.t_tts_started;
     const p = (ts?: number) => ts !== undefined ? `+${(ts - base).toFixed(1)} ms` : "N/A";
     const delta = (t2: number, t1: number) => `+${(t2 - t1).toFixed(1)} ms`;
     const gap = t.t_text_rendered && t.t_playback_started ? Math.abs(t.t_text_rendered - t.t_playback_started).toFixed(1) : "0.0";
+    const bufferLeadStr = t.bufferLeadTimeMs !== null && t.bufferLeadTimeMs !== undefined
+      ? (t.bufferLeadTimeMs >= 0 ? `+${t.bufferLeadTimeMs.toFixed(1)} ms (Healthy lead: Chunk 1 ready before Chunk 0 ended)` : `${t.bufferLeadTimeMs.toFixed(1)} ms (Stall warning)`)
+      : "Single chunk turn";
 
     console.log(
       `%c[MedVoice Audio Timing] ── Full Lifecycle Breakdown ─────────────────────\n` +
@@ -904,6 +908,7 @@ export default function ConsultPage() {
       `  8. Doctor text rendered:           ${p(t.t_text_rendered)}  (SYNCHRONIZED: text-to-voice gap: ${gap} ms)\n` +
       `────────────────────────────────────────────────────────────────────────\n` +
       `  Doctor: ${t.doctorName} | Engine: ${t.engine}\n` +
+      `  Buffer Lead Time: ${bufferLeadStr}\n` +
       `  Hardware Output Latency: ${t.hardwareOutputLatencyMs !== null && t.hardwareOutputLatencyMs !== undefined ? `${t.hardwareOutputLatencyMs} ms` : "Unreported by OS"}\n` +
       `────────────────────────────────────────────────────────────────────────`,
       "color: #06b6d4; font-family: monospace; font-size: 11px; font-weight: bold;"
@@ -1126,7 +1131,7 @@ export default function ConsultPage() {
     };
 
     // 4. Primary Path: Multi-Provider Neural Audio Dispatcher with Chunk-Level Pipelining
-    const chunks = splitIntoSpeechChunks(cleanText, 13);
+    const chunks = splitIntoSpeechChunks(cleanText, 24);
     const t_tts_started = performance.now();
 
     const fetchTTSChunk = async (chunkText: string): Promise<{ blob: Blob; engineHeader: string; t_received: number }> => {
@@ -1167,6 +1172,13 @@ export default function ConsultPage() {
       
       // In parallel, queue synthesis of remaining chunks in background
       const remainingPromises = chunks.slice(1).map((c) => fetchTTSChunk(c));
+
+      let chunk1ReadyTime: number | null = null;
+      if (remainingPromises.length > 0) {
+        remainingPromises[0].then(() => {
+          chunk1ReadyTime = performance.now();
+        }).catch(() => {});
+      }
 
       const { blob: blob0, engineHeader, t_received: t_tts_received } = await chunk0Promise;
       const t_blob_ready = performance.now();
@@ -1276,6 +1288,13 @@ export default function ConsultPage() {
         setAudioState("DOCTOR_SPEAKING");
         commitDoctorText();
         const t_text_rendered = performance.now();
+        const chunk0DurationMs = (audio.duration && !isNaN(audio.duration) && audio.duration > 0)
+          ? audio.duration * 1000
+          : 0;
+
+        const bufferLeadTimeMs = (chunk1ReadyTime !== null && chunk0DurationMs > 0)
+          ? Math.round((t_playback_started + chunk0DurationMs) - chunk1ReadyTime)
+          : (chunks.length > 1 ? 0 : null);
 
         logPlaybackLifecycle({
           doctorName: targetDoctor.name,
@@ -1289,6 +1308,7 @@ export default function ConsultPage() {
           t_playback_started,
           t_text_rendered,
           hardwareOutputLatencyMs: getHardwareAudioLatency(),
+          bufferLeadTimeMs,
         });
       };
 

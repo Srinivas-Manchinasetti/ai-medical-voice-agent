@@ -30,7 +30,8 @@
     "test:subfield": "tsx scripts/test-subfield-clinical-state.ts",
     "test:severity": "tsx scripts/test-severity-and-nondeniable.ts",
     "test:goldendialogue": "tsx scripts/test-golden-clinical-dialogue.ts",
-    "test:all": "npm run test:security && npm run test:durable-audit && npm run test:goldendialogue && npm run test:severity && npm run test:voicestate && npm run test:subfield && npm run test:interpreter && npm run test:planner && npm run test:engine && npm run test:adversarial && npm run test:multiclause && npm run test:provenance && npm run test:rag && npm run test:explanatory && npm run test:manager && npm run test:board && npm run test:clinical && npm run test:interview && npm run test:bargein && npm run test:discussion && npm run test:acceptance && npm run test:fhir && npm run test:dispatch"
+    "test:safetyarbiter": "tsx scripts/test-safety-arbiter-decision.ts",
+    "test:all": "npm run test:security && npm run test:durable-audit && npm run test:goldendialogue && npm run test:safetyarbiter && npm run test:severity && npm run test:voicestate && npm run test:subfield && npm run test:interpreter && npm run test:planner && npm run test:engine && npm run test:adversarial && npm run test:multiclause && npm run test:provenance && npm run test:rag && npm run test:explanatory && npm run test:manager && npm run test:board && npm run test:clinical && npm run test:interview && npm run test:bargein && npm run test:discussion && npm run test:acceptance && npm run test:fhir && npm run test:dispatch"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
