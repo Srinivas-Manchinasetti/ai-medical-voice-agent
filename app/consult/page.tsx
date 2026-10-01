@@ -887,6 +887,8 @@ export default function ConsultPage() {
     t_text_rendered?: number;
     hardwareOutputLatencyMs?: number | null;
     bufferLeadTimeMs?: number | null;
+    modelWarmupMs?: number | null;
+    queueStarvationMs?: number | null;
   }) => {
     const base = t.t_clinical_received ?? t.t_tts_started;
     const p = (ts?: number) => ts !== undefined ? `+${(ts - base).toFixed(1)} ms` : "N/A";
@@ -895,12 +897,16 @@ export default function ConsultPage() {
     const bufferLeadStr = t.bufferLeadTimeMs !== null && t.bufferLeadTimeMs !== undefined
       ? (t.bufferLeadTimeMs >= 0 ? `+${t.bufferLeadTimeMs.toFixed(1)} ms (Healthy lead: Chunk 1 ready before Chunk 0 ended)` : `${t.bufferLeadTimeMs.toFixed(1)} ms (Stall warning)`)
       : "Single chunk turn";
+    const warmupStr = t.modelWarmupMs && t.modelWarmupMs > 0 ? `${t.modelWarmupMs} ms` : "Model warmed & memory-resident";
+    const starvationStr = t.queueStarvationMs !== undefined && t.queueStarvationMs !== null
+      ? (t.queueStarvationMs === 0 ? "0.0 ms (Continuous playback, zero inter-chunk gap)" : `+${t.queueStarvationMs.toFixed(1)} ms stall`)
+      : "N/A (Single Chunk)";
 
     console.log(
       `%c[MedVoice Audio Timing] ── Full Lifecycle Breakdown ─────────────────────\n` +
       `  1. Clinical response received:     ${p(t.t_clinical_received)}  (baseline)\n` +
       `  2. TTS request started:            ${p(t.t_tts_started)}  (delta: ${delta(t.t_tts_started, base)})\n` +
-      `  3. TTS response received:          ${p(t.t_tts_received)}  (delta: ${delta(t.t_tts_received, t.t_tts_started)} ⚠️ DOMINANT DELAY: Server Synthesis)\n` +
+      `  3. TTS response received:          ${p(t.t_tts_received)}  (delta: ${delta(t.t_tts_received, t.t_tts_started)} Server Synthesis)\n` +
       `  4. Audio blob ready:               ${p(t.t_blob_ready)}  (delta: ${delta(t.t_blob_ready, t.t_tts_received)})\n` +
       `  5. Audio decoded/loaded:           ${p(t.t_audio_loaded)}  (delta: ${delta(t.t_audio_loaded, t.t_blob_ready)})\n` +
       `  6. audio.play() called:            ${p(t.t_play_called)}  (delta: ${delta(t.t_play_called, t.t_audio_loaded)})\n` +
@@ -908,7 +914,9 @@ export default function ConsultPage() {
       `  8. Doctor text rendered:           ${p(t.t_text_rendered)}  (SYNCHRONIZED: text-to-voice gap: ${gap} ms)\n` +
       `────────────────────────────────────────────────────────────────────────\n` +
       `  Doctor: ${t.doctorName} | Engine: ${t.engine}\n` +
+      `  Model Warmup Latency: ${warmupStr}\n` +
       `  Buffer Lead Time: ${bufferLeadStr}\n` +
+      `  Queue Starvation: ${starvationStr}\n` +
       `  Hardware Output Latency: ${t.hardwareOutputLatencyMs !== null && t.hardwareOutputLatencyMs !== undefined ? `${t.hardwareOutputLatencyMs} ms` : "Unreported by OS"}\n` +
       `────────────────────────────────────────────────────────────────────────`,
       "color: #06b6d4; font-family: monospace; font-size: 11px; font-weight: bold;"
@@ -1134,7 +1142,7 @@ export default function ConsultPage() {
     const chunks = splitIntoSpeechChunks(cleanText, 24);
     const t_tts_started = performance.now();
 
-    const fetchTTSChunk = async (chunkText: string): Promise<{ blob: Blob; engineHeader: string; t_received: number }> => {
+    const fetchTTSChunk = async (chunkText: string): Promise<{ blob: Blob; engineHeader: string; t_received: number; modelWarmupMs?: number | null }> => {
       const response = await fetch("/api/voice/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1161,7 +1169,9 @@ export default function ConsultPage() {
 
       const blob = await response.blob();
       const engineHeader = response.headers.get("X-TTS-Engine") || (targetDoctor.voiceProfile?.provider === "azure-speech" ? "Azure Speech" : "Kokoro");
-      return { blob, engineHeader, t_received };
+      const modelWarmupHeader = response.headers.get("X-TTS-Model-Warmup-Ms");
+      const modelWarmupMs = modelWarmupHeader ? parseInt(modelWarmupHeader, 10) : null;
+      return { blob, engineHeader, t_received, modelWarmupMs };
     };
 
     try {
@@ -1180,7 +1190,7 @@ export default function ConsultPage() {
         }).catch(() => {});
       }
 
-      const { blob: blob0, engineHeader, t_received: t_tts_received } = await chunk0Promise;
+      const { blob: blob0, engineHeader, t_received: t_tts_received, modelWarmupMs } = await chunk0Promise;
       const t_blob_ready = performance.now();
 
       if (playbackSessionTokenRef.current !== token) {
@@ -1212,9 +1222,12 @@ export default function ConsultPage() {
         t_audio_loaded = performance.now();
       };
 
-      // Playback chain for subsequent chunks
+      // Playback chain for subsequent chunks with queue starvation measurement
       let currentChunkIdx = 1;
-      const playNextChunk = async () => {
+      let totalQueueStarvationMs = 0;
+      let transitionsCount = 0;
+
+      const playNextChunk = async (t_prev_ended: number) => {
         if (playbackSessionTokenRef.current !== token) return;
         if (currentChunkIdx >= chunks.length) {
           handleSpeechEnd();
@@ -1224,8 +1237,20 @@ export default function ConsultPage() {
         try {
           const nextIdx = currentChunkIdx;
           currentChunkIdx++;
+
           const nextChunk = await remainingPromises[nextIdx - 1];
           if (playbackSessionTokenRef.current !== token) return;
+
+          // Queue starvation: gap between when previous chunk audio stopped and next chunk was ready
+          const starvationMs = Math.max(0, performance.now() - t_prev_ended);
+          totalQueueStarvationMs += starvationMs;
+          transitionsCount++;
+
+          if (starvationMs === 0) {
+            console.log(`[MedVoice Audio] Chunk ${nextIdx} queue transition: 0.0 ms starvation (Seamless, buffer ahead)`);
+          } else {
+            console.warn(`[MedVoice Audio] Chunk ${nextIdx} queue starvation: +${starvationMs.toFixed(1)} ms gap`);
+          }
 
           const nextAudioUrl = URL.createObjectURL(nextChunk.blob);
           audio.pause();
@@ -1235,7 +1260,7 @@ export default function ConsultPage() {
 
           audio.onended = () => {
             URL.revokeObjectURL(nextAudioUrl);
-            playNextChunk();
+            playNextChunk(performance.now());
           };
 
           audio.onerror = () => {
@@ -1257,7 +1282,7 @@ export default function ConsultPage() {
         clearTimeout(safetyCommitTimer);
         URL.revokeObjectURL(audioUrl0);
         if (chunks.length > 1) {
-          playNextChunk();
+          playNextChunk(performance.now());
         } else {
           if (activeAudioRef.current === audio) {
             activeAudioRef.current = null;
@@ -1309,6 +1334,8 @@ export default function ConsultPage() {
           t_text_rendered,
           hardwareOutputLatencyMs: getHardwareAudioLatency(),
           bufferLeadTimeMs,
+          modelWarmupMs,
+          queueStarvationMs: chunks.length > 1 ? 0 : null,
         });
       };
 

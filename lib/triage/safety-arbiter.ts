@@ -363,7 +363,7 @@ function consolidateStructuredEvidence(
     ...(structuredState?.redFlags || {}),
   };
 
-  const coreDomains = ['airway', 'breathing', 'cardiac', 'neurological', 'bleeding'];
+  const coreDomains = ['airway', 'swallowing', 'breathing', 'cardiac', 'neurological', 'bleeding'];
   const unresolvedRedFlags: string[] = [];
 
   for (const domain of coreDomains) {
@@ -377,6 +377,11 @@ function consolidateStructuredEvidence(
       structuredRedFlags.push(`STRUCTURED_${domain.toUpperCase()}_RED_FLAG`);
       if (domain === 'airway') {
         featureOverrides.stridor = true;
+      } else if (domain === 'swallowing') {
+        featureOverrides.throatTightness = true;
+        if (assessment.status === 'critical') {
+          featureOverrides.stridor = true;
+        }
       } else if (domain === 'breathing') {
         featureOverrides.severeDyspnea = true;
       } else if (domain === 'cardiac') {
