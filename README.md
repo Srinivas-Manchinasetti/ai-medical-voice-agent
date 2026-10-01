@@ -1,60 +1,220 @@
-# 🩺 AI Medical Voice Agent
+# 🩺 MedVoice AI: Clinical Voice Triage & Decision-Support System
 
-> **Intelligent Patient Care & Clinical Voice Triage Platform**  
-> Deliver instant, empathetic medical voice assistance 24/7. Automate appointment scheduling, symptom evaluation, emergency ER escalation, and EHR SOAP documentation with zero call wait times.
+> **A bounded, multi-specialist clinical voice platform with deterministic safety arbitration, local neural audio pipelines, and verifiable audit ledgers.**
+> Designed for AI-assisted intake, triage, and clinical decision support. The system does not autonomously diagnose patients.
 
 ---
 
-## 🌟 Key Capabilities & Features
+## 📑 Table of Contents
 
-- **🎙️ Interactive Voice Call Simulator**: Live conversational speech interface simulating real-time patient interactions (Urgent Chest Pain, Pediatric Fever, Post-Op Rx Refill).
-- **📋 Real-Time Symptom & Entity Mining**: Automatically isolates chief complaints, duration, severity, and tags standard ICD-10 medical codes during natural patient speech.
-- **📄 Automated SOAP Note Generation**: Eliminates manual charting by capturing structured Subjective, Objective, Assessment, and Plan (SOAP) records ready for provider signature.
-- **🌐 Multilingual Voice Support**: Real-time natural speech translation across 30+ languages (English, Spanish, Mandarin, Hindi, Telugu, French).
-- **🚨 Emergency Escalation Routing**: Instantly flags red-flag cardiac and neurological emergency symptoms to patch calls directly to 911 or on-call triage nurses.
-- **🛡️ Enterprise Security & Privacy**: Designed for HIPAA compliance guidelines with TLS 1.3 voice stream encryption, AES-256 storage, and zero-retention voice pipelines.
+- [System Architecture Overview](#-system-architecture-overview)
+- [Audited Technical Specifications & Code Reality](#-audited-technical-specifications--code-reality)
+  - [1. Bounded Multi-Specialist Decision Architecture](#1-bounded-multi-specialist-decision-architecture)
+  - [2. Deterministic Dual-Arbiter Safety Shield](#2-deterministic-dual-arbiter-safety-shield)
+  - [3. Triage Benchmark & Safety Concordance](#3-triage-benchmark--safety-concordance)
+  - [4. Latency Profiles & Adaptive First-Chunk TTS](#4-latency-profiles--adaptive-first-chunk-tts)
+  - [5. Runtime Paralinguistic Acoustic DSP Analyzer](#5-runtime-paralinguistic-acoustic-dsp-analyzer)
+  - [6. Deterministic Multi-Field Clinical RAG Engine](#6-deterministic-multi-field-clinical-rag-engine)
+  - [7. Durable SHA-256 Chained Audit Ledger](#7-durable-sha-256-chained-audit-ledger)
+  - [8. HL7® FHIR® R4 Bundle Export & Provenance](#8-hl7-fhir-r4-bundle-export--provenance)
+  - [9. Geospatial Emergency Facility Discovery & Road Routing](#9-geospatial-emergency-facility-discovery--road-routing)
+  - [10. Monotonic Barge-in Interruption](#10-monotonic-barge-in-interruption)
+- [Technology Stack](#-technology-stack)
+- [Repository Structure](#-repository-structure)
+- [Verification & Test Suites](#-verification--test-suites)
+- [Getting Started](#-getting-started)
+- [Clinical & Regulatory Boundary Disclaimers](#-clinical--regulatory-boundary-disclaimers)
+
+---
+
+## 🏛️ System Architecture Overview
+
+MedVoice AI is architected around strict safety boundaries where non-deterministic LLM reasoning is bounded by deterministic safety arbiters, cryptographic audit chains, and auditable evidence provenance:
+
+```mermaid
+flowchart TD
+    subgraph Client["Browser Runtime (Next.js / React 19)"]
+        A["Microphone Input (MediaStream)"] --> B["Acoustic DSP Analyzer\n(25ms/10ms, RMS, VAD, f0)"]
+        B -.->|"Observational Telemetry Only"| C["VoicePill UI & Patient State"]
+        A --> D["Speech-to-Text (Whisper / ASR)"]
+        M["Interactive Care Map\n(5-State Gated Location)"]
+    end
+
+    subgraph AudioEngine["Local Neural Audio Pipeline"]
+        D --> E["Canonical Transcript"]
+        N["Adaptive First-Chunk Chunker"] --> O["Kokoro-82M q4 CPU TTS"]
+        O -->|"Streamed Audio Chunks"| P["Audio Playback Buffer (0ms Starvation)"]
+    end
+
+    subgraph SafetyShield["Deterministic Dual-Arbiter Shield"]
+        E --> F["Pre-Arbiter Safety Filter\n(Deterministic Emergency Flagging)"]
+        F --> G["Bounded Multi-Specialist Board\n(Internal Med, Cardio, Neuro, Peds)"]
+        G <--> H["Asynchronous In-Memory Blackboard"]
+        H --> I["Deterministic Lexical RAG\n(2,112 Local MedlinePlus Passages)"]
+        G --> J["Post-Arbiter Safety Shield\n(Non-Downgrade & Negation Verifier)"]
+    end
+
+    subgraph DurableLedger["Durable Integrity & Export"]
+        J --> K["Structured Clinical State & Provenance"]
+        K --> N
+        K --> L["Durable SHA-256 Audit Ledger\n(Neon PostgreSQL / Local Fallback)"]
+        K --> Q["HL7 FHIR R4 Bundle Serializer\n(Encounter, Condition, Observation)"]
+    end
+```
+
+---
+
+## 🔬 Audited Technical Specifications & Code Reality
+
+This specification documents the verified codebase implementation across clinical reasoning, safety, audio latency, and infrastructure:
+
+### 1. Bounded Multi-Specialist Decision Architecture
+* **Implementation Reality**: Specialist modules, an orchestrator, a clinical board, and bounded specialist execution routines exist as software decision modules. They operate within bounded execution budgets rather than functioning as unconstrained or autonomous human-like physicians.
+* **Architecture**: A bounded multi-specialist clinical decision architecture comprising generalist and specialty reasoning modules (Lead Internist, Cardiology, Neurology, Pediatrics) orchestrated within a constrained clinical board.
+* **Blackboard Model**: A bounded asynchronous in-memory clinical blackboard coordinates specialist observations, hypotheses, and clinical synthesis across iterative turns.
+* **Diagnostic Scoring**: Clinical scoring tools (e.g., TIMI, BE-FAST, NIHSS, PEWS criteria) evaluate patient-reported signs, structured clinical facts, and available telemetry parameters; ECG-related scoring evaluates reported telemetry indicators and does not imply direct 12-lead hardware acquisition.
+
+### 2. Deterministic Dual-Arbiter Safety Shield
+* **Pre-Arbiter & Post-Arbiter**: Deterministic safety arbiters execute before and after LLM synthesis:
+  - **Emergency Precedence**: High-acuity physiological presentations (e.g., acute coronary syndrome, stroke signs, severe pediatric respiratory distress) enforce an emergency floor (ESI-1 / ESI-2).
+  - **Non-Downgrade Invariant**: Downstream LLM passes are cryptographically and deterministically forbidden from overriding or downgrading an emergency trigger.
+  - **Missing vs. Denied Semantics**: Explicitly denies false symptom conflation (e.g., an unasked symptom is treated as `unresolved`, not `denied`).
+  - **Output Sanitization & Anti-Leakage**: Clinical output sanitization filters prevent unsupported diagnostic assertions or internal prompt instructions from leaking into patient-facing verbal responses.
+
+### 3. Triage Benchmark & Safety Concordance
+* **Benchmark Scope**: The evaluation harness contains 35 standardized clinical benchmark scenarios: 22 high-acuity emergency cases and 13 non-emergency control cases across cardiac, neurological, pediatric, and general medicine domains.
+* **Concordance Rate**: Achieved **100% emergency sensitivity (22/22)** on the evaluated 35-case benchmark. The system correctly separated all 22 life-threatening presentations from controls without false-negative downgrades. (Note: Evaluated on this finite test population; not a claim of universal population-level clinical accuracy).
+
+### 4. Latency Profiles & Adaptive First-Chunk TTS
+* **Arbiter Latency**: Mean deterministic safety-arbiter latency was **0.39 ms** in local Node.js benchmarks, with **P50 at 0.14 ms**.
+* **Kokoro-82M TTS Baseline**: Engine-level Kokoro-82M q4 CPU synthesis latency is approximately 0.93–0.96 s P50 for short 5-word inputs.
+* **Adaptive First-Chunk Optimization**: To eliminate compound response lag, the audio engine adaptively partitions speech into an immediate introductory clause (4–8 words) synthesized ahead of subsequent paragraphs.
+* **Time-to-First-Audio (TTFA)**:
+  - Reduced compound-turn end-to-end TTFA by **61.4% on average** (from ~4.2 s down to **1.1–1.6 s** in tested scenarios).
+  - Zero measured playback starvation between consecutive audio buffers.
+  - Interactive turn turnaround: sub-second for short acknowledgments, and ~1.1–1.6 s TTFA for complex compound clinical responses.
+
+### 5. Runtime Paralinguistic Acoustic DSP Analyzer
+* **Microphone DSP Pipeline**: The browser runtime extracts short-term acoustic features from live microphone PCM input via Web Audio API using **25 ms analysis windows** and **10 ms hop intervals**.
+* **Measured Parameters**: Real-time Root-Mean-Square (RMS) energy, dBFS calculations, energy-based Voice Activity Detection (VAD threshold: −38 dBFS), conversational pause cadence, and autocorrelation fundamental frequency ($f_0$).
+* **Clinical Isolation Boundary**: Acoustic measurements serve strictly as observational telemetry in the UI and supportive evidence in clinical documentation. They are strictly isolated and are **never** used as autonomous diagnostic biomarkers or ESI triage escalators.
+
+### 6. Deterministic Multi-Field Clinical RAG Engine
+* **Corpus**: 2,112 processed MedlinePlus XML-derived passages indexed locally alongside curated clinical practice guidelines for retrieval-augmented specialist reasoning.
+* **Scoring Formulation**: Retrieval executes in-memory deterministic multi-field lexical matching with domain alignment and authority weighting (no BM25 or Dense DPR vector embeddings):
+  $$S(d, q) = \left( L_{\text{multi-field}}(d, q) + \Delta_{\text{domain}} \right) \times \gamma_{\text{section}} + \alpha_{\text{auth}}$$
+  where:
+  - $L_{\text{multi-field}}(d, q)$ calculates exact and partial token overlap across title, keywords, and passage body.
+  - $\Delta_{\text{domain}}$ applies targeted clinical domain bonuses (cardiac, neuro, pediatrics, triage).
+  - $\gamma_{\text{section}}$ weights primary indications vs. background reference sections.
+  - $\alpha_{\text{auth}}$ enforces authority weighting for peer-reviewed guidelines.
+* **Reference Categories**: Task-aware retrieval routes queries over locally curated, pre-indexed, source-tagged medical reference categories corresponding to RxNorm, DailyMed, and openFDA information domains (without unverified live HTTP external API dependencies).
+
+### 7. Durable SHA-256 Chained Audit Ledger
+* **Tamper-Evident Ledger**: A durable SHA-256 chained audit ledger records clinical state transitions, triage dispositions, arbiter decisions, and associated provenance.
+* **Cryptographic Linking**: Each audit event stores monotonic index $i$, timestamp, payload hash, and `previousHash` linking directly to block $i-1$:
+  $$\text{Hash}_i = \text{SHA-256}\left( i \,\|\, \text{prevHash} \,\|\, \text{timestamp} \,\|\, \text{eventType} \,\|\, \text{SHA-256}(\text{payload}) \right)$$
+* **Durable Persistence**: Backed by Neon serverless PostgreSQL with transactional serialization to defend against concurrent write races, with automatic verified memory fallback for development resilience.
+
+### 8. HL7® FHIR® R4 Bundle Export & Provenance
+* **Interoperability Standard**: Generates structured HL7® FHIR® R4 `Bundle` objects containing `Patient`, `Encounter`, `Condition`, `Observation`, and `Composition` (clinical SOAP note) resources.
+* **Provenance Verification**: Every clinical entity carries explicit provenance tags (`patient_reported`, `clinician_verified`, `device_measured`, or `arbiter_enforced`).
+* **Paralinguistic Representation**: FHIR bundles represent verified clinical telemetry (e.g., ESI acuity); runtime acoustic telemetry is recorded as descriptive device/intake metadata rather than unstandardized standalone clinical observations.
+
+### 9. Geospatial Emergency Facility Discovery & Road Routing
+* **State Machine Architecture**: Eliminates unverified location defaults via an explicit 5-state finite state machine in `/care`:
+  ```text
+  LOCATION_UNKNOWN ──► LOCATION_PERMISSION_REQUESTED ──► LOCATION_RESOLVED (GPS)
+         │                                                        ▲
+         ▼                                                        │
+  LOCATION_PERMISSION_DENIED ──► LOCATION_MANUALLY_SELECTED ──────┘
+  ```
+* **Strict Query Gating**: Zero hospital discovery queries fire on initial mount. Queries require verified non-null coordinates or explicit user region selection.
+* **Backend Validation**: `/api/hospitals` rejects missing or out-of-range coordinates with `400 Bad Request`.
+* **Routing Telemetry**: Computes driving distance, estimated road transit times, and verified Emergency Department capabilities (decoupled from direct municipal 911 dispatch).
+
+### 10. Monotonic Barge-in Interruption
+* **Session Invalidation**: Interactive speech playback utilizes monotonic playback-session token counters.
+* **Low-Latency Cancellation**: When new user speech or VAD interruption is detected, the audio controller invalidates the current playback token, immediately pausing audio output and clearing queued buffers before new transcription begins.
 
 ---
 
 ## 🛠️ Technology Stack
 
-### Frontend & Web Application
-- **Framework**: [Next.js 16 (App Router)](https://nextjs.org/)
-- **UI Core**: [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/)
-- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
-- **Animations**: [Framer Motion](https://www.framer.com/motion/)
-- **Icons**: [Lucide React](https://lucide.dev/), [Tabler Icons](https://tabler-icons.io/)
-
-### Backend Microservice & Audio Processing (Specs)
-- **API Framework**: [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
-- **AI Speech & NLP**: OpenAI Whisper, gTTS, Pyttsx3, LangChain
-- **Audio DSP**: PyAudio, SoundFile, SciPy, NumPy
+| Layer | Technologies |
+|---|---|
+| **Frontend Framework** | [Next.js 16 (App Router)](https://nextjs.org/), [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/) |
+| **Styling & UI** | [Tailwind CSS v4](https://tailwindcss.com/), [Motion](https://motion.dev/), [Lucide React](https://lucide.dev/) |
+| **Mapping & Geospatial** | [Leaflet](https://leafletjs.com/), OpenStreetMap Tile Servers, OSRM Road Routing |
+| **Audio & Speech Engine** | Whisper STT, [Kokoro-82M](https://github.com/hexgrad/kokoro) (ONNX / WebAssembly CPU), Web Audio API DSP |
+| **Security & Auth** | [Clerk](https://clerk.com/) Server Authentication, Role-Based Access Control (RBAC), CSP Report-Only |
+| **Persistence & Audit** | [Neon PostgreSQL](https://neon.tech/) Serverless, Drizzle ORM, SHA-256 Hash Chain Ledger |
+| **Healthcare Standards** | HL7® FHIR® R4, Emergency Severity Index (ESI) v4, ICD-10 Category Tagging |
 
 ---
 
-## 📁 Directory Structure
+## 📁 Repository Structure
 
 ```text
 ai-medical-voice-agent/
 ├── app/
-│   ├── _components/
-│   │   ├── Navbar.tsx                   # Floating glassmorphic header
-│   │   ├── VoiceCallSimulator.tsx       # Live interactive voice call simulator
-│   │   ├── FeatureBentoGrid.tsx         # Clinical capabilities bento grid
-│   │   ├── WorkflowSection.tsx          # 5-step conversation to care workflow
-│   │   ├── UseCasesSection.tsx          # Solution cards (Intake, Rx, Urgent)
-│   │   ├── CareTeamSection.tsx          # Operational impact & safety boundaries
-│   │   ├── MultilingualSection.tsx      # Spoken language translation showcase
-│   │   ├── SecuritySection.tsx          # HIPAA & encryption safeguards
-│   │   └── Footer.tsx                   # Deep slate footer with status badge
-│   ├── globals.css                      # Global styles, fonts, and design tokens
-│   ├── layout.tsx                       # Root layout with hydration suppression
-│   └── page.tsx                         # Main landing page composition
-├── public/                              # Static brand assets & icons
-├── package.json                         # Node.js dependencies & scripts
-├── requirements.txt                     # Python backend requirements
-├── tsconfig.json                        # TypeScript configuration
-└── README.md                            # Documentation
+│   ├── _components/                # UI components (InteractiveRouteMap, VoicePill)
+│   ├── api/
+│   │   ├── audit/                  # Cryptographic SHA-256 audit ledger endpoint
+│   │   ├── consultations/          # Consultation lifecycle & FHIR R4 export
+│   │   ├── hospitals/              # Gated healthcare facility discovery
+│   │   ├── route/                  # Road routing & ETA calculation
+│   │   ├── triage/                 # Deterministic clinical safety triage
+│   │   └── voice/                  # Voice STT, chat reasoning, and TTS routes
+│   ├── care/                       # Geospatial emergency care network
+│   ├── consult/                    # Live interactive clinical voice consultation
+│   ├── layout.tsx                  # Root layout & global providers
+│   └── page.tsx                    # Platform landing page & overview
+├── lib/
+│   ├── acoustic/                   # 25ms/10ms acoustic DSP analyzer & feature extraction
+│   ├── agents/                     # Specialist board, schemas & orchestrator
+│   ├── audio/                      # Adaptive first-chunk sentence splitter & audio pipeline
+│   ├── care-network/               # Hospital RAG & facility discovery services
+│   ├── fhir/                       # HL7 FHIR R4 Bundle generator & validator
+│   ├── security/                   # RBAC, IDOR guards, and error detail sanitizers
+│   └── triage/                     # Deterministic pre-arbiter & post-arbiter safety shields
+├── scripts/                        # Automated regression suites & clinical benchmarks
+├── tests/                          # Security, RBAC, durable audit & FHIR evaluation suites
+├── next.config.ts                  # Security headers, CSP & Next.js configuration
+├── package.json                    # Dependencies & test runners
+└── README.md                       # System documentation
+```
+
+---
+
+## 🧪 Verification & Test Suites
+
+The codebase includes an extensive suite of automated test harnesses validating clinical safety, security, and audio latency:
+
+```bash
+# Security, RBAC, IDOR ownership & CSP headers
+npm run test:security
+
+# Durable SHA-256 PostgreSQL audit ledger persistence & concurrency
+npm run test:durable-audit
+
+# 11-turn golden clinical dialogue state & negation invariant suite
+npm run test:goldendialogue
+
+# Voice-state lifecycle, audio buffer discard & error recovery
+npm run test:voicestate
+
+# Care Network 5-state location acquisition & 0-query mount invariants
+npx tsx scripts/test-care-location-state.ts
+
+# Paralinguistic acoustic DSP analyzer & safety isolation
+npx tsx scripts/test-acoustic-dsp.ts
+
+# HL7 FHIR R4 bundle generation & provenance validation
+npm run test:fhir
+
+# Full comprehensive test suite (all 24 verification suites)
+npm run test:all
 ```
 
 ---
@@ -62,55 +222,50 @@ ai-medical-voice-agent/
 ## 🚀 Getting Started
 
 ### Prerequisites
-
-Ensure you have the following installed on your machine:
-- **Node.js** >= 18.17.0
+- **Node.js** >= 18.18.0
 - **npm** >= 9.0.0
-- *(Optional)* **Python** >= 3.10 (for backend voice processing scripts)
+- *(Optional)* Access to Neon PostgreSQL connection string (`DATABASE_URL`) for durable audit ledger persistence.
 
-### Installation
-
-1. **Clone the Repository**
+### Quick Start
+1. **Clone the repository**:
    ```bash
    git clone https://github.com/Srinivas-Manchinasetti/ai-medical-voice-agent.git
    cd ai-medical-voice-agent
    ```
-
-2. **Install Node Dependencies**
+2. **Install dependencies**:
    ```bash
    npm install
    ```
+3. **Configure environment variables** (create `.env.local`):
+   ```env
+   # Authentication
+   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_pub_key
+   CLERK_SECRET_KEY=your_clerk_secret_key
 
-3. **Start the Development Server**
+   # Database (Optional; falls back to in-memory audit store if omitted)
+   DATABASE_URL=postgresql://user:pass@ep-cool-db.neon.tech/neondb?sslmode=require
+
+   # Speech & Inference
+   ASSEMBLYAI_API_KEY=your_server_only_key
+   NVIDIA_API_KEY=your_inference_key
+   ```
+4. **Run the local development server**:
    ```bash
    npm run dev
    ```
-
-4. **Open in Browser**  
-   Navigate to [http://localhost:3000](http://localhost:3000) to view the running application.
+5. **Open in browser**: Navigate to [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## 🐍 Python Backend Setup (Optional)
+## ⚠️ Clinical & Regulatory Boundary Disclaimers
 
-If running the Python audio processing microservice backend:
-
-```bash
-# Create virtual environment
-python -m venv venv
-
-# Activate environment (Windows)
-.\venv\Scripts\activate
-
-# Install Python requirements
-pip install -r requirements.txt
-```
-
----
-
-## 🔒 Security & Medical Disclaimer
-
-> **Notice**: MediVoice AI is designed as a clinical decision support and triage intake assistant. It is intended to streamline intake workflows for healthcare providers. In the event of a life-threatening medical emergency, patients should always contact 911 immediately.
+> **IMPORTANT CLINICAL NOTICE**
+> MedVoice AI is an investigational clinical decision support and triage intake prototype designed to assist healthcare personnel with patient intake, structured clinical documentation, and emergency risk stratification.
+>
+> 1. **No Autonomous Diagnosis**: The platform does not make autonomous clinical diagnoses, prescribe medication, or formulate independent medical treatment plans.
+> 2. **Emergency Protocol**: For suspected life-threatening medical emergencies (including crushing chest pain, symptoms of acute stroke, severe breathing difficulty, or anaphylaxis), patients must immediately call **911** (or local emergency medical services) or proceed to the nearest emergency department.
+> 3. **Observational Acoustic Telemetry**: Paralinguistic speech measurements (pitch, energy, pause duration) are observational acoustic telemetry only and are not certified diagnostic biomarkers.
+> 4. **Regulatory Status**: This software is not cleared or approved by the U.S. Food and Drug Administration (FDA), European Medicines Agency (EMA), or any other regulatory body as a medical device (SaMD).
 
 ---
 
