@@ -7,7 +7,7 @@ import { ConversationInterpreter } from "./conversation-interpreter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
-import { extractSubfieldState } from "./clinical-state";
+import { extractSubfieldState, extractNumericSeverity, NON_DENIABLE_SLOTS } from "./clinical-state";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -400,9 +400,10 @@ export class ConversationManager {
 
       // G. SWALLOWING DIFFICULTY
       if (slot === "swallowing_difficulty") {
-        const hasSpecificDenial = /\b(?:no|not|neither|without|no\s+trouble|can\s+swallow\s+(?:fine|ok|normally))\s+(?:trouble\s+swallowing|difficulty\s+swallowing|problems?\s+swallowing|dysphagia)\b/i.test(textLower) ||
-          /^(?:no|nope|not\s+really|neither)[.!?\s]*$/i.test(textLower) ||
-          /\b(swallowing\s+is\s+(?:fine|ok|normal)|can\s+swallow\s+(?:fine|liquids|normally))\b/i.test(textLower);
+        const hasSpecificDenial =
+          /\b(?:no|not|neither|without|no\s+trouble|no\s+problem|no\s+issue|can\s+swallow\s+(?:fine|ok|normally))\s+(?:trouble\s+swallowing|difficulty\s+swallowing|problems?\s+swallowing|dysphagia)\b/i.test(textLower) ||
+          /^(?:no|nope|not\s+really|neither|none|nothing|nothing\s+with\s+that|nothing\s+like\s+that|no\s+(?:trouble|problem|issue)\s+with\s+that|none\s+of\s+that)[.!?\s]*$/i.test(textLower) ||
+          /\b(?:nothing\s+with\s+that|nothing\s+like\s+that|no\s+trouble\s+with\s+that|no\s+issues?\s+with\s+that|none\s+of\s+that|swallow(?:ing)?\s+is\s+(?:fine|ok|normal)|can\s+swallow\s+(?:fine|liquids|normally))\b/i.test(textLower);
         const hasSpecificComplaint = /\b(trouble\s+swallowing|difficulty\s+swallowing|hard\s+to\s+swallow|cannot\s+swallow|can't\s+swallow|choking|dysphagia)\b/i.test(textLower);
         const hasOdynophagiaOnly = /\b(?:hurts?|painful|pain|burning|sharp)\s+(?:when\s+(?:i\s+)?swallow|to\s+swallow|swallowing)\b/i.test(textLower) ||
           /\b(?:when\s+(?:i\s+)?swallow|swallowing)\s+(?:it\s+)?(?:hurts?|is\s+painful)\b/i.test(textLower);
@@ -428,8 +429,8 @@ export class ConversationManager {
 
       // I. SEVERITY
       if (slot === "severity") {
-        const numMatch = textLower.match(/\b([0-9]|10)\b/);
-        return { intent: "answer_question", resolvedSlot: "severity", resolvedValue: numMatch ? `${numMatch[0]}/10` : text };
+        const sevVal = extractNumericSeverity(textLower, true);
+        return { intent: "answer_question", resolvedSlot: "severity", resolvedValue: sevVal || text };
       }
 
       // J. EAR PAIN
@@ -456,10 +457,9 @@ export class ConversationManager {
     }
 
     // 3. Fallback opportunistic symptom extraction if pending question wasn't directly answered
-    const sevMatch = textLower.match(/\b(?:pain\s+(?:level\s+)?(?:is\s+)?|severity\s+(?:is\s+)?|about\s+|around\s+)?([0-9]|10)\s*(?:out of 10|\/10)\b/i) ||
-      textLower.match(/\bpain\s+(?:level\s+)?(?:is\s+)?(?:about\s+|around\s+)?([0-9]|10)\b/i);
+    const sevMatch = extractNumericSeverity(textLower);
     if (sevMatch) {
-      return { intent: "answer_question", resolvedSlot: "severity", resolvedValue: `${sevMatch[1]}/10` };
+      return { intent: "answer_question", resolvedSlot: "severity", resolvedValue: sevMatch };
     }
 
     if (/\b(no\s+fever|haven'?t\s+had\s+(?:a\s+)?fever|without\s+fever|denies\s+fever)\b/i.test(textLower)) {
@@ -649,22 +649,24 @@ export class ConversationManager {
           if (/fever|chills/i.test(questionText) || slot === "fever") deniedList.push("fever");
           if (/ear/i.test(questionText) || slot === "ear_pain") deniedList.push("ear_pain");
 
-          if (deniedList.length === 0) {
+          if (deniedList.length === 0 && !NON_DENIABLE_SLOTS.has(slot)) {
             deniedList.push(slot);
           }
 
-          deniedList.forEach(d => {
-            if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(d)) {
-              state.conversationMemory.deniedSymptoms.push(d);
-            }
-            if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(d)) {
-              state.conversationMemory.questionsAlreadyAsked.push(d);
-            }
-          });
+          if (deniedList.length > 0) {
+            deniedList.forEach(d => {
+              if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(d)) {
+                state.conversationMemory.deniedSymptoms.push(d);
+              }
+              if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(d)) {
+                state.conversationMemory.questionsAlreadyAsked.push(d);
+              }
+            });
 
-          const fact = `Denied: ${deniedList.join(", ")}`;
-          if (!state.slots.known_facts.includes(fact)) {
-            state.slots.known_facts.push(fact);
+            const fact = `Denied: ${deniedList.join(", ")}`;
+            if (!state.slots.known_facts.includes(fact)) {
+              state.slots.known_facts.push(fact);
+            }
           }
         } else if (slot === "associated_symptoms" && Array.isArray(val)) {
           state.slots.associated_symptoms = Array.from(new Set([...state.slots.associated_symptoms, ...val]));
@@ -988,22 +990,24 @@ export class ConversationManager {
         if (/fever|chills/i.test(questionText) || slot === "fever") deniedList.push("fever");
         if (/ear/i.test(questionText) || slot === "ear_pain") deniedList.push("ear_pain");
 
-        if (deniedList.length === 0) {
+        if (deniedList.length === 0 && !NON_DENIABLE_SLOTS.has(slot)) {
           deniedList.push(slot);
         }
 
-        deniedList.forEach(d => {
-          if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(d)) {
-            state.conversationMemory.deniedSymptoms.push(d);
-          }
-          if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(d)) {
-            state.conversationMemory.questionsAlreadyAsked.push(d);
-          }
-        });
+        if (deniedList.length > 0) {
+          deniedList.forEach(d => {
+            if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(d)) {
+              state.conversationMemory.deniedSymptoms.push(d);
+            }
+            if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(d)) {
+              state.conversationMemory.questionsAlreadyAsked.push(d);
+            }
+          });
 
-        const fact = `Denied: ${deniedList.join(", ")}`;
-        if (!state.slots.known_facts.includes(fact)) {
-          state.slots.known_facts.push(fact);
+          const fact = `Denied: ${deniedList.join(", ")}`;
+          if (!state.slots.known_facts.includes(fact)) {
+            state.slots.known_facts.push(fact);
+          }
         }
       } else if (slot === "associated_symptoms" && Array.isArray(val)) {
         state.slots.associated_symptoms = Array.from(new Set([...state.slots.associated_symptoms, ...val]));
@@ -1401,14 +1405,12 @@ export class ConversationManager {
       }
     }
 
-    // Opportunistic Severity Extraction (0-10, /10, or "pain is 6")
+    // Opportunistic Severity Extraction (0-10, /10, "8 by 10", "pain is 6", etc.)
     if (!state.slots.severity) {
-      const sevMatch = state.cumulativeTranscript.match(/\b(?:pain\s+(?:level\s+)?(?:is\s+)?|severity\s+(?:is\s+)?|about\s+|around\s+)?([0-9]|10)\s*(?:out of 10|\/10)\b/i) ||
-        state.cumulativeTranscript.match(/\bpain\s+(?:level\s+)?(?:is\s+)?(?:about\s+|around\s+)?([0-9]|10)\b/i);
-      if (sevMatch) {
-        const score = sevMatch[1];
-        state.slots.severity = `${score}/10`;
-        const fact = `SEVERITY: ${score}/10`;
+      const extractedSev = extractNumericSeverity(state.cumulativeTranscript);
+      if (extractedSev) {
+        state.slots.severity = extractedSev;
+        const fact = `SEVERITY: ${extractedSev}`;
         if (!state.slots.known_facts.some(f => f.startsWith("SEVERITY"))) {
           state.slots.known_facts.push(fact);
         }

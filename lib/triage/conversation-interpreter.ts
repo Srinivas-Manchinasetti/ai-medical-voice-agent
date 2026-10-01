@@ -1,4 +1,5 @@
 import { PendingQuestion } from "../agents/schemas";
+import { extractNumericSeverity, NON_DENIABLE_SLOTS, detectQuestionTargetSlot } from "./clinical-state";
 
 export type PatientIntent =
   | "answer_pending_question"
@@ -207,11 +208,17 @@ export class ConversationInterpreter {
 
     // 3.10 Detect Negative Answers / Symptom Denials ("Nothing else I guess?", "Nope none", "No", "None")
     const isNegativeResponse =
-      /^(?:no|nope|none|nothing|nothing\s+else|no\s+other\s+symptoms?|none\s+of\s+those|not\s+really|i\s+don'?t\s+think\s+so)[.!?\s]*$/i.test(lower) ||
-      /\b(nothing\s+else(?:\s+i\s+guess)?|nope\s+none|no\s+weakness|no\s+droop|no\s+vision|neither|none\s+of\s+those)\b/i.test(lower);
+      /^(?:no|nope|none|nothing|nothing\s+else|nothing\s+with\s+that|nothing\s+like\s+that|no\s+trouble\s+with\s+that|no\s+problem\s+with\s+that|none\s+of\s+that|no\s+other\s+symptoms?|none\s+of\s+those|not\s+really|i\s+don'?t\s+think\s+so)[.!?\s]*$/i.test(lower) ||
+      /\b(nothing\s+else(?:\s+i\s+guess)?|nope\s+none|nothing\s+with\s+that|nothing\s+like\s+that|no\s+trouble\s+with\s+that|no\s+weakness|no\s+droop|no\s+vision|neither|none\s+of\s+those)\b/i.test(lower);
 
     if (isNegativeResponse && !isEmergencyQuestion) {
-      const slotTarget = pendingQuestion?.targetSlot || "associated_symptoms";
+      let slotTarget = pendingQuestion?.targetSlot;
+      // Architectural rule: NON_DENIABLE_SLOTS can NEVER be resolved as "denied".
+      // Re-associate with the doctor's actual spoken question if available:
+      if (!slotTarget || NON_DENIABLE_SLOTS.has(slotTarget)) {
+        const detectedFromQ = detectQuestionTargetSlot(pendingQuestion?.question || "");
+        slotTarget = !NON_DENIABLE_SLOTS.has(detectedFromQ) ? detectedFromQ : "associated_symptoms";
+      }
       return {
         rawUtterance: text,
         intent: "answer_pending_question",
@@ -494,8 +501,7 @@ export class ConversationInterpreter {
 
       // Check Severity slot
       if (targetSlot === "severity") {
-        const numMatch = lower.match(/\b([0-9]|10)\b/);
-        const val = numMatch ? `${numMatch[0]}/10` : text;
+        const val = extractNumericSeverity(lower, true) || text;
         return {
           rawUtterance: text,
           intent: "answer_pending_question",
@@ -513,6 +519,10 @@ export class ConversationInterpreter {
 
     // 6. Generic Symptom Report
     const extracted: Array<{ slot: string; value: string }> = [];
+    const opportunisticSev = extractNumericSeverity(lower);
+    if (opportunisticSev) {
+      extracted.push({ slot: "severity", value: opportunisticSev });
+    }
     if (/chest|tightness|pressure|crushing|squeezing/i.test(lower)) {
       extracted.push({ slot: "character", value: "tightness/pressure" });
     }

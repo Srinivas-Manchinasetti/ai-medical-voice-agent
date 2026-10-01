@@ -9,7 +9,7 @@ import { clinicalKnowledgeRetriever } from "@/lib/clinical-knowledge/retriever";
 import { generateDoctorTurnResponse } from "@/lib/ai/clinical-llm";
 import { hospitalRagService } from "@/lib/care-network/hospital-rag";
 import { buildProvenanceEvidenceFromClinicalState } from "@/lib/agents/provenance";
-import { extractSubfieldState } from "@/lib/triage/clinical-state";
+import { extractSubfieldState, detectQuestionTargetSlot } from "@/lib/triage/clinical-state";
 
 export async function POST(request: Request) {
   try {
@@ -190,7 +190,14 @@ export async function POST(request: Request) {
       const feverAssessed = turnResult.state.slots.known_facts.some(f => /fever/i.test(f)) ||
         turnResult.state.conversationMemory?.deniedSymptoms.includes("fever");
       if (!feverAssessed) calculatedMissingDims.push("Fever / chills");
-      if (!subfields.characterSeverity.severity) calculatedMissingDims.push("Pain severity (0-10)");
+      // Independent character & severity breakdown
+      if (!subfields.characterSeverity.character && !subfields.characterSeverity.severity) {
+        calculatedMissingDims.push("Character & severity");
+      } else if (!subfields.characterSeverity.character) {
+        calculatedMissingDims.push("Symptom character / sensation");
+      } else if (!subfields.characterSeverity.severity) {
+        calculatedMissingDims.push("Pain severity (0-10)");
+      }
       const earAssessed = turnResult.state.slots.known_facts.some(f => /ear/i.test(f)) ||
         turnResult.state.conversationMemory?.deniedSymptoms.includes("ear_pain");
       if (!earAssessed) calculatedMissingDims.push("Referred ear pain (Otalgia)");
@@ -258,6 +265,9 @@ export async function POST(request: Request) {
 
     const completenessScore = hasAnySymptoms ? Math.min(0.95, Math.round(earnedPoints) / 100) : 0;
     const missingDims = calculatedMissingDims;
+    if (turnResult.state.structuredHistory) {
+      turnResult.state.structuredHistory.unansweredDimensions = calculatedMissingDims;
+    }
 
     // Conditioned Care Network RAG Trigger:
     // Only invoke when an access constraint (financial or remote location) is present,
@@ -317,6 +327,15 @@ export async function POST(request: Request) {
     });
 
     const activeDoctorReply = turnResult.action === "CLARIFY" ? turnResult.doctorReply : (llmResult.reply || turnResult.doctorReply);
+    
+    // Ensure state's pending question and last question match what the doctor actually articulated
+    if (turnResult.state.pendingQuestion) {
+      turnResult.state.pendingQuestion.question = activeDoctorReply;
+      turnResult.state.pendingQuestion.targetSlot = detectQuestionTargetSlot(activeDoctorReply, turnResult.state.pendingQuestion.targetSlot);
+      if (turnResult.state.conversationMemory) {
+        turnResult.state.conversationMemory.lastDoctorQuestion = activeDoctorReply;
+      }
+    }
 
     // Structured multi-specialist intake deliberation messages
     const intakeDeliberationMessages: any[] = [];

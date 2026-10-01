@@ -60,6 +60,7 @@ import { ThoughtLine, ThoughtStep } from "@/components/clinical/ThoughtLine";
 import { PulseHeart } from "@/components/clinical/PulseHeart";
 import { SwipeToast } from "@/components/feedback/SwipeToast";
 import { PeekRating } from "@/components/feedback/PeekRating";
+import { splitIntoSpeechChunks } from "@/lib/audio/sentence-splitter";
 
 
 type AudioState =
@@ -1124,37 +1125,28 @@ export default function ConsultPage() {
       window.speechSynthesis.speak(utterance);
     };
 
-    // 4. Primary Path: Multi-Provider Neural Audio Dispatcher (/api/voice/tts)
+    // 4. Primary Path: Multi-Provider Neural Audio Dispatcher with Chunk-Level Pipelining
+    const chunks = splitIntoSpeechChunks(cleanText, 13);
     const t_tts_started = performance.now();
-    try {
-      console.log(`[MedVoice Audio] Requesting speech via TTS Dispatcher (provider: ${targetDoctor.voiceProfile?.provider || "kokoro"}, voice: ${targetDoctor.voiceId}) for ${targetDoctor.name}...`);
+
+    const fetchTTSChunk = async (chunkText: string): Promise<{ blob: Blob; engineHeader: string; t_received: number }> => {
       const response = await fetch("/api/voice/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: cleanText,
+          text: chunkText,
           doctorId: targetDoctor.id,
           speed: targetDoctor.voiceProfile?.speed || 0.96,
         }),
       });
 
-      const t_tts_received = performance.now();
-
-      if (playbackSessionTokenRef.current !== token) {
-        clearTimeout(safetyCommitTimer);
-        console.log(`[MedVoice Audio] Discarding in-flight TTS result for ${targetDoctor.name} (token mismatch).`);
-        return;
-      }
+      const t_received = performance.now();
 
       const contentType = response.headers.get("content-type") || "";
-
-      // Check if server indicated fallback (e.g. cloud provider credentials missing in dev)
       if (contentType.includes("application/json")) {
         const data = await response.json();
         if (data.fallbackRequired) {
-          console.info(`[MedVoice Audio] Server returned development fallback signal for ${targetDoctor.name}: ${data.reason}`);
-          playBrowserFallback(data.locale);
-          return;
+          throw new Error(`Fallback signal: ${data.reason}`);
         }
       }
 
@@ -1163,17 +1155,30 @@ export default function ConsultPage() {
       }
 
       const blob = await response.blob();
+      const engineHeader = response.headers.get("X-TTS-Engine") || (targetDoctor.voiceProfile?.provider === "azure-speech" ? "Azure Speech" : "Kokoro");
+      return { blob, engineHeader, t_received };
+    };
+
+    try {
+      console.log(`[MedVoice Audio] Requesting speech (${chunks.length} chunk${chunks.length > 1 ? "s" : ""}) via TTS Dispatcher for ${targetDoctor.name}...`);
+      
+      // Immediately dispatch Chunk 0 for fast Time-To-First-Audio (TTFA)
+      const chunk0Promise = fetchTTSChunk(chunks[0]);
+      
+      // In parallel, queue synthesis of remaining chunks in background
+      const remainingPromises = chunks.slice(1).map((c) => fetchTTSChunk(c));
+
+      const { blob: blob0, engineHeader, t_received: t_tts_received } = await chunk0Promise;
       const t_blob_ready = performance.now();
 
       if (playbackSessionTokenRef.current !== token) {
         clearTimeout(safetyCommitTimer);
+        console.log(`[MedVoice Audio] Discarding in-flight TTS result for ${targetDoctor.name} (token mismatch).`);
         return;
       }
 
-      const engineHeader = response.headers.get("X-TTS-Engine") || (targetDoctor.voiceProfile?.provider === "azure-speech" ? "Azure Speech" : "Kokoro");
+      const audioUrl0 = URL.createObjectURL(blob0);
 
-      const audioUrl = URL.createObjectURL(blob);
-      
       // Reuse persistent warmed Audio element rather than allocating a new DOM element per turn
       let audio = persistentAudioRef.current;
       if (!audio) {
@@ -1195,13 +1200,58 @@ export default function ConsultPage() {
         t_audio_loaded = performance.now();
       };
 
+      // Playback chain for subsequent chunks
+      let currentChunkIdx = 1;
+      const playNextChunk = async () => {
+        if (playbackSessionTokenRef.current !== token) return;
+        if (currentChunkIdx >= chunks.length) {
+          handleSpeechEnd();
+          return;
+        }
+
+        try {
+          const nextIdx = currentChunkIdx;
+          currentChunkIdx++;
+          const nextChunk = await remainingPromises[nextIdx - 1];
+          if (playbackSessionTokenRef.current !== token) return;
+
+          const nextAudioUrl = URL.createObjectURL(nextChunk.blob);
+          audio.pause();
+          audio.removeAttribute("src");
+          audio.src = nextAudioUrl;
+          audio.load();
+
+          audio.onended = () => {
+            URL.revokeObjectURL(nextAudioUrl);
+            playNextChunk();
+          };
+
+          audio.onerror = () => {
+            URL.revokeObjectURL(nextAudioUrl);
+            handleSpeechEnd();
+          };
+
+          audio.play().catch(() => {
+            URL.revokeObjectURL(nextAudioUrl);
+            handleSpeechEnd();
+          });
+        } catch (chainErr) {
+          console.warn("[MedVoice Audio] Chunk stream chained chunk notice:", chainErr);
+          handleSpeechEnd();
+        }
+      };
+
       audio.onended = () => {
         clearTimeout(safetyCommitTimer);
-        URL.revokeObjectURL(audioUrl);
-        if (activeAudioRef.current === audio) {
-          activeAudioRef.current = null;
+        URL.revokeObjectURL(audioUrl0);
+        if (chunks.length > 1) {
+          playNextChunk();
+        } else {
+          if (activeAudioRef.current === audio) {
+            activeAudioRef.current = null;
+          }
+          handleSpeechEnd();
         }
-        handleSpeechEnd();
       };
 
       audio.onerror = () => {
@@ -1210,7 +1260,7 @@ export default function ConsultPage() {
         const mediaErr = audio.error;
         const detail = mediaErr ? `Code ${mediaErr.code}: ${mediaErr.message || "playback issue"}` : "media decode notice";
         console.warn(`[MedVoice Audio] Audio element playback notice (${detail}). Transitioning to browser voice fallback for ${targetDoctor.name}...`);
-        URL.revokeObjectURL(audioUrl);
+        URL.revokeObjectURL(audioUrl0);
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
         }
@@ -1229,7 +1279,7 @@ export default function ConsultPage() {
 
         logPlaybackLifecycle({
           doctorName: targetDoctor.name,
-          engine: engineHeader,
+          engine: `${engineHeader}${chunks.length > 1 ? ` (Chunk 1/${chunks.length} Pipelined)` : ""}`,
           t_clinical_received: options?.clinicalReceivedAt,
           t_tts_started,
           t_tts_received,
@@ -1243,7 +1293,7 @@ export default function ConsultPage() {
       };
 
       audio.removeAttribute("src");
-      audio.src = audioUrl;
+      audio.src = audioUrl0;
       audio.load();
 
       const t_play_called = performance.now();
@@ -1257,7 +1307,7 @@ export default function ConsultPage() {
         audio.onended = null;
         audio.onerror = null;
         audio.onplaying = null;
-        URL.revokeObjectURL(audioUrl);
+        URL.revokeObjectURL(audioUrl0);
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
         }
@@ -1561,13 +1611,13 @@ export default function ConsultPage() {
       text: doctorToUse.greeting,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       doctorName: doctorToUse.name,
-      doctorSpecialty: doctorToUse.department
+      doctorSpecialty: doctorToUse.specialty || doctorToUse.department
     };
 
     setPendingDoctorMessage({
       id: initialGreeting.id,
       doctorName: doctorToUse.name,
-      doctorSpecialty: doctorToUse.department,
+      doctorSpecialty: doctorToUse.specialty || doctorToUse.department,
     });
 
     speakDoctorResponse(doctorToUse.greeting, doctorToUse.id, undefined, {
@@ -1689,7 +1739,7 @@ export default function ConsultPage() {
       const respondingDoctorId = data.doctor?.id || selectedDoctor.id;
       const respondingDoctorProfile = getDoctorById(respondingDoctorId) || selectedDoctor;
       const respondingDoctorName = data.doctor?.name || respondingDoctorProfile.name;
-      const respondingDoctorSpecialty = data.doctor?.specialty || respondingDoctorProfile.department;
+      const respondingDoctorSpecialty = data.doctor?.specialty || respondingDoctorProfile.specialty || respondingDoctorProfile.department;
 
       setActiveSpeaker({
         id: respondingDoctorProfile.id,

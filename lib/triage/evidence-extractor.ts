@@ -14,6 +14,7 @@ import {
   ClinicalFact,
   ClinicalInterviewStateV2,
   RedFlagDomainAssessment,
+  extractNumericSeverity,
 } from "./clinical-state";
 
 export interface ExtractedEvidenceResult {
@@ -142,8 +143,11 @@ export class EvidenceExtractor {
 
     // Swallowing difficulty / True Dysphagia (Mechanical or functional inability to pass liquids/food)
     const hasDysphagiaComplaint = /\b(trouble\s+swallowing|difficulty\s+swallowing|hard\s+to\s+swallow|cannot\s+swallow|can't\s+swallow|choking\s+on\s+liquids|food\s+gets?\s+stuck|unable\s+to\s+swallow|dysphagia)\b/i.test(lower);
+    const isSwallowingPrompt = lastTarget === "swallowing_difficulty" ||
+      /\b(swallow|swallowing|liquids|solids|saliva|dysphagia)\b/i.test(lastDoctorQuestion || state.nextBestQuestion?.suggestedPhrasing || (state as any).conversationMemory?.lastPlannedQuestion?.suggestedPhrasing || "");
     const hasDysphagiaDenial = /\b(?:no|not|neither|without|no\s+trouble|can\s+swallow\s+(?:fine|ok|normally))\s+(?:trouble\s+swallowing|difficulty\s+swallowing|problems?\s+swallowing|dysphagia)\b/i.test(lower) ||
-      (/^(?:no|nope|not\s+really|neither)[.!?\s]*$/i.test(lower) && lastTarget === "swallowing_difficulty");
+      (/\b(?:nothing\s+with\s+that|nothing\s+like\s+that|no\s+trouble\s+with\s+that|none\s+of\s+that)\b/i.test(lower) && isSwallowingPrompt) ||
+      (/^(?:no|nope|not\s+really|neither|none|nothing|nothing\s+with\s+that|nothing\s+like\s+that|no\s+trouble)[.!?\s]*$/i.test(lower) && isSwallowingPrompt);
     const mentionsSwallowing = hasPainfulSwallowing || hasDysphagiaComplaint || hasDysphagiaDenial || /\b(swallow|swallowing)\b/i.test(lower);
 
     if (hasDysphagiaComplaint && !hasDysphagiaDenial) {
@@ -402,22 +406,19 @@ export class EvidenceExtractor {
     }
 
     // 7. SEVERITY (0-10 or Mild/Moderate/Severe)
-    const severityExplicitMatch = lower.match(/\b(?:pain\s+(?:is\s+|at\s+)?|severity\s+(?:is\s+|at\s+)?|around\s+|about\s+)?([0-9]|10)\s*(?:out\s+of\s+10|\/10)\b/i) ||
-      (/\b(?:pain|severity|hurts?)\s+(?:is\s+|at\s+)?([0-9]|10)\b/i.exec(lower));
-    const severityTargetedMatch = lastTarget === "severity" ? lower.match(/\b([0-9]|10)\b/) : null;
-    const severityNum = severityExplicitMatch ? severityExplicitMatch[1] : (severityTargetedMatch ? severityTargetedMatch[1] : null);
+    const isSeverityPrompt = lastTarget === "severity" || /\b(severity|scale|0\s*[-–to]\s*10|zero\s*[-–to]\s*ten|how\s+severe)\b/i.test(lastDoctorQuestion || state.nextBestQuestion?.suggestedPhrasing || (state as any).conversationMemory?.lastPlannedQuestion?.suggestedPhrasing || "");
+    const severityExtracted = extractNumericSeverity(lower, isSeverityPrompt);
     const hasQualSeverity = /\b(mild|moderate|severe|unbearable|excruciating|tolerable)\b/i.test(lower);
 
-    if (severityNum) {
-      const sevVal = `${severityNum}/10`;
+    if (severityExtracted) {
       const sevFact: ClinicalFact = {
         id: `fact-severity-${turnId}`,
         name: "severity",
         label: "Pain severity",
         category: "symptom_profile",
         status: "present",
-        value: parseInt(severityNum, 10),
-        normalizedText: sevVal,
+        value: parseInt(severityExtracted.split("/")[0], 10),
+        normalizedText: severityExtracted,
         confidence: 0.96,
         source: "patient",
         turnId,
