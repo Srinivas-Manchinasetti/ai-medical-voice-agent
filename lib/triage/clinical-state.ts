@@ -305,3 +305,111 @@ export function createInitialInterviewStateV2(): ClinicalInterviewStateV2 {
     safety: initialSafety,
   };
 }
+
+/**
+ * SUB-FIELD LEVEL CLINICAL STATE MODEL
+ * 
+ * Prevents repeating already-resolved portions of compound categories.
+ * Breaks down compound categories into independently resolved atomic facts:
+ * - Onset / Timeline: duration vs onsetPattern (sudden vs gradual)
+ * - Character & Severity: character vs numeric severity
+ * - Episodic: episodeDuration vs frequency
+ */
+export interface SubfieldClinicalState {
+  onset: {
+    duration?: string;
+    onsetPattern?: "sudden" | "gradual" | "unknown";
+    isResolved: boolean;
+  };
+  characterSeverity: {
+    character?: string;
+    severity?: string;
+    isResolved: boolean;
+  };
+  episodic: {
+    isEpisodic?: boolean;
+    frequency?: string;
+    episodeDuration?: string;
+    isResolved: boolean;
+  };
+}
+
+export function extractSubfieldState(
+  slots: Record<string, any> = {},
+  knownFacts: string[] = [],
+  conversationMemory?: any
+): SubfieldClinicalState {
+  // 1. Onset & Timeline subfields
+  let onsetDuration = slots.duration || slots.onset;
+  if (!onsetDuration) {
+    const onsetFact = knownFacts.find(f => /^(?:ONSET|Duration):\s*(.+)/i.test(f));
+    if (onsetFact) {
+      const match = onsetFact.match(/^(?:ONSET|Duration):\s*(.+)/i);
+      if (match) onsetDuration = match[1].trim();
+    }
+  }
+  let isDurationValid = false;
+  if (onsetDuration && !/^(?:sudden|gradual|unknown)$/i.test(String(onsetDuration).trim())) {
+    isDurationValid = true;
+  }
+
+  let pattern: "sudden" | "gradual" | "unknown" = "unknown";
+  if (slots.acute_worsening === true) pattern = "sudden";
+  else if (slots.acute_worsening === false) pattern = "gradual";
+  else {
+    const typeFact = knownFacts.find(f => /ONSET_TYPE:\s*(sudden|gradual)/i.test(f) || /Course:\s*(sudden|gradual)/i.test(f));
+    if (typeFact) {
+      pattern = /sudden/i.test(typeFact) ? "sudden" : "gradual";
+    } else if (knownFacts.some(f => /sudden\s+onset/i.test(f))) {
+      pattern = "sudden";
+    } else if (knownFacts.some(f => /gradual/i.test(f))) {
+      pattern = "gradual";
+    } else if (slots.onset && /sudden/i.test(String(slots.onset))) {
+      pattern = "sudden";
+    } else if (slots.onset && /gradual/i.test(String(slots.onset))) {
+      pattern = "gradual";
+    }
+  }
+
+  // 2. Character & Severity subfields
+  let character = slots.character;
+  if (!character) {
+    const charFact = knownFacts.find(f => /^CHARACTER:\s*(.+)/i.test(f));
+    if (charFact) character = charFact.replace(/^CHARACTER:\s*/i, "").trim();
+  }
+
+  let severity = slots.severity;
+  if (!severity) {
+    const sevFact = knownFacts.find(f => /^SEVERITY:\s*(.+)/i.test(f) || /\b([0-9]|10)\/10\b/i.test(f));
+    if (sevFact) {
+      const match = sevFact.match(/\b([0-9]|10)\/10\b/i);
+      severity = match ? match[0] : sevFact.replace(/^SEVERITY:\s*/i, "").trim();
+    }
+  }
+
+  // 3. Episodic subfields
+  const freq = conversationMemory?.frequencyPattern ||
+    knownFacts.find(f => /^Frequency:\s*(.+)/i.test(f))?.replace(/^Frequency:\s*/i, "").trim();
+  const isEpisodic = Boolean(freq || /episode/i.test(conversationMemory?.durationPattern || ""));
+  const episodeDur = conversationMemory?.durationPattern || (isEpisodic ? slots.duration : undefined);
+
+  return {
+    onset: {
+      duration: isDurationValid ? String(onsetDuration) : undefined,
+      onsetPattern: pattern,
+      isResolved: Boolean(isDurationValid && pattern !== "unknown")
+    },
+    characterSeverity: {
+      character: character ? String(character) : undefined,
+      severity: severity ? String(severity) : undefined,
+      isResolved: Boolean(character && severity)
+    },
+    episodic: {
+      isEpisodic,
+      frequency: freq ? String(freq) : undefined,
+      episodeDuration: episodeDur ? String(episodeDur) : undefined,
+      isResolved: Boolean(freq && episodeDur)
+    }
+  };
+}
+

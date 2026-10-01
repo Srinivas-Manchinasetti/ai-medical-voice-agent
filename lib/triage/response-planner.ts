@@ -2,6 +2,7 @@ import { ClinicalInterviewState, ConversationMemory } from "./conversation-manag
 import { SemanticInterpretation } from "./conversation-interpreter";
 import { PreArbiterResult } from "./pre-arbiter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
+import { extractSubfieldState } from "./clinical-state";
 
 export type PlanGoal =
   | "CONFIRM_CORRECTION_AND_PROCEED"
@@ -243,6 +244,7 @@ export class ResponsePlanner {
     }
 
     // 8. GENERAL CLINICAL INTAKE: DYNAMIC NEXT-ACTION SELECTION
+    const subfields = extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory);
     const hasChest = Boolean(state.slots.character || state.slots.location === "chest" || /\bchest\b/i.test(state.cumulativeTranscript));
     const hasNeuro = Boolean(state.slots.neurological_signs.length > 0 || /\b(headache|dizz|droop|weak|speech)\b/i.test(state.cumulativeTranscript));
 
@@ -260,18 +262,32 @@ export class ResponsePlanner {
     let nextInquiry: { topic: string; clinicalRationale: string; suggestedPhrasing: string } | undefined = undefined;
 
     if (hasChest) {
-      if (!state.slots.character && !isTopicAddressed("character")) {
+      if (!subfields.characterSeverity.character && !isTopicAddressed("character")) {
         nextInquiry = {
           topic: "character",
           clinicalRationale: "Differentiate pressure/squeezing from sharp or pleuritic pain.",
           suggestedPhrasing: "Could you describe what the discomfort feels like — is it a tight pressure, squeezing, burning, or a sharp pain?",
         };
-      } else if (!state.slots.onset && !isTopicAddressed("onset")) {
-        nextInquiry = {
-          topic: "onset",
-          clinicalRationale: "Establish onset acuity and timeline.",
-          suggestedPhrasing: "When did this begin, and did it start suddenly or build up gradually?",
-        };
+      } else if (!subfields.onset.isResolved && !isTopicAddressed("onset") && !isTopicAddressed("onset_pattern")) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+          nextInquiry = {
+            topic: "onset_pattern",
+            clinicalRationale: "Establish whether chest discomfort onset was sudden or gradual.",
+            suggestedPhrasing: "Did that chest discomfort come on suddenly, or did it build up gradually?",
+          };
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+          nextInquiry = {
+            topic: "onset_time",
+            clinicalRationale: "Establish onset timeline of chest discomfort.",
+            suggestedPhrasing: "When did that chest discomfort first begin?",
+          };
+        } else {
+          nextInquiry = {
+            topic: "onset",
+            clinicalRationale: "Establish onset acuity and timeline.",
+            suggestedPhrasing: "When did this begin, and did it start suddenly or build up gradually?",
+          };
+        }
       } else if (!state.slots.radiation && !isTopicAddressed("radiation")) {
         nextInquiry = {
           topic: "radiation",
@@ -312,12 +328,20 @@ export class ResponsePlanner {
           clinicalRationale: "Establish episode duration to differentiate transient orthostasis from persistent deficits.",
           suggestedPhrasing: "When these episodes happen, roughly how long does each one last?",
         };
-      } else if (!state.slots.onset && !isTopicAddressed("onset")) {
-        nextInquiry = {
-          topic: "onset",
-          clinicalRationale: "Establish symptom timeline and progression.",
-          suggestedPhrasing: "When did you first notice these symptoms, and did they come on all of a sudden?",
-        };
+      } else if (!subfields.onset.isResolved && !isTopicAddressed("onset") && !isTopicAddressed("onset_pattern")) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+          nextInquiry = {
+            topic: "onset_pattern",
+            clinicalRationale: "Establish whether neurological symptoms began suddenly (concerning for vascular event) or gradually.",
+            suggestedPhrasing: "Did it come on suddenly, or did it gradually get worse?",
+          };
+        } else {
+          nextInquiry = {
+            topic: "onset",
+            clinicalRationale: "Establish symptom timeline and progression.",
+            suggestedPhrasing: "When did you first notice these symptoms, and did they come on all of a sudden?",
+          };
+        }
       }
     } else {
       const hasVoiceChange = /\b(voice\s+has\s+been\s+ruined|voice\s+changed|voice\s+is\s+different|lost\s+my\s+voice|hoarse|hoarseness)\b/i.test(patientUtterance) ||
@@ -344,12 +368,26 @@ export class ResponsePlanner {
           clinicalRationale: "Patient reported painful swallowing (odynophagia); screen specifically for mechanical obstruction or inability to swallow fluids (true dysphagia).",
           suggestedPhrasing: "When you say it hurts to swallow, are you still able to swallow liquids and saliva normally?",
         };
-      } else if (!state.slots.onset && !isTopicAddressed("onset")) {
-        nextInquiry = {
-          topic: "onset",
-          clinicalRationale: "Establish symptom timeline and progression.",
-          suggestedPhrasing: "Could you tell me when this began, and whether it started suddenly or built up gradually?",
-        };
+      } else if (!subfields.onset.isResolved && !isTopicAddressed("onset") && !isTopicAddressed("onset_pattern")) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+          nextInquiry = {
+            topic: "onset_pattern",
+            clinicalRationale: "Timeline/duration is established; determine whether onset was sudden or built up gradually.",
+            suggestedPhrasing: "Did it come on suddenly, or did it gradually get worse?",
+          };
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+          nextInquiry = {
+            topic: "onset_time",
+            clinicalRationale: "Onset pattern is established; determine timeline / how long symptoms have persisted.",
+            suggestedPhrasing: "Roughly how long have you had this, or when did it begin?",
+          };
+        } else {
+          nextInquiry = {
+            topic: "onset",
+            clinicalRationale: "Establish symptom timeline and progression.",
+            suggestedPhrasing: "Could you tell me when this began, and whether it started suddenly or built up gradually?",
+          };
+        }
       } else if (hasThroat && !state.slots.known_facts.some(f => /course/i.test(f)) && !isTopicAddressed("course")) {
         nextInquiry = {
           topic: "course",
@@ -374,11 +412,17 @@ export class ResponsePlanner {
           clinicalRationale: "Screen for systemic infection and bacterial pharyngitis.",
           suggestedPhrasing: "Have you had a fever or chills?",
         };
-      } else if (!state.slots.severity && !isTopicAddressed("severity")) {
+      } else if (!subfields.characterSeverity.character && !isTopicAddressed("character")) {
+        nextInquiry = {
+          topic: "character",
+          clinicalRationale: "Establish symptom sensation and quality.",
+          suggestedPhrasing: "Could you describe what the sensation feels like — is it sharp, burning, dull, or a tight pressure?",
+        };
+      } else if (!subfields.characterSeverity.severity && !isTopicAddressed("severity")) {
         nextInquiry = {
           topic: "severity",
           clinicalRationale: "Quantify symptom pain intensity.",
-          suggestedPhrasing: "How severe is the throat pain right now on a scale from zero to ten?",
+          suggestedPhrasing: "How severe is that discomfort right now on a scale from zero to ten?",
         };
       } else if (hasThroat && !isTopicAddressed("ear_pain")) {
         nextInquiry = {
@@ -386,15 +430,49 @@ export class ResponsePlanner {
           clinicalRationale: "Screen for referred otalgia.",
           suggestedPhrasing: "Are you feeling any ear pain or pain radiating to your ears?",
         };
+      } else if (subfields.episodic.isEpisodic) {
+        if (!subfields.episodic.episodeDuration && !isTopicAddressed("duration")) {
+          nextInquiry = {
+            topic: "duration",
+            clinicalRationale: "Frequency is known; quantify duration of individual episodes.",
+            suggestedPhrasing: "When these episodes happen, roughly how long does each one last?",
+          };
+        } else if (!subfields.episodic.frequency && !isTopicAddressed("frequency")) {
+          nextInquiry = {
+            topic: "frequency",
+            clinicalRationale: "Episode duration is known; quantify frequency of occurrence.",
+            suggestedPhrasing: "How often do these episodes tend to occur?",
+          };
+        }
       }
     }
 
     const defaultPhrasing = nextInquiry?.suggestedPhrasing || "Could you tell me a little more about what you're experiencing?";
 
+    const mustAvoid = [...memory.questionsAlreadyAsked];
+    if (subfields.onset.duration) {
+      mustAvoid.push("onset", "when did it begin", "when did this begin", "how long have you had", "started a week");
+    }
+    if (subfields.onset.onsetPattern !== "unknown") {
+      mustAvoid.push("onset_pattern", "started suddenly", "built up gradually");
+    }
+    if (subfields.characterSeverity.severity) {
+      mustAvoid.push("severity", "scale from zero to ten", "0-10");
+    }
+    if (subfields.characterSeverity.character) {
+      mustAvoid.push("character", "describe what it feels like");
+    }
+    if (subfields.episodic.frequency) {
+      mustAvoid.push("frequency", "how often");
+    }
+    if (subfields.episodic.episodeDuration) {
+      mustAvoid.push("how long does each one last");
+    }
+
     return {
       primaryGoal: "ADVANCE_CLINICAL_INTAKE",
       conversationalFocus: `Directly acknowledge what the patient just stated. If they shared a new finding, validate it naturally. Then ask ONE high-yield question: ${nextInquiry?.topic || "clarification"}.`,
-      mustAvoidAsking: memory.questionsAlreadyAsked,
+      mustAvoidAsking: Array.from(new Set(mustAvoid)),
       nextHighValueInquiry: nextInquiry,
       bedsideTone: "attentive_and_methodical",
       suggestedSpokenReply: defaultPhrasing,

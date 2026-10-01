@@ -65,7 +65,8 @@ import { PeekRating } from "@/components/feedback/PeekRating";
 type AudioState =
   | "IDLE"
   | "PATIENT_LISTENING"
-  | "PROCESSING_PATIENT"
+  | "PROCESSING_TRANSCRIPTION"
+  | "PROCESSING_CLINICAL"
   | "DOCTOR_SPEAKING"
   | "BARGE_IN_DETECTED"
   | "PROCESSING_INTERRUPTION";
@@ -294,6 +295,19 @@ function formatTimer(seconds: number): string {
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
 
+function formatNaturalDuration(seconds: number): string {
+  const total = Math.max(1, Math.round(seconds || 0));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  if (mins === 0) {
+    return `${secs} sec`;
+  }
+  if (secs === 0) {
+    return `${mins} min`;
+  }
+  return `${mins} min ${secs} sec`;
+}
+
 function formatClinicalFact(raw: string): string {
   if (!raw) return "";
   const clean = raw.trim();
@@ -439,7 +453,9 @@ export default function ConsultPage() {
 
   if (audioState === "PATIENT_LISTENING") {
     contextSubtitle = "Listening to patient...";
-  } else if (audioState === "PROCESSING_PATIENT" || audioState === "PROCESSING_INTERRUPTION") {
+  } else if (audioState === "PROCESSING_TRANSCRIPTION") {
+    contextSubtitle = "Transcribing speech...";
+  } else if (audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION") {
     contextSubtitle = "Updating context...";
   } else if (audioState === "DOCTOR_SPEAKING") {
     contextSubtitle = `${activeSpeaker?.name ? activeSpeaker.name.split(",")[0] : "Doctor"} speaking...`;
@@ -481,8 +497,10 @@ export default function ConsultPage() {
   const voicePillState: VoicePillState = 
     audioState === "PATIENT_LISTENING"
       ? "listening"
-      : audioState === "PROCESSING_PATIENT"
+      : audioState === "PROCESSING_TRANSCRIPTION"
       ? "transcribing"
+      : audioState === "PROCESSING_CLINICAL"
+      ? "understanding"
       : audioState === "DOCTOR_SPEAKING"
       ? "responding"
       : audioState === "BARGE_IN_DETECTED" || audioState === "PROCESSING_INTERRUPTION"
@@ -508,7 +526,7 @@ export default function ConsultPage() {
       detail: triageData?.detectedSymptoms && triageData.detectedSymptoms.length > 0
         ? `Identified: ${triageData.detectedSymptoms.slice(0, 3).join(", ")}`
         : (hasContextFacts ? `${contextKnownFacts.length} verified facts extracted` : "Extracting symptom semantics"),
-      status: (triageData?.detectedSymptoms && triageData.detectedSymptoms.length > 0) || hasContextFacts ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+      status: (triageData?.detectedSymptoms && triageData.detectedSymptoms.length > 0) || hasContextFacts ? "completed" : (audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION" ? "running" : "pending")
     },
     {
       id: "step-deliberation",
@@ -518,7 +536,7 @@ export default function ConsultPage() {
         : (boardData?.deliberation_messages && boardData.deliberation_messages.length > 0)
         ? `${boardData.deliberation_messages.length} specialist assessments active`
         : "Cardiology, neurology, and internal medicine monitoring",
-      status: (boardData?.opinions && boardData.opinions.length > 0) || (boardData?.deliberation_messages && boardData.deliberation_messages.length > 0) ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+      status: (boardData?.opinions && boardData.opinions.length > 0) || (boardData?.deliberation_messages && boardData.deliberation_messages.length > 0) ? "completed" : (audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION" ? "running" : "pending")
     },
     {
       id: "step-esi",
@@ -532,7 +550,7 @@ export default function ConsultPage() {
       id: "step-response",
       label: "Consensus response ready & clinical guidance",
       detail: audioState === "DOCTOR_SPEAKING" ? `${activeSpeaker?.name ? activeSpeaker.name.split(",")[0] : "Doctor"} audio synthesis streaming` : (messages.length > 0 ? "SOAP encounter note compiled" : "Standby for response synthesis"),
-      status: audioState === "DOCTOR_SPEAKING" || messages.some(m => m.role === "doctor") ? "completed" : (audioState === "PROCESSING_PATIENT" ? "running" : "pending")
+      status: audioState === "DOCTOR_SPEAKING" || messages.some(m => m.role === "doctor") ? "completed" : (audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION" ? "running" : "pending")
     }
   ];
 
@@ -597,6 +615,8 @@ export default function ConsultPage() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioStateRef = useRef<AudioState>("IDLE");
   const callActiveRef = useRef<boolean>(false);
+  const consultationStartedAtRef = useRef<number | null>(null);
+  const consultationCompletedAtRef = useRef<number | null>(null);
   const lastDoctorSpeechRef = useRef<string>("");
   const lastDoctorSpeechTimeRef = useRef<number>(0);
   const preferredFemaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
@@ -718,7 +738,6 @@ export default function ConsultPage() {
       silenceTimerRef.current = null;
     }
 
-    const browserText = (forceText ?? transcriptTextRef.current ?? accumulatedTranscriptRef.current).trim();
     accumulatedTranscriptRef.current = "";
     transcriptTextRef.current = "";
     setTranscriptText("");
@@ -737,18 +756,12 @@ export default function ConsultPage() {
       mediaStreamRef.current = null;
     }
 
-    let finalTranscript = browserText;
+    let finalTranscript = "";
+    setAudioState("PROCESSING_TRANSCRIPTION");
 
-    // If browser SpeechRecognition already captured text, use it immediately — no
-    // redundant Whisper round-trip. The user already saw and verified this transcript
-    // in the VoicePill bar, so re-transcribing adds latency for no accuracy gain.
-    if (finalTranscript.length > 0) {
-      console.log("🎤 Immediate browser transcript (Whisper skipped):", finalTranscript);
-    } else if (audioBlob && audioBlob.size > 2000) {
-      // Fallback: browser SpeechRecognition returned nothing (unsupported browser,
-      // empty interim, etc.) — send audio to Local Whisper ASR for transcription.
+    // Primary Canonical Path: Transcribe recorded utterance using Local Whisper ASR
+    if (audioBlob && audioBlob.size > 2000) {
       try {
-        setAudioState("PROCESSING_PATIENT");
         const formData = new FormData();
         const ext = audioBlob.type?.includes("mp4") ? "utterance.mp4" :
                     audioBlob.type?.includes("wav") ? "utterance.wav" : "utterance.webm";
@@ -759,19 +772,23 @@ export default function ConsultPage() {
           body: formData,
         });
 
-        if (sttRes.ok) {
-          const sttData = await sttRes.json();
-          const whisperText = (sttData.transcript || "").trim();
-          if (whisperText.length > 0) {
-            console.log("🎯 Whisper ASR fallback transcript:", whisperText);
-            finalTranscript = whisperText;
-          }
-        } else {
-          const errJson = await sttRes.json().catch(() => ({}));
-          console.warn("Whisper STT endpoint notice:", errJson.error || errJson.detail);
+        if (!sttRes.ok) {
+          throw new Error(`Whisper STT failed: ${sttRes.status}`);
         }
-      } catch (asrErr) {
-        console.warn("Whisper STT fallback network error:", asrErr);
+
+        const sttData = await sttRes.json();
+        finalTranscript = (sttData.transcript || "").trim();
+        if (finalTranscript.length > 0) {
+          console.log("🎯 Canonical Local Whisper ASR Transcript:", finalTranscript);
+        }
+      } catch (err) {
+        console.error("Whisper STT failed:", err);
+        if (callActiveRef.current) {
+          setAudioState("PATIENT_LISTENING");
+        } else {
+          setAudioState("IDLE");
+        }
+        return;
       }
     }
 
@@ -779,11 +796,14 @@ export default function ConsultPage() {
       console.log("No intelligible speech detected in utterance.");
       if (callActiveRef.current) {
         setAudioState("PATIENT_LISTENING");
+      } else {
+        setAudioState("IDLE");
       }
       return;
     }
 
     console.log("🎤 Finalized patient utterance:", finalTranscript);
+    setAudioState("PROCESSING_CLINICAL");
     handleUserUtteranceRef.current?.(finalTranscript);
   }, [stopSpeechRecognitionListening]);
 
@@ -824,7 +844,14 @@ export default function ConsultPage() {
   // Text-To-Speech with Kokoro-first Neural Audio, regional accent variation & race-safe playback
   const speakDoctorResponse = useCallback(async (text: string, doctorId: string, expectedToken?: number) => {
     const cleanText = text.replace(/[*_#`\[\]()]/g, "").trim();
-    if (!cleanText) return;
+    if (!cleanText) {
+      if (callActiveRef.current) {
+        setAudioState("PATIENT_LISTENING");
+      } else {
+        setAudioState("IDLE");
+      }
+      return;
+    }
 
     // 1. Resolve immutable doctor persona strictly from doctorId (server-authoritative)
     const targetDoctor = getDoctorById(doctorId);
@@ -1283,6 +1310,18 @@ export default function ConsultPage() {
     startSpeechRecognitionListeningRef.current = startSpeechRecognitionListening;
   }, [startSpeechRecognitionListening]);
 
+  // Active Consultation Live Timer Effect
+  useEffect(() => {
+    if (!callActive) return;
+    const interval = setInterval(() => {
+      if (consultationStartedAtRef.current) {
+        const elapsed = Math.floor((Date.now() - consultationStartedAtRef.current) / 1000);
+        setCallDuration(elapsed);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [callActive]);
+
   // Start consultation session
   const startConsultation = async (doc?: DoctorProfile) => {
     const doctorToUse = doc || selectedDoctor;
@@ -1297,6 +1336,9 @@ export default function ConsultPage() {
       voiceGender: doctorToUse.voiceGender,
       voiceEngine: "Kokoro",
     });
+    const now = Date.now();
+    consultationStartedAtRef.current = now;
+    consultationCompletedAtRef.current = null;
     callActiveRef.current = true;
     setCallActive(true);
     setCallDuration(0);
@@ -1317,6 +1359,12 @@ export default function ConsultPage() {
 
   // End consultation session
   const endConsultation = () => {
+    const completedAt = Date.now();
+    consultationCompletedAtRef.current = completedAt;
+    const startedAt = consultationStartedAtRef.current || completedAt;
+    const elapsedSeconds = Math.max(1, Math.round((completedAt - startedAt) / 1000));
+    setCallDuration(elapsedSeconds);
+
     setCallActive(false);
     callActiveRef.current = false;
     setAudioState("IDLE");
@@ -1338,6 +1386,8 @@ export default function ConsultPage() {
   // Return to lobby and start new consultation
   const startNewConsultation = () => {
     stopSpeechRecognitionListening();
+    consultationStartedAtRef.current = null;
+    consultationCompletedAtRef.current = null;
     setMessages([]);
     setTriageData(null);
     setBoardData(null);
@@ -1364,7 +1414,7 @@ export default function ConsultPage() {
       setCallActive(true);
     }
 
-    setAudioState(isBargeIn ? "PROCESSING_INTERRUPTION" : "PROCESSING_PATIENT");
+    setAudioState(isBargeIn ? "PROCESSING_INTERRUPTION" : "PROCESSING_CLINICAL");
     setTranscriptText("");
     transcriptTextRef.current = "";
     accumulatedTranscriptRef.current = "";
@@ -1398,8 +1448,11 @@ export default function ConsultPage() {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
+      if (!res.ok) {
+        throw new Error(`Clinical response failed: ${res.status}`);
+      }
+
+      const data = await res.json();
         const doctorReplyText = data.doctorReply || "I have received your symptoms and documented them.";
 
         const respondingDoctorId = data.doctor?.id || selectedDoctor.id;
@@ -1482,10 +1535,13 @@ export default function ConsultPage() {
         }
 
         speakDoctorResponse(doctorReplyText, respondingDoctorId);
-      }
     } catch (err) {
       console.error("Consultation chat error:", err);
-      setAudioState("IDLE");
+      if (callActiveRef.current) {
+        setAudioState("PATIENT_LISTENING");
+      } else {
+        setAudioState("IDLE");
+      }
     }
   };
 
@@ -2078,7 +2134,7 @@ export default function ConsultPage() {
                 <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${
                   triageData?.isEmergency
                     ? "text-rose-800 bg-rose-50 border-rose-200"
-                    : audioState === "PROCESSING_PATIENT"
+                    : (audioState === "PROCESSING_TRANSCRIPTION" || audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION")
                     ? "text-cyan-800 bg-cyan-50 border-cyan-200"
                     : "text-emerald-800 bg-emerald-50 border-emerald-200"
                 }`}>
@@ -2087,7 +2143,7 @@ export default function ConsultPage() {
                   } animate-pulse`} />
                   {triageData?.isEmergency
                     ? "Emergency Detected"
-                    : audioState === "PROCESSING_PATIENT"
+                    : (audioState === "PROCESSING_TRANSCRIPTION" || audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION")
                     ? "Analyzing"
                     : callActive
                     ? "Active"
@@ -2441,7 +2497,7 @@ export default function ConsultPage() {
                             History Completeness
                           </h3>
                           <p className="text-xs sm:text-sm text-slate-600 font-medium flex items-center gap-1.5">
-                            {(audioState === "PATIENT_LISTENING" || audioState === "PROCESSING_PATIENT" || audioState === "PROCESSING_INTERRUPTION") && (
+                            {(audioState === "PATIENT_LISTENING" || audioState === "PROCESSING_TRANSCRIPTION" || audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION") && (
                               <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
                             )}
                             <span>{contextSubtitle}</span>
@@ -3023,43 +3079,65 @@ export default function ConsultPage() {
               <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs flex flex-col items-center text-center space-y-4">
                 <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 tracking-wider uppercase font-mono shadow-2xs">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>CONSULTATION COMPLETE · ENCOUNTER RECORD SEALED</span>
+                  <span>CONSULTATION COMPLETE</span>
                 </div>
 
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-950 tracking-tight">
-                  Consultation complete with {selectedDoctor.name}
+                  Your consultation with {selectedDoctor.name.split(",")[0]}
                 </h1>
                 <p className="text-sm sm:text-base text-slate-600 max-w-xl font-normal leading-relaxed">
-                  Clinical history recorded, symptoms cross-examined against ESI protocols, and SOAP encounter documentation generated with cryptographic SHA-256 integrity.
+                  Your clinical history has been recorded and your assessment is ready to review.
                 </p>
 
-                {/* Clinical Takeaways Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-2xl pt-2">
-                  {/* Triage Level */}
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 text-left">
-                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Triage Assessment</div>
-                    <div className="text-base font-extrabold text-slate-900 mt-1">
-                      {triageData?.triageLevel ? `ESI Level ${triageData.esiScore} (${triageData.triageLevel.toUpperCase()})` : "ESI Level 2 (Emergent)"}
+                {/* Clean 3-Card Summary Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 w-full max-w-2xl pt-2">
+                  {/* Card 1: Consultation Duration */}
+                  <div className="p-4.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-left flex flex-col justify-between">
+                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Consultation</div>
+                    <div className="text-xl sm:text-2xl font-black text-slate-900 mt-1.5 font-sans">
+                      {formatNaturalDuration(callDuration)}
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">Deterministic Safety Verified</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {messages.filter(m => m.role === "patient").length || 1} answers recorded
+                    </div>
                   </div>
 
-                  {/* Duration */}
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 text-left">
-                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Encounter Duration</div>
-                    <div className="text-base font-extrabold text-slate-900 mt-1 font-mono">
-                      {formatTimer(callDuration)}
+                  {/* Card 2: Assessment */}
+                  <div className="p-4.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-left flex flex-col justify-between">
+                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Assessment</div>
+                    <div className={`text-xl sm:text-2xl font-black mt-1.5 ${
+                      triageData?.triageLevel === "emergency" ? "text-rose-600" : "text-slate-900"
+                    }`}>
+                      {triageData?.triageLevel === "emergency"
+                        ? "Immediate attention"
+                        : triageData?.triageLevel === "priority"
+                        ? "Priority care"
+                        : (triageData?.soap?.assessment || (triageData?.esiScore != null && triageData.triageLevel !== "gathering_history"))
+                        ? "Review ready"
+                        : "Assessment pending"}
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">{messages.length} Utterances Processed</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {triageData?.triageLevel === "emergency"
+                        ? "Emergency evaluation indicated"
+                        : (triageData?.soap?.assessment || (triageData?.esiScore != null && triageData.triageLevel !== "gathering_history"))
+                        ? "Symptoms reviewed"
+                        : "Intake recorded for clinician review"}
+                    </div>
                   </div>
 
-                  {/* ICD-10 Coding */}
-                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 text-left">
-                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Diagnostic Coding</div>
-                    <div className="text-base font-extrabold text-cyan-900 mt-1 font-mono">
-                      {(triageData?.icdCodes && triageData.icdCodes[0]) || "ICD-10 R07.9"}
+                  {/* Card 3: Record */}
+                  <div className="p-4.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-left flex flex-col justify-between">
+                    <div className="text-[11px] font-mono font-bold text-slate-500 uppercase">Record</div>
+                    <div className="text-xl sm:text-2xl font-black text-slate-900 mt-1.5">
+                      {triageData?.soap?.subjective && triageData?.soap?.assessment
+                        ? "SOAP note available"
+                        : "Intake summary ready"}
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">HL7 FHIR Encoded</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {triageData?.soap?.subjective && triageData?.soap?.assessment
+                        ? "Clinical documentation compiled"
+                        : "Patient narrative documented"}
+                    </div>
                   </div>
                 </div>
 
@@ -3096,38 +3174,7 @@ export default function ConsultPage() {
           )}
         </AnimatePresence>
 
-        {/* CLINICAL ENCOUNTER SOAP REVIEW & FINALIZATION MODAL */}
-        <SoapReportModal
-          isOpen={showSoapModal}
-          onClose={() => setShowSoapModal(false)}
-          encounter={{
-            id: `ENC-${Date.now().toString().slice(-6)}`,
-            patientName: patientDisplayName,
-            doctorId: selectedDoctor.id,
-            doctorName: selectedDoctor.name,
-            specialty: selectedDoctor.department,
-            callDuration: callDuration,
-            transcript: messages.map((m) => ({
-              role: m.role,
-              text: m.text,
-              timestamp: m.timestamp,
-            })),
-            triageLevel: triageData?.triageLevel || (boardData?.phase === "decided" ? "priority" : "routine"),
-            triageTitle: triageData?.triageTitle || "Clinical Voice Consultation Evaluation",
-            esiScore: triageData?.esiScore ?? (triageData?.triageLevel === "emergency" ? 2 : 3),
-            detectedSymptoms: triageData?.detectedSymptoms || [],
-            icdCodes: triageData?.icdCodes || ["Z76.0"],
-            recommendedAction: triageData?.recommendedAction || "Consultation complete. Follow clinical disposition.",
-            soap: triageData?.soap || {
-              subjective: "",
-              objective: "",
-              assessment: "",
-              plan: "",
-            },
-            auditSha256: boardData?.trace?.audit_sha256,
-            userId: user?.id,
-          }}
-        />
+
 
         {/* EMERGENCY CALL CONFIRMATION MODAL */}
         {emergencyCallTarget?.isOpen && (
@@ -3234,6 +3281,39 @@ export default function ConsultPage() {
         </div>
 
       </main>
+
+      {/* CLINICAL ENCOUNTER SOAP REVIEW & FINALIZATION MODAL (ROOT LAYER OVERLAY) */}
+      <SoapReportModal
+        isOpen={showSoapModal}
+        onClose={() => setShowSoapModal(false)}
+        encounter={{
+          id: `ENC-${Date.now().toString().slice(-6)}`,
+          patientName: patientDisplayName,
+          doctorId: selectedDoctor.id,
+          doctorName: selectedDoctor.name,
+          specialty: selectedDoctor.department,
+          callDuration: callDuration,
+          transcript: messages.map((m) => ({
+            role: m.role,
+            text: m.text,
+            timestamp: m.timestamp,
+          })),
+          triageLevel: triageData?.triageLevel || (boardData?.phase === "decided" ? "priority" : "routine"),
+          triageTitle: triageData?.triageTitle || "Clinical Voice Consultation Evaluation",
+          esiScore: triageData?.esiScore ?? null,
+          detectedSymptoms: triageData?.detectedSymptoms || [],
+          icdCodes: triageData?.icdCodes || [],
+          recommendedAction: triageData?.recommendedAction || "Consultation complete. Follow clinical disposition.",
+          soap: triageData?.soap || {
+            subjective: "",
+            objective: "",
+            assessment: "",
+            plan: "",
+          },
+          auditSha256: boardData?.trace?.audit_sha256,
+          userId: user?.id,
+        }}
+      />
 
       <AppFooter />
     </div>

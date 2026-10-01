@@ -115,7 +115,7 @@ export function VoicePill({
           <div className="flex items-center gap-2 text-xs text-slate-300 font-sans">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
             <span className="font-mono text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
-              {state === "understanding" ? "Processing..." : "Transcribing..."}
+              {state === "understanding" ? "Reviewing..." : "Transcribing..."}
             </span>
             {transcriptSnippet && (
               <span className="text-slate-400 truncate italic">
