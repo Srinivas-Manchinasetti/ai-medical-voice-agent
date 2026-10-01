@@ -421,6 +421,11 @@ export default function ConsultPage() {
   const [micPermissionError, setMicPermissionError] = useState<string | null>(null);
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pendingDoctorMessage, setPendingDoctorMessage] = useState<{
+    id: string;
+    doctorName: string;
+    doctorSpecialty?: string;
+  } | null>(null);
   const [triageData, setTriageData] = useState<LiveTriageData | null>(null);
   const [boardData, setBoardData] = useState<BoardData | null>(null);
   const [interviewState, setInterviewState] = useState<any>(null);
@@ -626,6 +631,7 @@ export default function ConsultPage() {
   const preferredFemaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const preferredMaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const persistentAudioRef = useRef<HTMLAudioElement | null>(null);
   const playbackSessionTokenRef = useRef<number>(0);
 
   // Natural conversational voice intake refs
@@ -670,6 +676,23 @@ export default function ConsultPage() {
     });
   };
 
+  // Hardware Audio Latency Inspector via Web Audio API (baseLatency + outputLatency)
+  const getHardwareAudioLatency = useCallback((): number | null => {
+    if (typeof window === "undefined") return null;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return null;
+      const ctx = new AudioCtx();
+      const latency = (((ctx as any).outputLatency || 0) + (ctx.baseLatency || 0)) * 1000;
+      if (ctx.state !== "closed") {
+        ctx.close().catch(() => {});
+      }
+      return Math.round(latency * 10) / 10;
+    } catch {
+      return null;
+    }
+  }, []);
+
   // Safely stops and unloads active HTML5 AudioElement without triggering spurious error events
   const stopAndClearActiveAudio = useCallback(() => {
     if (activeAudioRef.current) {
@@ -678,6 +701,9 @@ export default function ConsultPage() {
         activeAudioRef.current = null;
         audio.onended = null;
         audio.onerror = null;
+        audio.onplaying = null;
+        audio.onloadeddata = null;
+        audio.oncanplay = null;
         audio.pause();
         audio.removeAttribute("src");
         audio.load();
@@ -816,6 +842,7 @@ export default function ConsultPage() {
     console.log("⚡ Interrupting doctor speech immediately.");
     // Invalidate any in-flight async TTS generation so late-arriving audio is suppressed
     playbackSessionTokenRef.current += 1;
+    setPendingDoctorMessage(null);
 
     stopAndClearActiveAudio();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -843,12 +870,59 @@ export default function ConsultPage() {
         startSpeechRecognitionListeningRef.current?.();
       }, 100);
     }
+  }, [stopAndClearActiveAudio]);
+
+  // Telemetry logger for empirical lifecycle latency breakdown
+  const logPlaybackLifecycle = useCallback((t: {
+    doctorName: string;
+    engine: string;
+    t_clinical_received?: number;
+    t_tts_started: number;
+    t_tts_received: number;
+    t_blob_ready: number;
+    t_audio_loaded: number;
+    t_play_called: number;
+    t_playback_started: number;
+    t_text_rendered?: number;
+    hardwareOutputLatencyMs?: number | null;
+  }) => {
+    const base = t.t_clinical_received ?? t.t_tts_started;
+    const p = (ts?: number) => ts !== undefined ? `+${(ts - base).toFixed(1)} ms` : "N/A";
+    const delta = (t2: number, t1: number) => `+${(t2 - t1).toFixed(1)} ms`;
+    const gap = t.t_text_rendered && t.t_playback_started ? Math.abs(t.t_text_rendered - t.t_playback_started).toFixed(1) : "0.0";
+
+    console.log(
+      `%c[MedVoice Audio Timing] ── Full Lifecycle Breakdown ─────────────────────\n` +
+      `  1. Clinical response received:     ${p(t.t_clinical_received)}  (baseline)\n` +
+      `  2. TTS request started:            ${p(t.t_tts_started)}  (delta: ${delta(t.t_tts_started, base)})\n` +
+      `  3. TTS response received:          ${p(t.t_tts_received)}  (delta: ${delta(t.t_tts_received, t.t_tts_started)} ⚠️ DOMINANT DELAY: Server Synthesis)\n` +
+      `  4. Audio blob ready:               ${p(t.t_blob_ready)}  (delta: ${delta(t.t_blob_ready, t.t_tts_received)})\n` +
+      `  5. Audio decoded/loaded:           ${p(t.t_audio_loaded)}  (delta: ${delta(t.t_audio_loaded, t.t_blob_ready)})\n` +
+      `  6. audio.play() called:            ${p(t.t_play_called)}  (delta: ${delta(t.t_play_called, t.t_audio_loaded)})\n` +
+      `  7. Actual playback started:        ${p(t.t_playback_started)}  (delta: ${delta(t.t_playback_started, t.t_play_called)} hardware buffer)\n` +
+      `  8. Doctor text rendered:           ${p(t.t_text_rendered)}  (SYNCHRONIZED: text-to-voice gap: ${gap} ms)\n` +
+      `────────────────────────────────────────────────────────────────────────\n` +
+      `  Doctor: ${t.doctorName} | Engine: ${t.engine}\n` +
+      `  Hardware Output Latency: ${t.hardwareOutputLatencyMs !== null && t.hardwareOutputLatencyMs !== undefined ? `${t.hardwareOutputLatencyMs} ms` : "Unreported by OS"}\n` +
+      `────────────────────────────────────────────────────────────────────────`,
+      "color: #06b6d4; font-family: monospace; font-size: 11px; font-weight: bold;"
+    );
   }, []);
 
-  // Text-To-Speech with Kokoro-first Neural Audio, regional accent variation & race-safe playback
-  const speakDoctorResponse = useCallback(async (text: string, doctorId: string, expectedToken?: number) => {
+  // Text-To-Speech with Kokoro-first Neural Audio, regional accent variation & race-safe synchronized playback
+  const speakDoctorResponse = useCallback(async (
+    text: string,
+    doctorId: string,
+    expectedToken?: number,
+    options?: {
+      clinicalReceivedAt?: number;
+      onPlaybackStart?: () => void;
+      onFallback?: () => void;
+    }
+  ) => {
     const cleanText = text.replace(/[*_#`\[\]()]/g, "").trim();
     if (!cleanText) {
+      options?.onFallback?.();
       if (callActiveRef.current) {
         setAudioState("PATIENT_LISTENING");
       } else {
@@ -888,9 +962,27 @@ export default function ConsultPage() {
 
     lastDoctorSpeechRef.current = cleanText.toLowerCase();
     lastDoctorSpeechTimeRef.current = Date.now();
-    setAudioState("DOCTOR_SPEAKING");
+
+    // Guard to ensure text commit happens exactly once per turn
+    let textCommitted = false;
+    const commitDoctorText = () => {
+      if (textCommitted) return;
+      textCommitted = true;
+      if (playbackSessionTokenRef.current === token) {
+        options?.onPlaybackStart?.();
+      }
+    };
+
+    // Safety timeout: If playback doesn't start within 10s (e.g. autoplay policy blocked or network stall), force text display
+    const safetyCommitTimer = setTimeout(() => {
+      if (playbackSessionTokenRef.current === token && !textCommitted) {
+        console.warn(`[MedVoice Audio Safety] Playback timeout reached; committing text transcript to preserve UX.`);
+        commitDoctorText();
+      }
+    }, 10000);
 
     const handleSpeechEnd = () => {
+      clearTimeout(safetyCommitTimer);
       if (playbackSessionTokenRef.current !== token) return;
 
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -912,10 +1004,12 @@ export default function ConsultPage() {
 
     // Helper for deterministic, persona-safe browser TTS fallback (Only used when primary neural provider is offline/unconfigured)
     const playBrowserFallback = (targetLocale?: string) => {
+      clearTimeout(safetyCommitTimer);
       if (playbackSessionTokenRef.current !== token) return;
       console.warn(`[MedVoice Audio Fallback] Primary TTS engine unavailable for ${targetDoctor.name} (${targetDoctor.voiceProfile?.provider} / ${targetDoctor.voiceId}). Attempting deterministic fallback...`);
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
         setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Text Only" }));
+        commitDoctorText();
         handleSpeechEnd();
         return;
       }
@@ -979,6 +1073,7 @@ export default function ConsultPage() {
       if (!chosenVoice) {
         console.warn(`[MedVoice Audio Safety] No appropriate ${targetDoctor.voiceGender} voice found in browser for ${targetDoctor.name}. Suppressing audio to preserve persona identity.`);
         setActiveSpeaker((prev) => ({ ...prev, voiceEngine: "Text Only" }));
+        commitDoctorText();
         setClinicalToasts((prev) => [
           ...prev,
           {
@@ -998,20 +1093,39 @@ export default function ConsultPage() {
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.voice = chosenVoice;
       utterance.rate = targetDoctor.voiceProfile?.speed || 1.0;
-      utterance.pitch = 1.0; // Clean prosody: character derives from voice identity and rate, not pitch distortion
+      utterance.pitch = 1.0;
 
       utterance.onstart = () => {
         if (playbackSessionTokenRef.current === token) {
           setAudioState("DOCTOR_SPEAKING");
+          commitDoctorText();
+          const t_playback_started = performance.now();
+          logPlaybackLifecycle({
+            doctorName: targetDoctor.name,
+            engine: engineLabel,
+            t_clinical_received: options?.clinicalReceivedAt,
+            t_tts_started: options?.clinicalReceivedAt || t_playback_started,
+            t_tts_received: t_playback_started,
+            t_blob_ready: t_playback_started,
+            t_audio_loaded: t_playback_started,
+            t_play_called: t_playback_started,
+            t_playback_started,
+            t_text_rendered: t_playback_started,
+            hardwareOutputLatencyMs: getHardwareAudioLatency(),
+          });
         }
       };
       utterance.onend = handleSpeechEnd;
-      utterance.onerror = handleSpeechEnd;
+      utterance.onerror = () => {
+        commitDoctorText();
+        handleSpeechEnd();
+      };
 
       window.speechSynthesis.speak(utterance);
     };
 
     // 4. Primary Path: Multi-Provider Neural Audio Dispatcher (/api/voice/tts)
+    const t_tts_started = performance.now();
     try {
       console.log(`[MedVoice Audio] Requesting speech via TTS Dispatcher (provider: ${targetDoctor.voiceProfile?.provider || "kokoro"}, voice: ${targetDoctor.voiceId}) for ${targetDoctor.name}...`);
       const response = await fetch("/api/voice/tts", {
@@ -1024,7 +1138,10 @@ export default function ConsultPage() {
         }),
       });
 
+      const t_tts_received = performance.now();
+
       if (playbackSessionTokenRef.current !== token) {
+        clearTimeout(safetyCommitTimer);
         console.log(`[MedVoice Audio] Discarding in-flight TTS result for ${targetDoctor.name} (token mismatch).`);
         return;
       }
@@ -1046,17 +1163,40 @@ export default function ConsultPage() {
       }
 
       const blob = await response.blob();
+      const t_blob_ready = performance.now();
+
       if (playbackSessionTokenRef.current !== token) {
+        clearTimeout(safetyCommitTimer);
         return;
       }
 
       const engineHeader = response.headers.get("X-TTS-Engine") || (targetDoctor.voiceProfile?.provider === "azure-speech" ? "Azure Speech" : "Kokoro");
 
       const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
+      
+      // Reuse persistent warmed Audio element rather than allocating a new DOM element per turn
+      let audio = persistentAudioRef.current;
+      if (!audio) {
+        audio = new Audio();
+        audio.preload = "auto";
+        persistentAudioRef.current = audio;
+      }
       activeAudioRef.current = audio;
 
+      // Detach any previous listeners before binding new ones
+      audio.onended = null;
+      audio.onerror = null;
+      audio.onplaying = null;
+      audio.onloadeddata = null;
+      audio.oncanplay = null;
+
+      let t_audio_loaded = performance.now();
+      audio.onloadeddata = () => {
+        t_audio_loaded = performance.now();
+      };
+
       audio.onended = () => {
+        clearTimeout(safetyCommitTimer);
         URL.revokeObjectURL(audioUrl);
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
@@ -1065,6 +1205,7 @@ export default function ConsultPage() {
       };
 
       audio.onerror = () => {
+        clearTimeout(safetyCommitTimer);
         if (playbackSessionTokenRef.current !== token) return;
         const mediaErr = audio.error;
         const detail = mediaErr ? `Code ${mediaErr.code}: ${mediaErr.message || "playback issue"}` : "media decode notice";
@@ -1073,30 +1214,65 @@ export default function ConsultPage() {
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
         }
+        commitDoctorText();
         playBrowserFallback(targetDoctor.voiceProfile?.locale);
       };
 
+      // Playback Synchronization: Trigger text reveal and DOCTOR_SPEAKING state at the exact moment audio output begins
+      audio.onplaying = () => {
+        clearTimeout(safetyCommitTimer);
+        if (playbackSessionTokenRef.current !== token) return;
+        const t_playback_started = performance.now();
+        setAudioState("DOCTOR_SPEAKING");
+        commitDoctorText();
+        const t_text_rendered = performance.now();
+
+        logPlaybackLifecycle({
+          doctorName: targetDoctor.name,
+          engine: engineHeader,
+          t_clinical_received: options?.clinicalReceivedAt,
+          t_tts_started,
+          t_tts_received,
+          t_blob_ready,
+          t_audio_loaded,
+          t_play_called,
+          t_playback_started,
+          t_text_rendered,
+          hardwareOutputLatencyMs: getHardwareAudioLatency(),
+        });
+      };
+
+      audio.removeAttribute("src");
+      audio.src = audioUrl;
+      audio.load();
+
+      const t_play_called = performance.now();
       audio.play().then(() => {
         setActiveSpeaker((prev) => ({ ...prev, voiceEngine: engineHeader }));
-        console.log(`[MedVoice Audio] ${engineHeader} audio playback started successfully for ${targetDoctor.name}.`);
+        console.log(`[MedVoice Audio] ${engineHeader} audio play() request dispatched successfully for ${targetDoctor.name}.`);
       }).catch((playErr: any) => {
+        clearTimeout(safetyCommitTimer);
         if (playbackSessionTokenRef.current !== token) return;
         console.warn(`[MedVoice Audio] Audio play() notice: ${playErr?.message || playErr}. Transitioning to fallback...`);
         audio.onended = null;
         audio.onerror = null;
+        audio.onplaying = null;
         URL.revokeObjectURL(audioUrl);
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
         }
+        commitDoctorText();
         playBrowserFallback(targetDoctor.voiceProfile?.locale);
       });
     } catch (err: any) {
+      clearTimeout(safetyCommitTimer);
       console.warn(`[MedVoice Audio] Synthesis route error for ${targetDoctor.name} (${targetDoctor.voiceId}):`, err.message);
+      commitDoctorText();
       if (playbackSessionTokenRef.current === token) {
         playBrowserFallback(targetDoctor.voiceProfile?.locale);
       }
     }
-  }, [stopSpeechRecognitionListening]);
+  }, [stopSpeechRecognitionListening, stopAndClearActiveAudio, logPlaybackLifecycle, getHardwareAudioLatency]);
 
   // Active Consultation Speaker Transition Handler
   const handleSelectDoctor = useCallback((doc: DoctorProfile) => {
@@ -1162,10 +1338,31 @@ export default function ConsultPage() {
       doctorId: doc.id,
     };
 
-    setMessages((prev) => [...prev, systemNotice, doctorMessage]);
+    setMessages((prev) => [...prev, systemNotice]);
+    setPendingDoctorMessage({
+      id: doctorMessage.id,
+      doctorName: doc.name,
+      doctorSpecialty: doc.department,
+    });
 
     // 5. Synthesize intro using new doctor's authoritative voice
-    speakDoctorResponse(greetingText, doc.id, currentToken);
+    speakDoctorResponse(greetingText, doc.id, currentToken, {
+      clinicalReceivedAt: performance.now(),
+      onPlaybackStart: () => {
+        setPendingDoctorMessage(null);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === doctorMessage.id)) return prev;
+          return [...prev, doctorMessage];
+        });
+      },
+      onFallback: () => {
+        setPendingDoctorMessage(null);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === doctorMessage.id)) return prev;
+          return [...prev, doctorMessage];
+        });
+      },
+    });
   }, [selectedDoctor.id, sessionMode, stopSpeechRecognitionListening, speakDoctorResponse]);
 
   // Speech Recognition with Continuous Intake, MediaRecorder audio buffering & Natural Silence Detection
@@ -1349,6 +1546,15 @@ export default function ConsultPage() {
     setMicPermissionError(null);
     setSessionMode("ACTIVE_CONSULTATION");
 
+    // Pre-warm the persistent HTML5 AudioElement during the user gesture to prime autoplay privileges
+    if (typeof window !== "undefined" && !persistentAudioRef.current) {
+      try {
+        const warmAudio = new Audio();
+        warmAudio.preload = "auto";
+        persistentAudioRef.current = warmAudio;
+      } catch {}
+    }
+
     const initialGreeting: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "doctor",
@@ -1357,12 +1563,30 @@ export default function ConsultPage() {
       doctorName: doctorToUse.name,
       doctorSpecialty: doctorToUse.department
     };
-    setMessages([initialGreeting]);
-    speakDoctorResponse(doctorToUse.greeting, doctorToUse.id);
+
+    setPendingDoctorMessage({
+      id: initialGreeting.id,
+      doctorName: doctorToUse.name,
+      doctorSpecialty: doctorToUse.department,
+    });
+
+    speakDoctorResponse(doctorToUse.greeting, doctorToUse.id, undefined, {
+      clinicalReceivedAt: performance.now(),
+      onPlaybackStart: () => {
+        setPendingDoctorMessage(null);
+        setMessages([initialGreeting]);
+      },
+      onFallback: () => {
+        setPendingDoctorMessage(null);
+        setMessages([initialGreeting]);
+      },
+    });
   };
 
   // End consultation session
   const endConsultation = () => {
+    playbackSessionTokenRef.current += 1;
+    setPendingDoctorMessage(null);
     const completedAt = Date.now();
     consultationCompletedAtRef.current = completedAt;
     const startedAt = consultationStartedAtRef.current || completedAt;
@@ -1389,6 +1613,8 @@ export default function ConsultPage() {
 
   // Return to lobby and start new consultation
   const startNewConsultation = () => {
+    playbackSessionTokenRef.current += 1;
+    setPendingDoctorMessage(null);
     stopSpeechRecognitionListening();
     consultationStartedAtRef.current = null;
     consultationCompletedAtRef.current = null;
@@ -1456,91 +1682,114 @@ export default function ConsultPage() {
         throw new Error(`Clinical response failed: ${res.status}`);
       }
 
+      const clinicalReceivedTime = performance.now();
       const data = await res.json();
-        const doctorReplyText = data.doctorReply || "I have received your symptoms and documented them.";
+      const doctorReplyText = data.doctorReply || "I have received your symptoms and documented them.";
 
-        const respondingDoctorId = data.doctor?.id || selectedDoctor.id;
-        const respondingDoctorProfile = getDoctorById(respondingDoctorId) || selectedDoctor;
-        const respondingDoctorName = data.doctor?.name || respondingDoctorProfile.name;
-        const respondingDoctorSpecialty = data.doctor?.specialty || respondingDoctorProfile.department;
+      const respondingDoctorId = data.doctor?.id || selectedDoctor.id;
+      const respondingDoctorProfile = getDoctorById(respondingDoctorId) || selectedDoctor;
+      const respondingDoctorName = data.doctor?.name || respondingDoctorProfile.name;
+      const respondingDoctorSpecialty = data.doctor?.specialty || respondingDoctorProfile.department;
 
-        setActiveSpeaker({
-          id: respondingDoctorProfile.id,
-          name: respondingDoctorProfile.name,
-          voiceId: respondingDoctorProfile.voiceId,
-          specialty: respondingDoctorProfile.specialty,
-          department: respondingDoctorProfile.department,
-          avatarUrl: respondingDoctorProfile.avatarUrl,
-          voiceGender: respondingDoctorProfile.voiceGender,
-          voiceEngine: "Kokoro",
-        });
+      setActiveSpeaker({
+        id: respondingDoctorProfile.id,
+        name: respondingDoctorProfile.name,
+        voiceId: respondingDoctorProfile.voiceId,
+        specialty: respondingDoctorProfile.specialty,
+        department: respondingDoctorProfile.department,
+        avatarUrl: respondingDoctorProfile.avatarUrl,
+        voiceGender: respondingDoctorProfile.voiceGender,
+        voiceEngine: "Kokoro",
+      });
 
-        const newDoctorMessage: ChatMessage = {
-          id: `msg-${Date.now() + 1}`,
-          role: "doctor",
-          text: doctorReplyText,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          doctorName: respondingDoctorName,
-          doctorSpecialty: respondingDoctorSpecialty
-        };
+      const newDoctorMessage: ChatMessage = {
+        id: `msg-${Date.now() + 1}`,
+        role: "doctor",
+        text: doctorReplyText,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        doctorName: respondingDoctorName,
+        doctorSpecialty: respondingDoctorSpecialty
+      };
 
-        setMessages((prev) => [...prev, newDoctorMessage]);
+      // Set pending state to display doctor formulation indicator during TTS synthesis
+      setPendingDoctorMessage({
+        id: newDoctorMessage.id,
+        doctorName: respondingDoctorName,
+        doctorSpecialty: respondingDoctorSpecialty,
+      });
 
-        if (data.interviewState) {
-          setInterviewState(data.interviewState);
+      if (data.interviewState) {
+        setInterviewState(data.interviewState);
+      }
+
+      if (data.nearbyHospitals && data.nearbyHospitals.length > 0) {
+        setNearbyHospitals(data.nearbyHospitals);
+        // If the patient expressed an access constraint, proactively bring attention to Care Options
+        if (data.interviewState?.structuredHistory?.accessConstraints?.financial || data.interviewState?.structuredHistory?.accessConstraints?.remoteLocation) {
+          setActiveRightTab("care");
         }
+      }
 
-        if (data.nearbyHospitals && data.nearbyHospitals.length > 0) {
-          setNearbyHospitals(data.nearbyHospitals);
-          // If the patient expressed an access constraint, proactively bring attention to Care Options
-          if (data.interviewState?.structuredHistory?.accessConstraints?.financial || data.interviewState?.structuredHistory?.accessConstraints?.remoteLocation) {
-            setActiveRightTab("care");
-          }
+      if (data.triage) {
+        setTriageData(data.triage);
+        if (data.triage.triageLevel === "emergency") {
+          setClinicalToasts((prev) => [
+            ...prev,
+            {
+              id: `triage-emerg-${Date.now()}`,
+              type: "warning",
+              title: "ESI-2 Emergency Triage Flagged",
+              description: "Critical clinical invariants flagged. Immediate hospital ED escalation recommended."
+            }
+          ]);
+        } else if (data.triage.esiScore && data.triage.esiScore <= 3) {
+          setClinicalToasts((prev) => [
+            ...prev,
+            {
+              id: `triage-esi-${Date.now()}`,
+              type: "info",
+              title: `ESI-${data.triage.esiScore} Urgency Classified`,
+              description: `Triage rating: ${data.triage.triageTitle || "Priority Outpatient Evaluation"}.`
+            }
+          ]);
         }
+      }
+      if (data.board) {
+        setBoardData(data.board);
+        const isHistoryGathering =
+          data.board.phase === "dormant" ||
+          data.board.phase === "gathering_history" ||
+          data.board.phase === "active_inquiring" ||
+          data.triage?.triageLevel === "gathering_history" ||
+          data.interviewState?.informationState === "insufficient";
 
-        if (data.triage) {
-          setTriageData(data.triage);
-          if (data.triage.triageLevel === "emergency") {
-            setClinicalToasts((prev) => [
-              ...prev,
-              {
-                id: `triage-emerg-${Date.now()}`,
-                type: "warning",
-                title: "ESI-2 Emergency Triage Flagged",
-                description: "Critical clinical invariants flagged. Immediate hospital ED escalation recommended."
-              }
-            ]);
-          } else if (data.triage.esiScore && data.triage.esiScore <= 3) {
-            setClinicalToasts((prev) => [
-              ...prev,
-              {
-                id: `triage-esi-${Date.now()}`,
-                type: "info",
-                title: `ESI-${data.triage.esiScore} Urgency Classified`,
-                description: `Triage rating: ${data.triage.triageTitle || "Priority Outpatient Evaluation"}.`
-              }
-            ]);
-          }
+        if (isHistoryGathering) {
+          setActiveRightTab("context");
+        } else {
+          setActiveRightTab("context");
         }
-        if (data.board) {
-          setBoardData(data.board);
-          const isHistoryGathering =
-            data.board.phase === "dormant" ||
-            data.board.phase === "gathering_history" ||
-            data.board.phase === "active_inquiring" ||
-            data.triage?.triageLevel === "gathering_history" ||
-            data.interviewState?.informationState === "insufficient";
+      }
 
-          if (isHistoryGathering) {
-            setActiveRightTab("context");
-          } else {
-            setActiveRightTab("context");
-          }
-        }
-
-        speakDoctorResponse(doctorReplyText, respondingDoctorId);
+      speakDoctorResponse(doctorReplyText, respondingDoctorId, undefined, {
+        clinicalReceivedAt: clinicalReceivedTime,
+        onPlaybackStart: () => {
+          setPendingDoctorMessage(null);
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === newDoctorMessage.id)) return prev;
+            return [...prev, newDoctorMessage];
+          });
+        },
+        onFallback: () => {
+          setPendingDoctorMessage(null);
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === newDoctorMessage.id)) return prev;
+            return [...prev, newDoctorMessage];
+          });
+        },
+      });
     } catch (err) {
       console.error("Consultation chat error:", err);
+      setPendingDoctorMessage(null);
       if (callActiveRef.current) {
         setAudioState("PATIENT_LISTENING");
       } else {
@@ -1552,6 +1801,13 @@ export default function ConsultPage() {
   useEffect(() => {
     handleUserUtteranceRef.current = handleUserUtterance;
   });
+
+  // Auto-scroll conversation feed to latest turn or pending response
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, pendingDoctorMessage]);
 
   // Helper for Doctor Status
   const getDoctorLiveStatus = (doc: DoctorProfile) => {
@@ -2077,6 +2333,22 @@ export default function ConsultPage() {
                     )}
                   </div>
                 ))
+              )}
+
+              {/* Synchronized Pending Doctor Turn Indicator (visible while neural TTS synthesizes) */}
+              {pendingDoctorMessage && (
+                <div className="flex flex-col gap-1.5 items-start">
+                  <span className="text-xs sm:text-sm font-black text-slate-900 tracking-wide flex items-center gap-2">
+                    {pendingDoctorMessage.doctorName.toUpperCase()}
+                    {pendingDoctorMessage.doctorSpecialty && (
+                      <span className="text-xs font-semibold text-slate-500">· {pendingDoctorMessage.doctorSpecialty}</span>
+                    )}
+                  </span>
+                  <div className="flex items-center gap-2.5 max-w-[92%] text-slate-600 text-sm font-medium bg-slate-50/90 border border-slate-200/70 rounded-2xl px-4 py-3 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+                    <span className="italic">Formulating response...</span>
+                  </div>
+                </div>
               )}
 
             </div>

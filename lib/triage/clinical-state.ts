@@ -357,9 +357,11 @@ export function extractSubfieldState(
   if (slots.acute_worsening === true) pattern = "sudden";
   else if (slots.acute_worsening === false) pattern = "gradual";
   else {
-    const typeFact = knownFacts.find(f => /ONSET_TYPE:\s*(sudden|gradual)/i.test(f) || /Course:\s*(sudden|gradual)/i.test(f));
+    const typeFact = knownFacts.find(f => /ONSET_(?:TYPE|PATTERN):\s*(sudden|gradual)/i.test(f) || /Course:\s*(sudden|gradual)/i.test(f));
     if (typeFact) {
       pattern = /sudden/i.test(typeFact) ? "sudden" : "gradual";
+    } else if ((slots as any).onset_pattern) {
+      pattern = (slots as any).onset_pattern === "sudden" ? "sudden" : "gradual";
     } else if (knownFacts.some(f => /sudden\s+onset/i.test(f))) {
       pattern = "sudden";
     } else if (knownFacts.some(f => /gradual/i.test(f))) {

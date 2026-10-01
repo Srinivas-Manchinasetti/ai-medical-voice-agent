@@ -7,6 +7,7 @@ import { ConversationInterpreter } from "./conversation-interpreter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
+import { extractSubfieldState } from "./clinical-state";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -269,11 +270,31 @@ export class ConversationManager {
         }
       }
 
-      // B. ONSET & DURATION
-      if (slot === "onset") {
+      // B. ONSET, DURATION & ONSET PATTERN
+      if (slot === "onset" || slot === "onset_pattern" || slot === "onset_time") {
         const hasSudden = /\b(?:sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere|all\s+at\s+once)\b/i.test(textLower);
-        const hasGradual = /\b(?:gradual(?:ly)?|slowly|built\s+up|over\s+time)\b/i.test(textLower);
+        const hasGradual = /\b(?:gradual(?:ly)?|slowly|built\s+up|over\s+time|getting\s+worse|came\s+on\s+gradually)\b/i.test(textLower);
         const timeMatch = textLower.match(/\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|an?\s+hour|twenty\s+minutes|thirty\s+minutes|this\s+morning|yesterday|a\s+week)\b/i);
+
+        if (slot === "onset_pattern") {
+          if (hasSudden || hasGradual) {
+            return {
+              intent: "answer_question",
+              resolvedSlot: "onset_pattern",
+              resolvedValue: hasSudden ? "sudden" : "gradual"
+            };
+          }
+        }
+
+        if (slot === "onset_time") {
+          if (timeMatch) {
+            return {
+              intent: "answer_question",
+              resolvedSlot: "onset_time",
+              resolvedValue: timeMatch[0]
+            };
+          }
+        }
 
         if (timeMatch || hasSudden || hasGradual) {
           let onsetVal = timeMatch ? timeMatch[0] : (hasSudden ? "sudden" : "gradual");
@@ -307,6 +328,28 @@ export class ConversationManager {
             intent: "answer_question",
             resolvedSlot: "course",
             resolvedValue: courseVal,
+          };
+        }
+      }
+
+      // B.3 DURATION & EPISODE DURATION
+      if (slot === "duration") {
+        const isEpisodePrompt = /how\s+long\s+does\s+each\s+(?:one\s+)?last|each\s+episode/i.test(pendingQuestion.question || "");
+        const indicatesDayOrTwo = /\b(?:for\s+)?(?:a\s+day\s+or\s+two|one\s+or\s+two\s+days|1\s*[-–]\s*2\s+days)\b/i.test(textLower);
+
+        if (isEpisodePrompt && indicatesDayOrTwo) {
+          return {
+            intent: "ambiguous",
+            clarificationNeeded: "Just to clarify, do you mean you've been having these episodes for a day or two, or that each individual episode lasts a day or two?"
+          };
+        }
+
+        const durMatch = textLower.match(/\b(?:for\s+)?(\d+\s*(?:minutes?|hours?|seconds?|days?)|(?:one|two|three|four|five|six|seven)\s+days?|a\s+minute|few\s+seconds|few\s+minutes|a\s+day\s+or\s+two)\b/i);
+        if (durMatch) {
+          return {
+            intent: "answer_question",
+            resolvedSlot: "duration",
+            resolvedValue: `approx. ${durMatch[0].replace(/^for\s+/i, "").trim()}`
           };
         }
       }
@@ -629,6 +672,32 @@ export class ConversationManager {
         } else if (slot === "neurological_signs" && Array.isArray(val)) {
           state.slots.neurological_signs = Array.from(new Set([...state.slots.neurological_signs, ...val]));
           state.slots.known_facts.push(`Neurological: ${val.join(", ")}`);
+        } else if (slot === "onset_pattern") {
+          const pattern = val === "sudden" ? "sudden" : "gradual";
+          state.slots.acute_worsening = pattern === "sudden";
+          (state.slots as any).onset_pattern = pattern;
+          state.slots.known_facts.push(`ONSET_TYPE: ${pattern}`);
+          if (state.conversationMemory) {
+            state.conversationMemory.confirmedFacts.push(`Onset pattern: ${pattern}`);
+            if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_pattern")) {
+              state.conversationMemory.questionsAlreadyAsked.push("onset_pattern");
+            }
+            if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
+              state.conversationMemory.questionsAlreadyAsked.push("onset");
+            }
+          }
+        } else if (slot === "onset_time") {
+          state.slots.onset = String(val);
+          state.slots.known_facts.push(`ONSET: ${val}`);
+          if (state.conversationMemory) {
+            state.conversationMemory.confirmedFacts.push(`Onset: ${val}`);
+            if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_time")) {
+              state.conversationMemory.questionsAlreadyAsked.push("onset_time");
+            }
+            if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
+              state.conversationMemory.questionsAlreadyAsked.push("onset");
+            }
+          }
         } else {
           (state.slots as any)[slot] = val;
           state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
@@ -663,6 +732,15 @@ export class ConversationManager {
         state.agentRequests.forEach(r => {
           if (r.targetSlot === confirmedSlot && r.status === "pending") r.status = "resolved";
         });
+      } else if (interpretation.intent === "ambiguous" && interpretation.clarificationNeeded) {
+        return {
+          action: "CLARIFY",
+          doctorReply: interpretation.clarificationNeeded,
+          doctorName: "Dr. Sarah Chen, MD",
+          specialty: "Internal Medicine & General Practice",
+          state,
+          preArbiterResult
+        };
       }
     }
 
@@ -933,6 +1011,32 @@ export class ConversationManager {
       } else if (slot === "neurological_signs" && Array.isArray(val)) {
         state.slots.neurological_signs = Array.from(new Set([...state.slots.neurological_signs, ...val]));
         state.slots.known_facts.push(`Neurological: ${val.join(", ")}`);
+      } else if (slot === "onset_pattern") {
+        const pattern = val === "sudden" ? "sudden" : "gradual";
+        state.slots.acute_worsening = pattern === "sudden";
+        (state.slots as any).onset_pattern = pattern;
+        state.slots.known_facts.push(`ONSET_TYPE: ${pattern}`);
+        if (state.conversationMemory) {
+          state.conversationMemory.confirmedFacts.push(`Onset pattern: ${pattern}`);
+          if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_pattern")) {
+            state.conversationMemory.questionsAlreadyAsked.push("onset_pattern");
+          }
+          if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
+            state.conversationMemory.questionsAlreadyAsked.push("onset");
+          }
+        }
+      } else if (slot === "onset_time") {
+        state.slots.onset = String(val);
+        state.slots.known_facts.push(`ONSET: ${val}`);
+        if (state.conversationMemory) {
+          state.conversationMemory.confirmedFacts.push(`Onset: ${val}`);
+          if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_time")) {
+            state.conversationMemory.questionsAlreadyAsked.push("onset_time");
+          }
+          if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
+            state.conversationMemory.questionsAlreadyAsked.push("onset");
+          }
+        }
       } else {
         (state.slots as any)[slot] = val;
         state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
@@ -1171,7 +1275,32 @@ export class ConversationManager {
       initialPurpose = state.responsePlan.nextHighValueInquiry.clinicalRationale;
       initialDoctorReply = state.responsePlan.suggestedSpokenReply || state.responsePlan.nextHighValueInquiry.suggestedPhrasing;
     } else if (!isChestPresentation) {
-      initialDoctorReply = "Thank you for describing what you're experiencing. Could you tell me when this began, and whether it started suddenly or built up gradually?";
+      const subfields = extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory);
+      if (subfields.onset.isResolved) {
+        if (!subfields.characterSeverity.character) {
+          initialTargetSlot = "character";
+          initialPurpose = "Establish symptom sensation and quality";
+          initialDoctorReply = "Could you describe what that discomfort feels like — is it sharp, burning, dull, or a tight pressure?";
+        } else if (!subfields.characterSeverity.severity) {
+          initialTargetSlot = "severity";
+          initialPurpose = "Establish severity of discomfort";
+          initialDoctorReply = "On a scale from zero to ten, how severe would you rate this discomfort right now?";
+        } else {
+          initialTargetSlot = "associated_symptoms";
+          initialPurpose = "Screen for associated symptoms";
+          initialDoctorReply = "Are you experiencing any other symptoms alongside this, such as fever, difficulty breathing, or dizziness?";
+        }
+      } else if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+        initialTargetSlot = "onset_pattern";
+        initialPurpose = "Establish whether onset was sudden or gradual";
+        initialDoctorReply = "Did it come on suddenly, or did it gradually get worse?";
+      } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+        initialTargetSlot = "onset_time";
+        initialPurpose = "Establish onset timeline";
+        initialDoctorReply = "Roughly when did this begin, or how long have you had it?";
+      } else {
+        initialDoctorReply = "Thank you for describing what you're experiencing. Could you tell me when this began, and whether it started suddenly or built up gradually?";
+      }
     }
 
     if (state.conversationMemory && !state.conversationMemory.questionsAlreadyAsked.includes(initialTargetSlot)) {
