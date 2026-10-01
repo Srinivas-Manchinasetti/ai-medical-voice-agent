@@ -2,13 +2,15 @@
 
 import React from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Mic, Volume2, Send, Loader2, ArrowRight } from "lucide-react";
+import { Mic, Volume2, Send, Loader2, ArrowRight, Square } from "lucide-react";
 
 export type VoicePillState = "idle" | "listening" | "transcribing" | "understanding" | "responding";
 
 export interface VoicePillProps {
   state: VoicePillState;
   onToggleRecord?: () => void;
+  onStopRecord?: () => void;
+  onSendRecord?: () => void;
   onInterrupt?: () => void;
   transcriptSnippet?: string;
   typedValue?: string;
@@ -22,6 +24,8 @@ export interface VoicePillProps {
 export function VoicePill({
   state,
   onToggleRecord,
+  onStopRecord,
+  onSendRecord,
   onInterrupt,
   transcriptSnippet = "",
   typedValue = "",
@@ -58,7 +62,7 @@ export function VoicePill({
       {/* ===================== LEFT: MICROPHONE / STATE ICON TRIGGER ===================== */}
       <button
         type="button"
-        onClick={isResponding ? onInterrupt : onToggleRecord}
+        onClick={isListening ? (onStopRecord || onToggleRecord) : (isResponding ? onInterrupt : onToggleRecord)}
         aria-label={
           isResponding
             ? "Interrupt doctor"
@@ -75,7 +79,7 @@ export function VoicePill({
         }`}
       >
         {isListening ? (
-          <Mic className="w-4 h-4 animate-bounce" />
+          <Square className="w-3.5 h-3.5 fill-current" />
         ) : isResponding ? (
           <Volume2 className="w-4 h-4 animate-pulse" />
         ) : isTranscribing ? (
@@ -111,7 +115,7 @@ export function VoicePill({
           <div className="flex items-center gap-2 text-xs text-slate-300 font-sans">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
             <span className="font-mono text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
-              {state === "understanding" ? "Clinical Deliberation..." : "Transcribing Speech..."}
+              {state === "understanding" ? "Processing..." : "Transcribing..."}
             </span>
             {transcriptSnippet && (
               <span className="text-slate-400 truncate italic">
@@ -159,10 +163,12 @@ export function VoicePill({
         {isListening ? (
           <button
             type="button"
-            onClick={onToggleRecord}
-            className="px-3 py-1.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 hover:bg-cyan-500/30 text-xs font-bold font-mono uppercase tracking-wider transition-colors cursor-pointer"
+            onClick={onSendRecord || onToggleRecord}
+            aria-label="Send recorded voice"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 hover:bg-cyan-500/30 text-xs font-bold font-mono uppercase tracking-wider transition-colors cursor-pointer"
           >
-            Done
+            <span>Send</span>
+            <Send className="w-3 h-3" />
           </button>
         ) : isResponding ? (
           <button
