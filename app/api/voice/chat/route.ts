@@ -9,6 +9,7 @@ import { clinicalKnowledgeRetriever } from "@/lib/clinical-knowledge/retriever";
 import { generateDoctorTurnResponse } from "@/lib/ai/clinical-llm";
 import { hospitalRagService } from "@/lib/care-network/hospital-rag";
 import { buildProvenanceEvidenceFromClinicalState } from "@/lib/agents/provenance";
+import { extractSubfieldState } from "@/lib/triage/clinical-state";
 
 export async function POST(request: Request) {
   try {
@@ -157,6 +158,8 @@ export async function POST(request: Request) {
     const isNeuro = /\b(headache|dizz|droop|weak|speech)\b/i.test(turnResult.state.cumulativeTranscript) ||
       slots.neurological_signs.length > 0;
 
+    const subfields = extractSubfieldState(slots, turnResult.state.slots.known_facts, turnResult.state.conversationMemory);
+
     let calculatedMissingDims: string[] = [];
     if (!hasAnySymptoms) {
       calculatedMissingDims = [
@@ -167,7 +170,15 @@ export async function POST(request: Request) {
         "Associated symptoms",
       ];
     } else if (isThroat) {
-      if (!slots.onset) calculatedMissingDims.push("Onset & timeline");
+      if (!subfields.onset.isResolved) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+          calculatedMissingDims.push("Onset pattern (sudden vs gradual)");
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+          calculatedMissingDims.push("Onset timeline & duration");
+        } else {
+          calculatedMissingDims.push("Onset & timeline");
+        }
+      }
       if (!turnResult.state.slots.known_facts.some(f => /course/i.test(f))) calculatedMissingDims.push("Course & progression");
       const hasVoiceChange = turnResult.state.slots.associated_symptoms.includes("voice change") ||
         turnResult.state.slots.known_facts.some(f => /voice/i.test(f));
@@ -179,16 +190,41 @@ export async function POST(request: Request) {
       const feverAssessed = turnResult.state.slots.known_facts.some(f => /fever/i.test(f)) ||
         turnResult.state.conversationMemory?.deniedSymptoms.includes("fever");
       if (!feverAssessed) calculatedMissingDims.push("Fever / chills");
-      if (!slots.severity) calculatedMissingDims.push("Pain severity (0-10)");
+      if (!subfields.characterSeverity.severity) calculatedMissingDims.push("Pain severity (0-10)");
       const earAssessed = turnResult.state.slots.known_facts.some(f => /ear/i.test(f)) ||
         turnResult.state.conversationMemory?.deniedSymptoms.includes("ear_pain");
       if (!earAssessed) calculatedMissingDims.push("Referred ear pain (Otalgia)");
     } else {
-      if (!slots.onset) calculatedMissingDims.push("Onset & timeline");
-      if (!slots.character) calculatedMissingDims.push("Character & severity");
-      if (!slots.duration && !turnResult.state.conversationMemory?.frequencyPattern) {
-        calculatedMissingDims.push("Episode duration & frequency");
+      if (!subfields.onset.isResolved) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+          calculatedMissingDims.push("Onset pattern (sudden vs gradual)");
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+          calculatedMissingDims.push("Onset timeline & duration");
+        } else {
+          calculatedMissingDims.push("Onset & timeline");
+        }
       }
+      // Independent character & severity breakdown
+      if (!subfields.characterSeverity.character && !subfields.characterSeverity.severity) {
+        calculatedMissingDims.push("Character & severity");
+      } else if (!subfields.characterSeverity.character) {
+        calculatedMissingDims.push("Symptom character / sensation");
+      } else if (!subfields.characterSeverity.severity) {
+        calculatedMissingDims.push("Pain severity (0-10)");
+      }
+
+      // Independent episodic duration & frequency breakdown
+      const isEpisodic = subfields.episodic.isEpisodic || /\b(episode|comes\s+and\s+goes|intermittent|spasm|attack)\b/i.test(turnResult.state.cumulativeTranscript);
+      if (isEpisodic) {
+        if (!subfields.episodic.episodeDuration && !subfields.episodic.frequency) {
+          calculatedMissingDims.push("Episode duration & frequency");
+        } else if (!subfields.episodic.episodeDuration) {
+          calculatedMissingDims.push("Episode duration");
+        } else if (!subfields.episodic.frequency) {
+          calculatedMissingDims.push("Episode frequency");
+        }
+      }
+
       if (!slots.radiation && /\b(chest|heart|angina|leg|calf|back)\b/i.test(turnResult.state.cumulativeTranscript)) {
         calculatedMissingDims.push("Radiation & spread");
       }
@@ -280,7 +316,7 @@ export async function POST(request: Request) {
       careNetworkSummary,
     });
 
-    const activeDoctorReply = llmResult.reply || turnResult.doctorReply;
+    const activeDoctorReply = turnResult.action === "CLARIFY" ? turnResult.doctorReply : (llmResult.reply || turnResult.doctorReply);
 
     // Structured multi-specialist intake deliberation messages
     const intakeDeliberationMessages: any[] = [];

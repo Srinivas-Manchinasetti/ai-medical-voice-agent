@@ -1205,14 +1205,18 @@ export class ConversationManager {
 
   public extractOpportunisticFacts(state: ClinicalInterviewState): void {
     if (!state.slots.duration) {
-      const durMatch = state.cumulativeTranscript.match(/\b(?:for\s+)?(\d+\s*(?:minutes?|hours?|seconds?|days?)|(?:one|two|three|four|five|six|seven)\s+days?|a\s+minute|few\s+seconds|few\s+minutes)\b/i);
-      if (durMatch) {
-        const cleanDur = durMatch[0].replace(/^for\s+/i, "").trim();
-        state.slots.duration = `approx. ${cleanDur}`;
-        if (state.conversationMemory) state.conversationMemory.durationPattern = `approx. ${cleanDur}`;
-        const fact = `Duration: approx. ${cleanDur}`;
-        if (!state.slots.known_facts.includes(fact)) {
-          state.slots.known_facts.push(fact);
+      const isEpisodePrompt = /how\s+long\s+does\s+each\s+(?:one\s+)?last|each\s+episode/i.test(state.pendingQuestion?.question || "");
+      const isDayOrTwo = /\b(?:for\s+)?(?:a\s+day\s+or\s+two|one\s+or\s+two\s+days|1\s*[-–]\s*2\s+days)\b/i.test(state.cumulativeTranscript);
+      if (!(isEpisodePrompt && isDayOrTwo)) {
+        const durMatch = state.cumulativeTranscript.match(/\b(?:for\s+)?(\d+\s*(?:minutes?|hours?|seconds?|days?)|(?:one|two|three|four|five|six|seven)\s+days?|a\s+minute|few\s+seconds|few\s+minutes)\b/i);
+        if (durMatch) {
+          const cleanDur = durMatch[0].replace(/^for\s+/i, "").trim();
+          state.slots.duration = `approx. ${cleanDur}`;
+          if (state.conversationMemory) state.conversationMemory.durationPattern = `approx. ${cleanDur}`;
+          const fact = `Duration: approx. ${cleanDur}`;
+          if (!state.slots.known_facts.includes(fact)) {
+            state.slots.known_facts.push(fact);
+          }
         }
       }
     }
