@@ -268,20 +268,20 @@ export class ResponsePlanner {
           clinicalRationale: "Differentiate pressure/squeezing from sharp or pleuritic pain.",
           suggestedPhrasing: "Could you describe what the discomfort feels like — is it a tight pressure, squeezing, burning, or a sharp pain?",
         };
-      } else if (!subfields.onset.isResolved && !isTopicAddressed("onset") && !isTopicAddressed("onset_pattern")) {
-        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+      } else if (!subfields.onset.isResolved) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset_pattern")) {
           nextInquiry = {
             topic: "onset_pattern",
             clinicalRationale: "Establish whether chest discomfort onset was sudden or gradual.",
             suggestedPhrasing: "Did that chest discomfort come on suddenly, or did it build up gradually?",
           };
-        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown" && !isTopicAddressed("onset_time") && !isTopicAddressed("onset")) {
           nextInquiry = {
             topic: "onset_time",
             clinicalRationale: "Establish onset timeline of chest discomfort.",
             suggestedPhrasing: "When did that chest discomfort first begin?",
           };
-        } else {
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset")) {
           nextInquiry = {
             topic: "onset",
             clinicalRationale: "Establish onset acuity and timeline.",
@@ -328,14 +328,20 @@ export class ResponsePlanner {
           clinicalRationale: "Establish episode duration to differentiate transient orthostasis from persistent deficits.",
           suggestedPhrasing: "When these episodes happen, roughly how long does each one last?",
         };
-      } else if (!subfields.onset.isResolved && !isTopicAddressed("onset") && !isTopicAddressed("onset_pattern")) {
-        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+      } else if (!subfields.onset.isResolved) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset_pattern")) {
           nextInquiry = {
             topic: "onset_pattern",
             clinicalRationale: "Establish whether neurological symptoms began suddenly (concerning for vascular event) or gradually.",
             suggestedPhrasing: "Did it come on suddenly, or did it gradually get worse?",
           };
-        } else {
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown" && !isTopicAddressed("onset_time") && !isTopicAddressed("onset")) {
+          nextInquiry = {
+            topic: "onset_time",
+            clinicalRationale: "Establish timeline of neurological symptoms.",
+            suggestedPhrasing: "Roughly when did you first notice these neurological symptoms?",
+          };
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset")) {
           nextInquiry = {
             topic: "onset",
             clinicalRationale: "Establish symptom timeline and progression.",
@@ -368,20 +374,20 @@ export class ResponsePlanner {
           clinicalRationale: "Patient reported painful swallowing (odynophagia); screen specifically for mechanical obstruction or inability to swallow fluids (true dysphagia).",
           suggestedPhrasing: "When you say it hurts to swallow, are you still able to swallow liquids and saliva normally?",
         };
-      } else if (!subfields.onset.isResolved && !isTopicAddressed("onset") && !isTopicAddressed("onset_pattern")) {
-        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
+      } else if (!subfields.onset.isResolved) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset_pattern")) {
           nextInquiry = {
             topic: "onset_pattern",
             clinicalRationale: "Timeline/duration is established; determine whether onset was sudden or built up gradually.",
             suggestedPhrasing: "Did it come on suddenly, or did it gradually get worse?",
           };
-        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown") {
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown" && !isTopicAddressed("onset_time") && !isTopicAddressed("onset")) {
           nextInquiry = {
             topic: "onset_time",
             clinicalRationale: "Onset pattern is established; determine timeline / how long symptoms have persisted.",
             suggestedPhrasing: "Roughly how long have you had this, or when did it begin?",
           };
-        } else {
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset")) {
           nextInquiry = {
             topic: "onset",
             clinicalRationale: "Establish symptom timeline and progression.",
