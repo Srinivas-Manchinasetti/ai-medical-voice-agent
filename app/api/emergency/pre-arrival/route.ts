@@ -115,8 +115,9 @@ export async function POST(request: Request) {
       receipt,
     });
   } catch (error: any) {
+    console.error("[EmergencyDispatchError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Emergency dispatch failed" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Emergency dispatch processing failure" : (error?.message || "Emergency dispatch failed") },
       { status: 500 }
     );
   }
@@ -200,8 +201,9 @@ export async function GET(request: Request) {
       dispatches: activeDispatches.slice(0, 10),
     });
   } catch (error: any) {
+    console.error("[EmergencyTelemetryBoardError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to query telemetry board" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Failed to query emergency telemetry board" : (error?.message || "Failed to query telemetry board") },
       { status: 500 }
     );
   }

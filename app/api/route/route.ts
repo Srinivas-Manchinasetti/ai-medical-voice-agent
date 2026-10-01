@@ -118,7 +118,10 @@ export async function GET(request: Request) {
   } catch (err: any) {
     console.error("[RouteAPI] Unexpected error:", err);
     return NextResponse.json(
-      { error: "Failed to calculate route", details: err.message },
+      {
+        error: "Failed to calculate route",
+        details: process.env.NODE_ENV === "production" ? undefined : err?.message,
+      },
       { status: 500 }
     );
   }

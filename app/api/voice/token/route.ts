@@ -37,9 +37,10 @@ export async function GET() {
       expires_in: 3600
     });
   } catch (error: any) {
+    console.error("[VoiceTokenError]", error);
     return NextResponse.json({
       hasAssemblyKey: false,
-      error: error?.message || "Internal server error fetching voice token",
+      error: process.env.NODE_ENV === "production" ? "Internal server error fetching voice token" : (error?.message || "Internal server error fetching voice token"),
       fallback: true
     }, { status: 500 });
   }

@@ -63,18 +63,17 @@ export class HospitalRagService {
       maxResults = 3,
     } = options;
 
-    // Default reference coordinates: Guntur / Vijayawada Medical Hub
-    let refLat = 16.3067;
-    let refLng = 80.4365;
+    let refLat: number | null = null;
+    let refLng: number | null = null;
     let locationType: "gps" | "city" | "default_region" = "default_region";
-    let locationLabel = "Andhra Pradesh / Telangana Region";
+    let locationLabel = "Location Unresolved";
 
-    if (userCoords && !isNaN(userCoords.latitude) && !isNaN(userCoords.longitude)) {
+    if (userCoords && Number.isFinite(userCoords.latitude) && Number.isFinite(userCoords.longitude)) {
       refLat = userCoords.latitude;
       refLng = userCoords.longitude;
       locationType = "gps";
       locationLabel = "Current Location (GPS)";
-    } else if (cityOrLandmark) {
+    } else if (cityOrLandmark && cityOrLandmark.trim().length > 0) {
       const q = cityOrLandmark.toLowerCase().trim();
       const match = INDIAN_HOSPITALS_DATASET.find(
         (h) =>
@@ -88,6 +87,21 @@ export class HospitalRagService {
         locationType = "city";
         locationLabel = match.city;
       }
+    }
+
+    if (refLat === null || refLng === null) {
+      return {
+        facilities: [],
+        careOptions: [],
+        locationBasis: {
+          type: "default_region",
+          label: "Location Unresolved",
+        },
+        prioritizedAffordability: prioritizeAffordable,
+        specialtySearched: specialtyRequired,
+        searchRadiusKm: 0,
+        summaryForLLM: "Patient location is unresolved. Cannot route to emergency facilities without location coordinates or explicit city.",
+      };
     }
 
     // Execute 3-layer progressive discovery and floor-first routing

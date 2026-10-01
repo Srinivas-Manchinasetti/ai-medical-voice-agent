@@ -26,7 +26,7 @@ export function CinematicCareNetworkMap() {
   useEffect(() => {
     async function fetchHospitals() {
       try {
-        const res = await fetch("/api/hospitals?urgency=emergency");
+        const res = await fetch("/api/hospitals?city=Guntur&urgency=emergency");
         if (res.ok) {
           const data = await res.json();
           if (data.hospitals && data.hospitals.length > 0) {

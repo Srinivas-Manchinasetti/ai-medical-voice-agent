@@ -219,6 +219,7 @@ export async function GET(
       },
     });
   } catch (error: any) {
+    console.error("[FHIRSerializationError]", error);
     return NextResponse.json(
       {
         resourceType: "OperationOutcome",
@@ -226,7 +227,7 @@ export async function GET(
           {
             severity: "fatal",
             code: "exception",
-            diagnostics: error?.message || "Internal server error during FHIR bundle serialization.",
+            diagnostics: process.env.NODE_ENV === "production" ? "Internal server error during clinical FHIR bundle serialization." : (error?.message || "Internal server error during FHIR bundle serialization."),
           },
         ],
       },

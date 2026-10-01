@@ -181,8 +181,9 @@ export async function GET(request: Request) {
       },
     });
   } catch (error: any) {
+    console.error("[AdminMetricsError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to generate admin metrics" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Failed to retrieve administrative metrics" : (error?.message || "Failed to generate admin metrics") },
       { status: 500 }
     );
   }

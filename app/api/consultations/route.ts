@@ -190,8 +190,9 @@ export async function GET(request: Request) {
       consultations: filtered.slice().reverse(),
     });
   } catch (error: any) {
+    console.error("[ConsultationsGetError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to fetch consultations" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Failed to retrieve consultation records" : (error?.message || "Failed to fetch consultations") },
       { status: 500 }
     );
   }
@@ -327,8 +328,9 @@ export async function POST(request: Request) {
       note: "Saved to clinical consultation session buffer with tamper-evident audit record.",
     });
   } catch (error: any) {
+    console.error("[ConsultationsPostError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to save consultation" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Failed to record consultation" : (error?.message || "Failed to save consultation") },
       { status: 500 }
     );
   }

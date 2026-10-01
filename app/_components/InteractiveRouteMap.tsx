@@ -48,9 +48,9 @@ export function calculateCalibratedDriveTime(distanceKm: number, rawOsrmSeconds?
   }
 }
 
-interface InteractiveRouteMapProps {
-  patientCoords: { lat: number; lng: number };
-  patientLocationName: string;
+export interface InteractiveRouteMapProps {
+  patientCoords: { lat: number; lng: number } | null;
+  patientLocationName?: string;
   selectedHospital: HospitalItem | null;
   allHospitals: HospitalItem[];
   isManualPicking: boolean;
@@ -58,6 +58,8 @@ interface InteractiveRouteMapProps {
   onConfirmManualLocation: (lat: number, lng: number) => void;
   onCancelManualPicking: () => void;
   onRouteCalculated?: (info: { roadDistanceKm: number; etaMinutes: number }) => void;
+  mapCenter?: { lat: number; lng: number };
+  onRequestLocation?: () => void;
 }
 
 export function InteractiveRouteMap({
@@ -70,6 +72,8 @@ export function InteractiveRouteMap({
   onConfirmManualLocation,
   onCancelManualPicking,
   onRouteCalculated,
+  mapCenter,
+  onRequestLocation,
 }: InteractiveRouteMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -129,7 +133,18 @@ export function InteractiveRouteMap({
       targetHospital: HospitalItem,
       autoFrame: boolean = true
     ) => {
-      if (!map || !routeLayerRef.current || !L) return;
+      if (
+        !map ||
+        !routeLayerRef.current ||
+        !L ||
+        !patientCoords ||
+        !Number.isFinite(patientCoords.lat) ||
+        !Number.isFinite(patientCoords.lng)
+      ) {
+        if (routeLayerRef.current) routeLayerRef.current.clearLayers();
+        setIsRouting(false);
+        return;
+      }
 
       const currentId = ++routingRequestIdRef.current;
 
@@ -269,7 +284,7 @@ export function InteractiveRouteMap({
         }
       }
     },
-    [patientCoords.lat, patientCoords.lng, onRouteCalculated]
+    [patientCoords?.lat, patientCoords?.lng, onRouteCalculated]
   );
 
   // Renders User Location and Hospital Destination Markers
@@ -281,34 +296,35 @@ export function InteractiveRouteMap({
 
       if (isManualPicking) return;
 
-      const origin = { lat: patientCoords.lat, lng: patientCoords.lng };
+      // 1. USER LOCATION MARKER (Render ONLY when patientCoords is non-null and valid)
+      if (patientCoords && Number.isFinite(patientCoords.lat) && Number.isFinite(patientCoords.lng)) {
+        const origin = { lat: patientCoords.lat, lng: patientCoords.lng };
+        const userPinIcon = L.divIcon({
+          className: "custom-user-pin",
+          html: `
+            <div style="position:relative; width:34px; height:34px; display:flex; align-items:center; justify-content:center;">
+              <div style="position:absolute; width:32px; height:32px; border-radius:50%; background:rgba(2,132,199,0.25); animation:ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+              <div style="position:relative; width:22px; height:22px; border-radius:50%; background:#0284c7; border:3px solid #ffffff; box-shadow:0 2px 10px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center;">
+                <div style="width:6px; height:6px; border-radius:50%; background:#ffffff;"></div>
+              </div>
+              <div style="position:absolute; top:-22px; white-space:nowrap; background:#0f172a; color:#ffffff; font-family:sans-serif; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; box-shadow:0 2px 6px rgba(0,0,0,0.25); pointer-events:none;">
+                Your Location
+              </div>
+            </div>
+          `,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+        });
 
-      // 1. USER LOCATION MARKER
-      const userPinIcon = L.divIcon({
-        className: "custom-user-pin",
-        html: `
-          <div style="position:relative; width:34px; height:34px; display:flex; align-items:center; justify-content:center;">
-            <div style="position:absolute; width:32px; height:32px; border-radius:50%; background:rgba(2,132,199,0.25); animation:ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-            <div style="position:relative; width:22px; height:22px; border-radius:50%; background:#0284c7; border:3px solid #ffffff; box-shadow:0 2px 10px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center;">
-              <div style="width:6px; height:6px; border-radius:50%; background:#ffffff;"></div>
-            </div>
-            <div style="position:absolute; top:-22px; white-space:nowrap; background:#0f172a; color:#ffffff; font-family:sans-serif; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; box-shadow:0 2px 6px rgba(0,0,0,0.25); pointer-events:none;">
-              Your Location
-            </div>
+        const userMarker = L.marker([origin.lat, origin.lng], { icon: userPinIcon, zIndexOffset: 1000 });
+        userMarker.bindPopup(`
+          <div style="font-family:sans-serif; padding:4px; line-height:1.4;">
+            <b style="color:#0f172a; font-size:12px;">📍 Your Location</b><br/>
+            <span style="color:#64748b; font-size:11px;">${patientLocationName}</span>
           </div>
-        `,
-        iconSize: [34, 34],
-        iconAnchor: [17, 17],
-      });
-
-      const userMarker = L.marker([origin.lat, origin.lng], { icon: userPinIcon, zIndexOffset: 1000 });
-      userMarker.bindPopup(`
-        <div style="font-family:sans-serif; padding:4px; line-height:1.4;">
-          <b style="color:#0f172a; font-size:12px;">📍 Your Location</b><br/>
-          <span style="color:#64748b; font-size:11px;">${patientLocationName}</span>
-        </div>
-      `);
-      markersLayerRef.current.addLayer(userMarker);
+        `);
+        markersLayerRef.current.addLayer(userMarker);
+      }
 
       // Expose click helper for popup navigation
       (window as any).medvoiceSelectHospitalById = (hospId: string) => {
@@ -327,23 +343,28 @@ export function InteractiveRouteMap({
         const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
         const shortName = hosp.name.split("-")[0].split("(")[0].trim();
 
-        const pinBg = isSelected ? "#e11d48" : isEligible ? "#0284c7" : "#0f172a";
-        const pinBorder = isSelected ? "#ffffff" : isEligible ? "#38bdf8" : "#94a3b8";
+        const pinBg = isSelected ? "#e11d48" : isEligible ? "#f0f9ff" : "#ffffff";
+        const pinBorder = isSelected ? "#ffffff" : isEligible ? "#0284c7" : "#94a3b8";
 
         const hospIcon = L.divIcon({
           className: "custom-hospital-marker",
           html: `
-            <div style="position:relative; width:${isSelected ? "48px" : "32px"}; height:${isSelected ? "48px" : "32px"}; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-              ${isSelected ? `<div style="position:absolute; width:46px; height:46px; border-radius:50%; background:rgba(225,29,72,0.3); animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
-              <div style="position:relative; width:${isSelected ? "34px" : "26px"}; height:${isSelected ? "34px" : "26px"}; border-radius:${isSelected ? "11px" : "8px"}; background:${pinBg}; border:2.5px solid ${pinBorder}; box-shadow:0 3px 12px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; color:#ffffff;">
-                ${isEligible && !isSelected ? `<span style="font-size:12px;">⭐</span>` : `<svg width="${isSelected ? "18" : "13"}" height="${isSelected ? "18" : "13"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`}
+            <div style="position:relative; width:${isSelected ? "44px" : "26px"}; height:${isSelected ? "44px" : "26px"}; display:flex; align-items:center; justify-content:center; cursor:pointer; ${isSelected ? "z-index:1000;" : "opacity:0.75;"}">
+              ${isSelected ? `<div style="position:absolute; width:44px; height:44px; border-radius:50%; background:rgba(225,29,72,0.25); animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
+              <div style="position:relative; width:${isSelected ? "32px" : "20px"}; height:${isSelected ? "32px" : "20px"}; border-radius:${isSelected ? "10px" : "6px"}; background:${pinBg}; border:${isSelected ? "2.5px" : "1.5px"} solid ${pinBorder}; box-shadow:${isSelected ? "0 4px 14px rgba(225,29,72,0.4)" : "0 1px 4px rgba(0,0,0,0.12)"}; display:flex; align-items:center; justify-content:center; color:${isSelected ? "#ffffff" : isEligible ? "#0284c7" : "#64748b"};">
+                ${isSelected
+                  ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+                  : isEligible
+                  ? `<span style="font-size:10px;">⭐</span>`
+                  : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+                }
               </div>
               ${isSelected
-              ? `<div style="position:absolute; bottom:-54px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#0f172a; font-family:sans-serif; padding:5px 10px; border-radius:10px; box-shadow:0 8px 24px -4px rgba(15,23,42,0.2); z-index:9999; border:1.5px solid #0284c7; pointer-events:none;">
-                      <div style="font-size:11px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:4px; line-height:1.2;">
-                        <span>🏥</span> ${shortName} <span style="color:#0284c7; font-weight:700;">(${hosp.distanceKm} km)</span>
+              ? `<div style="position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#0f172a; font-family:sans-serif; padding:4px 8px; border-radius:8px; box-shadow:0 6px 18px -2px rgba(15,23,42,0.2); z-index:9999; border:1.5px solid #e11d48; pointer-events:none;">
+                      <div style="font-size:10.5px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:4px; line-height:1.2;">
+                        <span>🏥</span> ${shortName} <span style="color:#e11d48; font-weight:700;">(${hosp.distanceKm} km)</span>
                       </div>
-                      <div style="font-size:9.5px; font-weight:700; color:#92400e; background:#fef3c7; border:1px solid #fde68a; padding:1px 6px; border-radius:5px; margin-top:3px; line-height:1.2; display:inline-block;">
+                      <div style="font-size:9px; font-weight:700; color:#92400e; background:#fef3c7; border:1px solid #fde68a; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-block;">
                         ⭐ Famous for: ${famousFor}
                       </div>
                     </div>`
@@ -351,13 +372,13 @@ export function InteractiveRouteMap({
             }
             </div>
           `,
-          iconSize: [isSelected ? 48 : 32, isSelected ? 48 : 32],
-          iconAnchor: [isSelected ? 24 : 16, isSelected ? 24 : 16],
+          iconSize: [isSelected ? 44 : 26, isSelected ? 44 : 26],
+          iconAnchor: [isSelected ? 22 : 13, isSelected ? 22 : 13],
         });
 
         const marker = L.marker([hLat, hLng], {
           icon: hospIcon,
-          zIndexOffset: isSelected ? 800 : isEligible ? 500 : 100,
+          zIndexOffset: isSelected ? 1200 : isEligible ? 400 : 100,
         });
 
         // Hover tooltip
@@ -402,7 +423,7 @@ export function InteractiveRouteMap({
         markersLayerRef.current.addLayer(marker);
       });
     },
-    [patientCoords.lat, patientCoords.lng, patientLocationName, isManualPicking, selectedHospital?.id, allHospitals, onSelectHospital]
+    [patientCoords?.lat, patientCoords?.lng, patientLocationName, isManualPicking, selectedHospital?.id, allHospitals, onSelectHospital]
   );
 
   // Initialize Leaflet Map on Mount
@@ -422,9 +443,20 @@ export function InteractiveRouteMap({
 
       if (!mapContainerRef.current || !isMounted) return;
 
+      const initialCenter: [number, number] =
+        patientCoords && Number.isFinite(patientCoords.lat) && Number.isFinite(patientCoords.lng)
+          ? [patientCoords.lat, patientCoords.lng]
+          : mapCenter && Number.isFinite(mapCenter.lat) && Number.isFinite(mapCenter.lng)
+          ? [mapCenter.lat, mapCenter.lng]
+          : selectedHospital
+          ? [selectedHospital.latitude, selectedHospital.longitude]
+          : [20.5937, 78.9629];
+
+      const initialZoom = patientCoords ? 14 : selectedHospital ? 13 : 5;
+
       const map = L.map(mapContainerRef.current, {
-        center: [patientCoords.lat, patientCoords.lng],
-        zoom: 14,
+        center: initialCenter,
+        zoom: initialZoom,
         zoomControl: false,
         attributionControl: false,
       });
@@ -448,7 +480,14 @@ export function InteractiveRouteMap({
 
       renderMarkers(L, map);
 
-      if (selectedHospital && selectedHospital.latitude && selectedHospital.longitude) {
+      if (
+        selectedHospital &&
+        selectedHospital.latitude &&
+        selectedHospital.longitude &&
+        patientCoords &&
+        Number.isFinite(patientCoords.lat) &&
+        Number.isFinite(patientCoords.lng)
+      ) {
         prevHospitalIdRef.current = selectedHospital.id;
         prevCoordsRef.current = `${patientCoords.lat},${patientCoords.lng}`;
         drawRouteToHospital(L, map, selectedHospital, true);
@@ -485,6 +524,15 @@ export function InteractiveRouteMap({
   useEffect(() => {
     if (!mapInstanceRef.current || !leafletRef.current) return;
 
+    if (!patientCoords || !Number.isFinite(patientCoords.lat) || !Number.isFinite(patientCoords.lng)) {
+      if (routeLayerRef.current) {
+        routeLayerRef.current.clearLayers();
+      }
+      setIsRouting(false);
+      prevCoordsRef.current = "";
+      return;
+    }
+
     const coordsKey = `${patientCoords.lat},${patientCoords.lng}`;
     const hospitalKey = selectedHospital?.id || "";
 
@@ -502,7 +550,7 @@ export function InteractiveRouteMap({
       routeLayerRef.current.clearLayers();
       setIsRouting(false);
     }
-  }, [selectedHospital, patientCoords.lat, patientCoords.lng, drawRouteToHospital]);
+  }, [selectedHospital, patientCoords?.lat, patientCoords?.lng, drawRouteToHospital]);
 
   // Custom Controls Handlers
   const handleZoomIn = () => {
@@ -515,7 +563,15 @@ export function InteractiveRouteMap({
 
   const handleRecenter = () => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([patientCoords.lat, patientCoords.lng], 14, { duration: 0.8 });
+      if (patientCoords && Number.isFinite(patientCoords.lat) && Number.isFinite(patientCoords.lng)) {
+        mapInstanceRef.current.flyTo([patientCoords.lat, patientCoords.lng], 14, { duration: 0.8 });
+      } else if (selectedHospital) {
+        mapInstanceRef.current.flyTo([selectedHospital.latitude, selectedHospital.longitude], 14, { duration: 0.8 });
+      } else if (mapCenter) {
+        mapInstanceRef.current.flyTo([mapCenter.lat, mapCenter.lng], 12, { duration: 0.8 });
+      } else {
+        mapInstanceRef.current.flyTo([20.5937, 78.9629], 5, { duration: 0.8 });
+      }
     }
   };
 
@@ -526,12 +582,15 @@ export function InteractiveRouteMap({
     }
   };
 
-  const directGoogleMapsUrl = selectedHospital
-    ? `https://www.google.com/maps/dir/?api=1&origin=${patientCoords.lat},${patientCoords.lng}&destination=${selectedHospital.latitude},${selectedHospital.longitude}&travelmode=driving`
-    : "#";
+  const directGoogleMapsUrl =
+    selectedHospital && patientCoords
+      ? `https://www.google.com/maps/dir/?api=1&origin=${patientCoords.lat},${patientCoords.lng}&destination=${selectedHospital.latitude},${selectedHospital.longitude}&travelmode=driving`
+      : selectedHospital
+      ? `https://www.google.com/maps/search/?api=1&query=${selectedHospital.latitude},${selectedHospital.longitude}`
+      : "#";
 
   return (
-    <div className="relative w-full h-[460px] sm:h-[520px] rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100">
+    <div className="relative w-full h-[480px] sm:h-[540px] lg:h-[580px] rounded-2xl overflow-hidden bg-slate-100">
       {/* Leaflet Map Canvas */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
@@ -578,71 +637,72 @@ export function InteractiveRouteMap({
         </>
       )}
 
-      {/* ============================================================ LIVE ROUTE HUD */}
-      {!isManualPicking && (
-        <div className="absolute top-4 left-4 z-10 max-w-xs sm:max-w-sm rounded-2xl bg-white/95 text-slate-900 p-4 shadow-xl backdrop-blur-md border border-slate-200 space-y-3 pointer-events-auto">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" />
-              <span className="font-bold text-xs text-slate-900">
-                Live Driving Route
+      {/* ============================================================ COMPACT LIVE ROUTE PILL */}
+      {!isManualPicking && patientCoords && selectedHospital && (
+        <div className="absolute top-3.5 left-3.5 z-10 max-w-[270px] sm:max-w-[290px] rounded-xl bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-md p-2.5 text-xs text-slate-900 pointer-events-auto">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
+                Route Active
               </span>
             </div>
             {isRouting ? (
-              <span className="text-[10px] font-mono font-semibold text-sky-600 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full border border-sky-500 border-t-transparent animate-spin" />
-                Updating route...
+              <span className="text-[10px] font-mono font-bold text-sky-600 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full border border-sky-500 border-t-transparent animate-spin" />
+                Updating...
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                Route Active
+              <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/70">
+                Live
               </span>
             )}
           </div>
 
-          {/* Real Origin & Destination Labels */}
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-start gap-2">
-              <span className="font-mono text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mt-0.5">FROM:</span>
-              <span className="font-bold text-slate-900 line-clamp-1">{patientLocationName}</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="font-mono text-[10px] font-bold text-rose-500 uppercase tracking-wider shrink-0 mt-0.5">TO:</span>
-              <span className="font-bold text-slate-900 line-clamp-1">{selectedHospital?.name || "Select a hospital"}</span>
-            </div>
+          <div className="font-bold text-slate-950 truncate text-xs mt-1 leading-snug" title={selectedHospital.name}>
+            {selectedHospital.name}
           </div>
 
-          {/* Distance & Time Grid */}
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">ROAD DISTANCE</div>
-              <div className="text-xl font-extrabold text-slate-900 flex items-baseline gap-1">
-                <span>{routeInfo.distanceKm}</span>
-                <span className="text-xs font-bold text-slate-500">km</span>
-              </div>
-            </div>
-            <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">EST. DRIVE (TRAFFIC)</div>
-              <div className="text-xl font-extrabold text-emerald-600 flex items-baseline gap-1">
-                <span>~{routeInfo.etaMinutes}</span>
-                <span className="text-xs font-bold text-slate-500">min</span>
-              </div>
-            </div>
+          <div className="flex items-center justify-between text-[11px] mt-1.5 pt-1.5 border-t border-slate-100">
+            <span className="font-extrabold text-slate-900">
+              {routeInfo.distanceKm} km <span className="text-slate-400 font-normal">·</span> ~{routeInfo.etaMinutes} min
+            </span>
+            <a
+              href={directGoogleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 hover:text-sky-900 transition-colors"
+            >
+              <span>Maps</span>
+              <ExternalLink className="w-2.5 h-2.5" />
+            </a>
           </div>
+        </div>
+      )}
 
-          {selectedHospital && (
-            <div className="pt-1">
-              <a
-                href={directGoogleMapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white py-2.5 text-xs font-bold transition-all shadow-sm cursor-pointer"
+      {/* ============================================================ LOCATION REQUIRED OVERLAY */}
+      {!isManualPicking && !patientCoords && allHospitals.length === 0 && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-slate-900/15 backdrop-blur-[2px] pointer-events-none">
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-xl p-5 max-w-sm text-center flex flex-col items-center gap-3 pointer-events-auto">
+            <div className="w-10 h-10 rounded-full bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700">
+              <MapPin className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-950">Find Emergency Care Near You</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Enable GPS or select a regional preset below to discover accredited hospitals, live ETAs, and verified specialty readiness.
+              </p>
+            </div>
+            {onRequestLocation && (
+              <button
+                onClick={onRequestLocation}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
               >
-                <span>Open Navigation in Google Maps</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            </div>
-          )}
+                <Locate className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Use My Live Location</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -676,20 +736,20 @@ export function InteractiveRouteMap({
       </div>
 
       {/* ============================================================ MAP LEGEND */}
-      <div className="hidden sm:flex absolute bottom-4 left-4 z-10 items-center gap-3 rounded-xl bg-white/95 backdrop-blur-md px-3.5 py-2 text-[11px] font-bold text-slate-700 border border-slate-200 shadow-md pointer-events-auto">
+      <div className="hidden sm:flex absolute bottom-3.5 left-3.5 z-10 items-center gap-2.5 rounded-lg bg-white/95 backdrop-blur-md px-3 py-1.5 text-[10px] font-bold text-slate-600 border border-slate-200/90 shadow-sm pointer-events-auto">
         <div className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-[#0284c7] border border-white shadow-xs" />
+          <span className="h-2 w-2 rounded-full bg-[#0284c7] border border-white shadow-xs" />
           <span>Your Location</span>
         </div>
-        <span className="text-slate-300">|</span>
+        <span className="text-slate-200">|</span>
         <div className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded bg-rose-600" />
-          <span>Hospital Destination</span>
+          <span className="h-2 w-2 rounded-sm bg-rose-600" />
+          <span>Selected ED</span>
         </div>
-        <span className="text-slate-300">|</span>
+        <span className="text-slate-200">|</span>
         <div className="flex items-center gap-1.5">
-          <span className="h-1.5 w-4 bg-[#0284c7] rounded-full" />
-          <span>Live Driving Route</span>
+          <span className="h-1.5 w-3.5 bg-[#0284c7] rounded-full" />
+          <span>Driving Route</span>
         </div>
       </div>
 

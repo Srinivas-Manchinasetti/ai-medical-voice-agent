@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL =
+  process.env.BACKEND_URL ||
+  process.env.FASTAPI_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "http://localhost:8000";
 
 export async function POST(request: Request) {
   try {
@@ -26,6 +30,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ status: "error", message: "TTS synthesis failed" }, { status: 500 });
   } catch (error: any) {
-    return NextResponse.json({ status: "error", message: error?.message || "Server error" }, { status: 500 });
+    console.error("[TTSRouteError]", error);
+    return NextResponse.json(
+      {
+        status: "error",
+        message: process.env.NODE_ENV === "production" ? "Internal text-to-speech synthesis error" : (error?.message || "Server error"),
+      },
+      { status: 500 }
+    );
   }
 }

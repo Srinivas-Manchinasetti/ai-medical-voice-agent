@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Mic, Volume2, Send, Loader2, ArrowRight, Square } from "lucide-react";
 
 export type VoicePillState = "idle" | "listening" | "transcribing" | "understanding" | "responding";
@@ -35,9 +35,26 @@ export function VoicePill({
   speakerName,
   speakerVoiceId,
 }: VoicePillProps) {
+  const shouldReduceMotion = useReducedMotion();
   const isListening = state === "listening";
   const isResponding = state === "responding";
   const isTranscribing = state === "transcribing" || state === "understanding";
+
+  const statusAnnouncement = (() => {
+    switch (state) {
+      case "listening":
+        return transcriptSnippet ? `Listening: "${transcriptSnippet}"` : "Listening for your voice. Speak now or click send.";
+      case "transcribing":
+        return "Transcribing your speech...";
+      case "understanding":
+        return "Reviewing clinical symptoms...";
+      case "responding":
+        return `${speakerName || "Doctor"} is speaking. Click Interrupt to speak.`;
+      case "idle":
+      default:
+        return "Ready. Type symptoms or click microphone to speak.";
+    }
+  })();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && typedValue.trim()) {
@@ -47,7 +64,7 @@ export function VoicePill({
 
   return (
     <motion.div
-      layout
+      layout={!shouldReduceMotion}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
       className={`relative w-full flex items-center gap-3 px-4 py-2.5 rounded-2xl border transition-all ${
         isListening
@@ -59,6 +76,16 @@ export function VoicePill({
           : "bg-white text-slate-900 border-slate-200/90 shadow-xs hover:border-slate-300 focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100"
       } ${className}`}
     >
+      {/* Visually hidden screen reader status announcement */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {statusAnnouncement}
+      </div>
+
       {/* ===================== LEFT: MICROPHONE / STATE ICON TRIGGER ===================== */}
       <button
         type="button"
@@ -72,7 +99,7 @@ export function VoicePill({
         }
         className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
           isListening
-            ? "bg-rose-500 text-white animate-pulse shadow-md"
+            ? `bg-rose-500 text-white shadow-md ${shouldReduceMotion ? "" : "animate-pulse"}`
             : isResponding
             ? "bg-cyan-500 text-white hover:bg-cyan-600 shadow-xs"
             : "bg-slate-900 text-white hover:bg-slate-800 shadow-2xs"
@@ -81,9 +108,9 @@ export function VoicePill({
         {isListening ? (
           <Square className="w-3.5 h-3.5 fill-current" />
         ) : isResponding ? (
-          <Volume2 className="w-4 h-4 animate-pulse" />
+          <Volume2 className={`w-4 h-4 ${shouldReduceMotion ? "" : "animate-pulse"}`} />
         ) : isTranscribing ? (
-          <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+          <Loader2 className={`w-4 h-4 text-cyan-400 ${shouldReduceMotion ? "" : "animate-spin"}`} />
         ) : (
           <Mic className="w-4 h-4 text-cyan-400" />
         )}
@@ -94,15 +121,23 @@ export function VoicePill({
         {/* State A: LISTENING (Live Waveform + Interim Speech Snippet) */}
         {isListening && (
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 h-5 flex-shrink-0">
-              {[0.4, 0.9, 0.6, 1, 0.7, 0.4, 0.8, 0.5, 0.9, 0.6].map((scale, i) => (
-                <motion.div
-                  key={i}
-                  animate={{ scaleY: [scale * 0.3, scale, scale * 0.35] }}
-                  transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.07, ease: "easeInOut" }}
-                  className="w-1 bg-cyan-400 rounded-full h-full origin-center"
-                />
-              ))}
+            <div className="flex items-center gap-1 h-5 flex-shrink-0" aria-hidden="true">
+              {[0.4, 0.9, 0.6, 1, 0.7, 0.4, 0.8, 0.5, 0.9, 0.6].map((scale, i) =>
+                shouldReduceMotion ? (
+                  <div
+                    key={i}
+                    style={{ height: `${Math.round(scale * 100)}%` }}
+                    className="w-1 bg-cyan-400 rounded-full origin-center"
+                  />
+                ) : (
+                  <motion.div
+                    key={i}
+                    animate={{ scaleY: [scale * 0.3, scale, scale * 0.35] }}
+                    transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.07, ease: "easeInOut" }}
+                    className="w-1 bg-cyan-400 rounded-full h-full origin-center"
+                  />
+                )
+              )}
             </div>
             <span className="text-xs text-cyan-200 font-sans truncate font-medium">
               {transcriptSnippet ? `"${transcriptSnippet}"` : "Listening to your voice... speak now"}
@@ -113,7 +148,7 @@ export function VoicePill({
         {/* State B: TRANSCRIBING / UNDERSTANDING (Processing Feedback) */}
         {isTranscribing && (
           <div className="flex items-center gap-2 text-xs text-slate-300 font-sans">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+            <span className={`w-2 h-2 rounded-full bg-cyan-400 ${shouldReduceMotion ? "" : "animate-ping"}`} />
             <span className="font-mono text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
               {state === "understanding" ? "Reviewing..." : "Transcribing..."}
             </span>
@@ -129,33 +164,31 @@ export function VoicePill({
         {isResponding && (
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+              <span className={`w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0 ${shouldReduceMotion ? "" : "animate-pulse"}`} />
               <span className="text-xs font-semibold text-white truncate">
                 {speakerName || "Doctor"} is speaking...
               </span>
-              {speakerVoiceId && (
-                <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/70 text-emerald-300 border border-emerald-500/30 flex-shrink-0">
-                  {speakerVoiceId}
-                </span>
-              )}
             </div>
             <span className="text-[11px] font-mono text-cyan-300 hidden sm:inline flex-shrink-0">
-              Speak aloud to interrupt
+              Click to interrupt
             </span>
           </div>
         )}
 
-        {/* State D: IDLE (Direct Input Field for Typing or Voice) */}
-        {!isListening && !isTranscribing && !isResponding && (
-          <input
-            type="text"
-            value={typedValue}
-            onChange={(e) => onTypedChange?.(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type symptoms or click mic to speak..."
-            className="w-full bg-transparent text-sm text-slate-900 placeholder:text-slate-400 outline-none font-medium"
-          />
-        )}
+        {/* State D: IDLE (Direct Input Field for Typing or Voice) - Kept mounted to preserve focus */}
+        <input
+          type="text"
+          value={typedValue}
+          onChange={(e) => onTypedChange?.(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type symptoms or click mic to speak..."
+          aria-label="Patient symptoms input"
+          tabIndex={isListening || isTranscribing || isResponding ? -1 : 0}
+          aria-hidden={isListening || isTranscribing || isResponding ? "true" : undefined}
+          className={`w-full bg-transparent text-sm text-slate-900 placeholder:text-slate-400 outline-none font-medium ${
+            isListening || isTranscribing || isResponding ? "sr-only" : "block"
+          }`}
+        />
       </div>
 
       {/* ===================== RIGHT: CONTEXTUAL ACTION BUTTON ===================== */}

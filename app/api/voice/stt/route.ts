@@ -23,6 +23,7 @@ import {
   buildRateLimitResponse,
   RESOURCE_LIMITS,
 } from "@/lib/security/rate-limiter";
+import { sanitizeErrorDetails } from "@/lib/security/error-sanitizer";
 
 export async function POST(request: Request) {
   try {
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: "Speech-to-text recognition failed. Please repeat your statement.",
-            detail: detail,
+            detail: sanitizeErrorDetails(detail),
           },
           { status: response.status }
         );
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: "Local Whisper ASR service unavailable. Please ensure the backend is running.",
-          detail: fetchErr?.message,
+          detail: sanitizeErrorDetails(fetchErr?.message),
         },
         { status: 503 }
       );

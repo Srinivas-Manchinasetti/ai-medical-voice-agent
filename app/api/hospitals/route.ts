@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { INDIAN_HOSPITALS_DATASET, calculateDistanceKm, Hospital, getHospitalFamousFor } from "@/lib/hospitals-india-data";
+import { INDIAN_HOSPITALS_DATASET, ALL_REGION_PRESETS, calculateDistanceKm, Hospital, getHospitalFamousFor } from "@/lib/hospitals-india-data";
 import { discoverHospitalsNearCoordinates } from "@/lib/care-network/osm-discovery";
 
 export function calculateRealisticDriveTime(distanceKm: number): number {
@@ -21,8 +21,11 @@ export function calculateRealisticDriveTime(distanceKm: number): number {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const userLat = searchParams.get("lat") ? parseFloat(searchParams.get("lat")!) : null;
-    const userLng = searchParams.get("lng") ? parseFloat(searchParams.get("lng")!) : null;
+    const rawLat = searchParams.get("lat");
+    const rawLng = searchParams.get("lng");
+    const userLat = rawLat !== null ? parseFloat(rawLat) : null;
+    const userLng = rawLng !== null ? parseFloat(rawLng) : null;
+
     // Patient departure coordinates (where user is physically located)
     const patientLatParam = searchParams.get("patientLat") ? parseFloat(searchParams.get("patientLat")!) : null;
     const patientLngParam = searchParams.get("patientLng") ? parseFloat(searchParams.get("patientLng")!) : null;
@@ -32,28 +35,101 @@ export async function GET(request: Request) {
     const cityFilter = searchParams.get("city")?.toLowerCase().trim() || "";
     const urgencyLevel = searchParams.get("urgency")?.toLowerCase().trim() || "all";
 
-    // Determine location context basis
-    const hasGps = userLat !== null && !isNaN(userLat) && userLng !== null && !isNaN(userLng);
+    const latProvided = rawLat !== null && rawLat.trim() !== "";
+    const lngProvided = rawLng !== null && rawLng.trim() !== "";
     const hasCitySearch = Boolean(cityFilter || searchFilter);
 
-    const locationContext = hasGps
-      ? { type: "gps", label: "Live Location" }
-      : hasCitySearch
-      ? { type: "city", label: `City Center (${cityFilter || searchFilter})` }
-      : { type: "none", label: "Default Region" };
+    // Validate coordinates if provided
+    if (latProvided || lngProvided) {
+      if (
+        userLat === null ||
+        userLng === null ||
+        !Number.isFinite(userLat) ||
+        !Number.isFinite(userLng) ||
+        userLat < -90 ||
+        userLat > 90 ||
+        userLng < -180 ||
+        userLng > 180
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Invalid coordinates provided: latitude must be between -90 and 90, longitude between -180 and 180.",
+            hospitals: [],
+          },
+          { status: 400 }
+        );
+      }
+    }
 
-    // Target search coords for discovering facilities in chosen region
-    const refLat = hasGps ? userLat! : 16.3067;
-    const refLng = hasGps ? userLng! : 80.4365;
+    // Require either explicit coordinates or explicit city search
+    if (!latProvided && !lngProvided && !hasCitySearch) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Missing required location: valid latitude and longitude coordinates or explicit city parameter are required.",
+          hospitals: [],
+        },
+        { status: 400 }
+      );
+    }
+
+    let refLat: number;
+    let refLng: number;
+    let locationContext: { type: "gps" | "city"; label: string };
+
+    if (latProvided && lngProvided && userLat !== null && userLng !== null) {
+      refLat = userLat;
+      refLng = userLng;
+      locationContext = { type: "gps", label: "Live Location" };
+    } else {
+      const q = (cityFilter || searchFilter).toLowerCase().trim();
+      const matchedCity =
+        ALL_REGION_PRESETS.find((p) => p.name.toLowerCase() === q || p.label.toLowerCase().includes(q)) ||
+        INDIAN_HOSPITALS_DATASET.find(
+          (h) => h.city.toLowerCase() === q || h.address.toLowerCase().includes(q)
+        );
+
+      if (matchedCity) {
+        if ("lat" in matchedCity) {
+          refLat = matchedCity.lat;
+          refLng = matchedCity.lng;
+          locationContext = {
+            type: "city",
+            label: `City Center (${matchedCity.name})`,
+          };
+        } else {
+          refLat = (matchedCity as Hospital).latitude;
+          refLng = (matchedCity as Hospital).longitude;
+          locationContext = {
+            type: "city",
+            label: `City Center (${(matchedCity as Hospital).city})`,
+          };
+        }
+      } else {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Unknown city or region '${cityFilter || searchFilter}'. Please provide valid coordinates or an accredited city name.`,
+            hospitals: [],
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     // True origin coords for calculating distance & driving time from where the patient is
-    const hasPatientOrigin = patientLatParam !== null && !isNaN(patientLatParam) && patientLngParam !== null && !isNaN(patientLngParam);
+    const hasPatientOrigin =
+      patientLatParam !== null &&
+      Number.isFinite(patientLatParam) &&
+      patientLngParam !== null &&
+      Number.isFinite(patientLngParam);
     const originLat = hasPatientOrigin ? patientLatParam! : refLat;
     const originLng = hasPatientOrigin ? patientLngParam! : refLng;
 
     // DYNAMIC POI DISCOVERY: Discover real local hospitals around any coordinate worldwide
     let localCandidates: Hospital[] = [];
-    if (hasGps) {
+    if (Number.isFinite(refLat) && Number.isFinite(refLng)) {
       try {
         const liveDiscovered = await discoverHospitalsNearCoordinates(refLat, refLng, 40);
         if (liveDiscovered && liveDiscovered.length > 0) {
@@ -256,13 +332,17 @@ export async function GET(request: Request) {
       count: sortedHospitals.length,
       eligibleCount: eligibleFacilities.length,
       locationContext,
-      userLocationDetected: hasGps,
+      userLocationDetected: latProvided && lngProvided,
       userCoordinates: { lat: refLat, lng: refLng },
       hospitals: sortedHospitals,
     });
   } catch (error: any) {
+    console.error("[HospitalsRouteError]", error);
     return NextResponse.json(
-      { status: "error", message: error?.message || "Failed to fetch hospital care routing data" },
+      {
+        status: "error",
+        message: process.env.NODE_ENV === "production" ? "Failed to retrieve healthcare facilities directory" : (error?.message || "Failed to fetch hospital care routing data"),
+      },
       { status: 500 }
     );
   }

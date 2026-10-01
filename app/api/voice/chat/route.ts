@@ -147,6 +147,10 @@ export async function POST(request: Request) {
       wordCount: audioMetrics?.wordCount,
       energyVariance: audioMetrics?.energyVariance,
       pitchVariance: audioMetrics?.pitchVariance,
+      meanF0Hz: audioMetrics?.meanF0Hz,
+      speechPauseRatio: audioMetrics?.speechPauseRatio,
+      meanPauseDurationMs: audioMetrics?.meanPauseDurationMs,
+      isLiveDsp: audioMetrics?.isLiveDsp,
     });
 
     let ageNum: number | null = null;
@@ -652,8 +656,9 @@ export async function POST(request: Request) {
       },
     });
   } catch (error: any) {
+    console.error("[VoiceChatError]", error);
     return NextResponse.json(
-      { error: error?.message || "Internal server error during multi-agent clinical consultation." },
+      { error: process.env.NODE_ENV === "production" ? "Internal server error during clinical consultation." : (error?.message || "Internal server error during multi-agent clinical consultation.") },
       { status: 500 }
     );
   }

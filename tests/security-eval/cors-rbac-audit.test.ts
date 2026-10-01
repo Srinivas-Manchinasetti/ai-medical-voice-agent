@@ -26,6 +26,7 @@ import { POST as postVoiceChat } from "../../app/api/voice/chat/route";
 import { POST as postVoiceTTS } from "../../app/api/voice/tts/route";
 import { POST as postVoiceSTT } from "../../app/api/voice/stt/route";
 import { checkRateLimit, resetRateLimitStore } from "../../lib/security/rate-limiter";
+import nextConfig from "../../next.config";
 
 // Ensure test environment is explicitly set for test runner
 (process.env as Record<string, string | undefined>).NODE_ENV = "test";
@@ -537,6 +538,48 @@ async function runSecurityAndAuditTestSuite() {
         params: Promise.resolve({ id: "MED-2026-ACS-8841" }),
       });
       assert(prodFhirRes.status === 401, "Production FHIR export enforces 401 authentication wall (no demo leakage)");
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+    }
+  }
+
+  // TEST 9: Production Error Sanitization & CSP Invariants
+  console.log("\n[Test Suite 9] Production Error Sanitization & Content-Security-Policy Invariants");
+  {
+    // 1. Verify Content-Security-Policy-Report-Only is registered in next.config.ts
+    const headersList = typeof nextConfig.headers === "function" ? await nextConfig.headers() : [];
+    const globalHeaderRule = headersList.find(h => h.source === "/(.*)");
+    assert(Boolean(globalHeaderRule), "next.config.ts defines global security headers rule for /(.*)");
+
+    const cspHeader = globalHeaderRule?.headers.find(h => h.key === "Content-Security-Policy-Report-Only");
+    assert(Boolean(cspHeader), "next.config.ts includes Content-Security-Policy-Report-Only header");
+    assert(cspHeader!.value.includes("default-src 'self'"), "CSP restricts default-src to 'self'");
+    assert(cspHeader!.value.includes("media-src 'self' blob: data:"), "CSP allows required media sources for audio playback");
+    assert(cspHeader!.value.includes("worker-src 'self' blob:"), "CSP allows required worker sources for neural TTS WebWorkers");
+    assert(cspHeader!.value.includes("clerk.accounts.dev"), "CSP whitelists Clerk authentication origins");
+    assert(cspHeader!.value.includes("tile.openstreetmap.org"), "CSP whitelists OpenStreetMap tile servers");
+    assert(cspHeader!.value.includes("wss://api.assemblyai.com"), "CSP whitelists AssemblyAI WebSocket endpoint");
+
+    // 2. Production Error Sanitization: Verify internal details are hidden in production
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+
+      // Test STT error sanitization when backend fails or file is empty
+      const badSTTReq = new Request("https://medvoice.org/api/voice/stt", {
+        method: "POST",
+        body: new FormData(),
+      });
+      const badSTTRes = await postVoiceSTT(badSTTReq);
+      assert(badSTTRes.status === 400, "STT rejects empty audio with 400 Bad Request");
+
+      // Verify that in production, sensitive details are NOT exposed
+      const prodTokenReq = new Request("https://medvoice.org/api/voice/token");
+      // GET token without ASSEMBLYAI_API_KEY returns fallback notice without internal paths
+      const tokenRes = await (await import("../../app/api/voice/token/route")).GET();
+      const tokenJson = await tokenRes.json();
+      assert(tokenJson.hasAssemblyKey === false, "Voice token safely reports absence of cloud key");
+      assert(!tokenJson.error?.includes("C:\\") && !tokenJson.error?.includes("/Users/"), "Error message never contains internal disk paths");
     } finally {
       (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
     }

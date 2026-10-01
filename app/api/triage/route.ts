@@ -3,7 +3,11 @@ import { evaluateSafetyArbiter } from "@/lib/triage/safety-arbiter";
 import { getAuthContext } from "@/lib/auth/rbac";
 import { logAuditEventAsync } from "@/lib/audit/audit-logger";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL =
+  process.env.BACKEND_URL ||
+  process.env.FASTAPI_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "http://localhost:8000";
 
 export async function POST(request: Request) {
   try {
@@ -130,8 +134,12 @@ export async function POST(request: Request) {
       },
     });
   } catch (error: any) {
+    console.error("[TriageRouteError]", error);
     return NextResponse.json(
-      { status: "error", message: error?.message || "Internal server error" },
+      {
+        status: "error",
+        message: process.env.NODE_ENV === "production" ? "Internal clinical triage processing error" : (error?.message || "Internal server error"),
+      },
       { status: 500 }
     );
   }

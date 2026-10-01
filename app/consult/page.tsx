@@ -61,6 +61,7 @@ import { PulseHeart } from "@/components/clinical/PulseHeart";
 import { SwipeToast } from "@/components/feedback/SwipeToast";
 import { PeekRating } from "@/components/feedback/PeekRating";
 import { splitIntoSpeechChunks } from "@/lib/audio/sentence-splitter";
+import { AcousticDSPAnalyzer, LiveAudioMetrics } from "@/lib/acoustic/acoustic-dsp-analyzer";
 
 
 type AudioState =
@@ -520,8 +521,8 @@ export default function ConsultPage() {
   const clinicalThoughtSteps: ThoughtStep[] = [
     {
       id: "step-audio",
-      label: "Voice stream captured (16kHz PCM audio)",
-      detail: audioState === "PATIENT_LISTENING" ? "Streaming low-latency microphone intake" : "Acoustic intake channel ready",
+      label: "Voice stream captured (high-fidelity audio)",
+      detail: audioState === "PATIENT_LISTENING" ? "Streaming clear microphone intake" : "Acoustic intake channel ready",
       status: callActive || audioState !== "IDLE" ? "completed" : "pending"
     },
     {
@@ -629,8 +630,6 @@ export default function ConsultPage() {
   const consultationCompletedAtRef = useRef<number | null>(null);
   const lastDoctorSpeechRef = useRef<string>("");
   const lastDoctorSpeechTimeRef = useRef<number>(0);
-  const preferredFemaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  const preferredMaleVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const persistentAudioRef = useRef<HTMLAudioElement | null>(null);
   const playbackSessionTokenRef = useRef<number>(0);
@@ -640,7 +639,8 @@ export default function ConsultPage() {
   const accumulatedTranscriptRef = useRef<string>("");
   const transcriptTextRef = useRef<string>("");
   const startSpeechRecognitionListeningRef = useRef<() => void>(() => {});
-  const handleUserUtteranceRef = useRef<(userText: string, isBargeIn?: boolean) => void>(() => {});
+  const handleUserUtteranceRef = useRef<(userText: string, isBargeIn?: boolean, audioMetrics?: LiveAudioMetrics) => void>(() => {});
+  const acousticAnalyzerRef = useRef<AcousticDSPAnalyzer | null>(null);
 
   // Canonical Whisper ASR Audio Capture refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -710,10 +710,28 @@ export default function ConsultPage() {
         audio.load();
       } catch {}
     }
+    if (persistentAudioRef.current) {
+      try {
+        const pAudio = persistentAudioRef.current;
+        pAudio.onended = null;
+        pAudio.onerror = null;
+        pAudio.onplaying = null;
+        pAudio.onloadeddata = null;
+        pAudio.oncanplay = null;
+        pAudio.pause();
+        pAudio.removeAttribute("src");
+        pAudio.load();
+      } catch {}
+    }
   }, []);
 
   // Cleanly stops active microphone and removes all event listeners to prevent hardware / thread locks
   const stopSpeechRecognitionListening = useCallback(() => {
+    if (acousticAnalyzerRef.current) {
+      acousticAnalyzerRef.current.dispose();
+      acousticAnalyzerRef.current = null;
+    }
+
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
@@ -748,6 +766,33 @@ export default function ConsultPage() {
     }
   }, []);
 
+  // Top-level unmount lifecycle cleanup: ensures no audio keeps playing, speech synthesis is halted,
+  // in-flight async TTS generation is discarded, and microphone hardware tracks are stopped on route departure.
+  useEffect(() => {
+    return () => {
+      playbackSessionTokenRef.current += 1;
+      stopSpeechRecognitionListening();
+      stopAndClearActiveAudio();
+      if (acousticAnalyzerRef.current) {
+        acousticAnalyzerRef.current.dispose();
+        acousticAnalyzerRef.current = null;
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+    };
+  }, [stopSpeechRecognitionListening, stopAndClearActiveAudio]);
+
   // Cancels recording without transcribing or sending — pure discard-and-return-to-IDLE
   const cancelVoiceRecording = useCallback(() => {
     if (silenceTimerRef.current) {
@@ -776,6 +821,18 @@ export default function ConsultPage() {
     // Stop browser interim speech recognition
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch {}
+    }
+
+    // Extract live acoustic metrics from DSP analyzer prior to stopping media tracks
+    let liveAudioMetrics: LiveAudioMetrics | undefined;
+    if (acousticAnalyzerRef.current) {
+      try {
+        liveAudioMetrics = acousticAnalyzerRef.current.finalize();
+      } catch (dspErr) {
+        console.warn("Acoustic DSP finalization notice:", dspErr);
+      }
+      acousticAnalyzerRef.current.dispose();
+      acousticAnalyzerRef.current = null;
     }
 
     // Retrieve recorded utterance from MediaRecorder
@@ -835,7 +892,7 @@ export default function ConsultPage() {
 
     console.log("🎤 Finalized patient utterance:", finalTranscript);
     setAudioState("PROCESSING_CLINICAL");
-    handleUserUtteranceRef.current?.(finalTranscript);
+    handleUserUtteranceRef.current?.(finalTranscript, false, liveAudioMetrics);
   }, [stopSpeechRecognitionListening]);
 
   // Immediate Barge-In: cleanly halts doctor TTS and starts listening
@@ -1476,8 +1533,27 @@ export default function ConsultPage() {
 
     // 1. Initialize MediaRecorder for canonical Whisper ASR
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      }).then((stream) => {
         mediaStreamRef.current = stream;
+
+        // Initialize Live Paralinguistic DSP Analyzer on the active MediaStream
+        try {
+          if (acousticAnalyzerRef.current) {
+            acousticAnalyzerRef.current.dispose();
+          }
+          const analyzer = new AcousticDSPAnalyzer();
+          analyzer.start(stream);
+          acousticAnalyzerRef.current = analyzer;
+        } catch (dspErr) {
+          console.warn("Acoustic DSP Analyzer initialization notice:", dspErr);
+        }
+
         try {
           let mimeType = "";
           if (typeof MediaRecorder !== "undefined") {
@@ -1753,7 +1829,7 @@ export default function ConsultPage() {
   };
 
   // Process User Utterance (Preserves exact spoken text without artificial tag prefixes)
-  const handleUserUtterance = async (userText: string, isBargeIn: boolean = false) => {
+  const handleUserUtterance = async (userText: string, isBargeIn: boolean = false, audioMetrics?: LiveAudioMetrics) => {
     const cleanUserText = userText.trim();
     if (!cleanUserText) return;
 
@@ -1796,6 +1872,7 @@ export default function ConsultPage() {
           interviewState: interviewState,
           userLocation: userLocation || undefined,
           locationPermission: locationPermission,
+          audioMetrics: audioMetrics || undefined,
         }),
       });
 
@@ -2116,7 +2193,7 @@ export default function ConsultPage() {
                   <span className="font-mono text-xs font-bold uppercase tracking-wider text-slate-600">
                     Clinical Specialist Network (5 Board-Certified Agents)
                   </span>
-                  <span className="text-xs text-slate-500 font-mono">16kHz PCM Stream Ready</span>
+                  <span className="text-xs text-slate-500 font-mono">High-Definition Audio</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2178,8 +2255,8 @@ export default function ConsultPage() {
                   <div className="text-[11px] text-slate-500 mt-0.5">Purged post-transcription</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
-                  <div className="text-xs font-bold text-slate-900 font-mono">SUB-120MS VOICE</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Real-time bi-directional</div>
+                  <div className="text-xs font-bold text-slate-900 font-mono">NATURAL VOICE</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Real-time clinical dialogue</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs text-center">
                   <div className="text-xs font-bold text-slate-900 font-mono">HL7 FHIR R4 READY</div>
@@ -2343,6 +2420,26 @@ export default function ConsultPage() {
               </div>
             </div>
 
+            {/* Visually hidden screen reader status announcement */}
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {audioState === "PATIENT_LISTENING"
+                ? "Microphone listening for patient speech."
+                : audioState === "PROCESSING_TRANSCRIPTION"
+                ? "Transcribing patient speech."
+                : audioState === "PROCESSING_CLINICAL" || audioState === "PROCESSING_INTERRUPTION"
+                ? "Reviewing symptoms and updating clinical assessment."
+                : audioState === "DOCTOR_SPEAKING"
+                ? `${activeSpeaker.name.split(",")[0]} is speaking.`
+                : micPermissionError
+                ? `Microphone alert: ${micPermissionError}`
+                : "Consultation ready."}
+            </div>
+
             {/* Quiet Barge-In Interruption Bar */}
             <AnimatePresence>
               {audioState === "DOCTOR_SPEAKING" && (
@@ -2354,7 +2451,7 @@ export default function ConsultPage() {
                 >
                   <span className="font-medium flex items-center gap-2">
                     <Volume2 className="w-4 h-4 text-amber-600" />
-                    Doctor is speaking. Speak aloud or click to interrupt:
+                    Doctor is speaking. Click Interrupt to speak
                   </span>
                   <button
                     type="button"

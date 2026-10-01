@@ -7,6 +7,10 @@ export interface RawAudioAnalysisInput {
   wordCount?: number;
   energyVariance?: number;
   pitchVariance?: number;
+  meanF0Hz?: number | null;
+  speechPauseRatio?: number;
+  meanPauseDurationMs?: number;
+  isLiveDsp?: boolean;
   transcriptText?: string;
 }
 
@@ -23,12 +27,16 @@ export function extractSpeechFeatures(input: RawAudioAnalysisInput): SpeechFeatu
   const wordCount = input.wordCount || (text ? text.split(/\s+/).length : 1);
   const durationMs = input.durationMs || Math.max(1000, wordCount * 450);
 
-  // 1. Measured Features
+  // 1. Measured Features (Prefer live DSP measurements; use heuristics only when metrics are absent)
   const pauseCount = input.pauseCount !== undefined ? input.pauseCount : (text.match(/[,\.\.\?\!\-]/g) || []).length;
   const totalPauseDurationMs = input.totalPauseDurationMs !== undefined ? input.totalPauseDurationMs : pauseCount * 420;
   
-  const speech_pause_ratio = Math.min(1.0, Math.max(0.0, Number((totalPauseDurationMs / durationMs).toFixed(2))));
-  const mean_pause_duration_ms = pauseCount > 0 ? Math.round(totalPauseDurationMs / pauseCount) : 250;
+  const speech_pause_ratio = input.speechPauseRatio !== undefined
+    ? input.speechPauseRatio
+    : Math.min(1.0, Math.max(0.0, Number((totalPauseDurationMs / durationMs).toFixed(2))));
+  const mean_pause_duration_ms = input.meanPauseDurationMs !== undefined
+    ? input.meanPauseDurationMs
+    : (pauseCount > 0 ? Math.round(totalPauseDurationMs / pauseCount) : 250);
   
   const minutes = durationMs / 60000;
   const speech_rate_wpm = minutes > 0 ? Math.round(wordCount / minutes) : 120;
@@ -53,6 +61,9 @@ export function extractSpeechFeatures(input: RawAudioAnalysisInput): SpeechFeatu
   if (voice_energy_variability > 0.30 || pitch_variability > 0.30) {
     observations.push("Acoustic energy volatility and pitch instability noted");
   }
+  if (input.meanF0Hz && input.meanF0Hz > 0) {
+    observations.push(`Mean fundamental frequency observed: ${input.meanF0Hz} Hz`);
+  }
 
   // Check text indicators of respiratory pauses
   const hasGaspingWords = /\b(gasp|pant|cannot\s+breathe|hard\s+to\s+breathe|out\s+of\s+breath)\b/i.test(text);
@@ -61,14 +72,16 @@ export function extractSpeechFeatures(input: RawAudioAnalysisInput): SpeechFeatu
   }
 
   // 3. Clinical Relevance Signal (Carefully bounded, not overclaimed)
+  // SAFETY INVARIANT: Live acoustic DSP must NEVER derive "severe" respiratory distress or trigger emergency
+  // escalation. Live DSP is strictly an observational telemetry layer.
   let respiratory_distress_signal: "unlikely" | "possible" | "probable" | "severe" = "unlikely";
   let vocal_instability_signal: "none" | "mild" | "pronounced" = "none";
   let confidence = 0.55;
 
-  if (speech_pause_ratio > 0.45 && (hasGaspingWords || speech_rate_wpm < 70)) {
+  if (hasGaspingWords && speech_pause_ratio > 0.45 && !input.isLiveDsp) {
     respiratory_distress_signal = "severe";
     confidence = 0.88;
-  } else if (speech_pause_ratio > 0.32 || hasGaspingWords) {
+  } else if (hasGaspingWords || speech_pause_ratio > 0.32) {
     respiratory_distress_signal = "probable";
     confidence = 0.74;
   } else if (speech_pause_ratio > 0.22) {

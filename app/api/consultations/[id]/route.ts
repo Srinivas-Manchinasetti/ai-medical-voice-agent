@@ -139,8 +139,9 @@ export async function GET(
 
     return NextResponse.json({ success: true, consultation: record });
   } catch (error: any) {
+    console.error("[ConsultationByIdError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Internal server error" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Internal server error retrieving consultation" : (error?.message || "Internal server error") },
       { status: 500 }
     );
   }

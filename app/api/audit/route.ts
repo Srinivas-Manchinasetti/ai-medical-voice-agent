@@ -92,8 +92,9 @@ export async function GET(request: Request) {
       events,
     });
   } catch (error: any) {
+    console.error("[AuditInspectionError]", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "Audit inspection failure" },
+      { success: false, error: process.env.NODE_ENV === "production" ? "Audit ledger inspection failure" : (error?.message || "Audit inspection failure") },
       { status: 500 }
     );
   }

@@ -64,21 +64,22 @@ const InteractiveRouteMap = dynamic(
   }
 );
 
+export type LocationStatus =
+  | "LOCATION_UNKNOWN"
+  | "LOCATION_PERMISSION_REQUESTED"
+  | "LOCATION_PERMISSION_DENIED"
+  | "LOCATION_RESOLVED"
+  | "LOCATION_MANUALLY_SELECTED";
+
 export type LocationSource = "gps" | "preset" | "search" | "manual_pin";
 
-interface CareOrigin {
+export interface CareOrigin {
   lat: number;
   lng: number;
   label: string;
   source: LocationSource;
+  resolvedAt?: number;
 }
-
-const DEFAULT_ORIGIN: CareOrigin = {
-  lat: ALL_REGION_PRESETS[0].lat,
-  lng: ALL_REGION_PRESETS[0].lng,
-  label: ALL_REGION_PRESETS[0].label,
-  source: "preset",
-};
 
 const STORAGE_KEY = "medvoice_care_origin";
 const PAGE_SIZE = 10;
@@ -86,13 +87,14 @@ const PAGE_SIZE = 10;
 export default function CarePage() {
   const [hospitals, setHospitals] = useState<HospitalItem[]>([]);
   const [selectedHospital, setSelectedHospital] = useState<HospitalItem | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
 
-  // Patient departure location state (where the user actually is)
-  const [userLocation, setUserLocation] = useState<CareOrigin>(DEFAULT_ORIGIN);
-  // Target hospital exploration region state
-  const [searchRegion, setSearchRegion] = useState<CareOrigin>(DEFAULT_ORIGIN);
-  const [isOriginInitialized, setIsOriginInitialized] = useState<boolean>(false);
+  // Authoritative location state machine
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("LOCATION_UNKNOWN");
+  // Patient departure location state (where the user actually is) - NULL on initial mount
+  const [userLocation, setUserLocation] = useState<CareOrigin | null>(null);
+  // Target hospital exploration region state - NULL on initial mount
+  const [searchRegion, setSearchRegion] = useState<CareOrigin | null>(null);
 
   const [isDetectingGps, setIsDetectingGps] = useState<boolean>(false);
   const [isManualPicking, setIsManualPicking] = useState<boolean>(false);
@@ -168,51 +170,97 @@ export default function CarePage() {
     });
   };
 
-  // 1. Check saved location or auto-detect user's live location on mount
+  // 1. Session Storage Restore on Mount: ONLY restore verified locations, discard unverified legacy defaults
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    let restored = false;
     try {
       const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed?.userLocation && parsed?.searchRegion) {
-          setUserLocation(parsed.userLocation);
-          setSearchRegion(parsed.searchRegion);
-          setIsOriginInitialized(true);
-          restored = true;
-        } else if (parsed?.lat && parsed?.lng) {
-          setUserLocation(parsed);
-          setSearchRegion(parsed);
-          setIsOriginInitialized(true);
-          restored = true;
+        const candidate = parsed?.userLocation || parsed;
+        const target = parsed?.searchRegion || candidate;
+
+        const allowedSources: LocationSource[] = ["gps", "preset", "search", "manual_pin"];
+        const isValidSource = allowedSources.includes(candidate?.source);
+        const hasValidCoords =
+          candidate &&
+          Number.isFinite(candidate.lat) &&
+          Number.isFinite(candidate.lng) &&
+          candidate.lat >= -90 &&
+          candidate.lat <= 90 &&
+          candidate.lng >= -180 &&
+          candidate.lng <= 180;
+        const isValidLabel = typeof candidate?.label === "string" && candidate.label.trim().length > 0;
+
+        // Invalidate legacy default records (which had Amaravati 16.5131, 80.5165 without explicit user action)
+        const isLegacyDefault =
+          !candidate?.resolvedAt &&
+          Math.abs(candidate?.lat - 16.5131) < 0.001 &&
+          Math.abs(candidate?.lng - 80.5165) < 0.001;
+
+        if (isValidSource && hasValidCoords && isValidLabel && !isLegacyDefault) {
+          const restoredOrigin: CareOrigin = {
+            lat: candidate.lat,
+            lng: candidate.lng,
+            label: candidate.label,
+            source: candidate.source,
+            resolvedAt: candidate.resolvedAt || Date.now(),
+          };
+          const restoredTarget: CareOrigin = {
+            lat: target.lat,
+            lng: target.lng,
+            label: target.label,
+            source: target.source || candidate.source,
+            resolvedAt: target.resolvedAt || Date.now(),
+          };
+          const nextStatus: LocationStatus =
+            candidate.source === "gps" ? "LOCATION_RESOLVED" : "LOCATION_MANUALLY_SELECTED";
+
+          setUserLocation(restoredOrigin);
+          setSearchRegion(restoredTarget);
+          setLocationStatus(nextStatus);
+          loadFacilities(restoredTarget, restoredOrigin, specialtyFilter);
+          return;
+        } else {
+          sessionStorage.removeItem(STORAGE_KEY);
         }
       }
     } catch (e) {
       console.warn("Could not restore saved search origin:", e);
+      sessionStorage.removeItem(STORAGE_KEY);
     }
 
-    // If no previous location was saved, automatically detect live location from user
-    if (!restored) {
-      handleDetectLiveLocation(true);
-    }
+    // CRITICAL: When no valid persisted location exists, status remains LOCATION_UNKNOWN
+    // and userLocation remains null. ZERO hospital discovery requests are made.
   }, []);
 
   // 2. Fetch facilities based on target region and user departure location
+  // STRICTLY GATED: Cannot run unless departureOrigin and targetRegion have valid numeric coordinates
   const loadFacilities = async (
     targetRegion: CareOrigin,
-    departureOrigin?: CareOrigin,
+    departureOrigin: CareOrigin,
     targetSpecialty?: string
   ) => {
+    if (
+      !targetRegion ||
+      !Number.isFinite(targetRegion.lat) ||
+      !Number.isFinite(targetRegion.lng) ||
+      !departureOrigin ||
+      !Number.isFinite(departureOrigin.lat) ||
+      !Number.isFinite(departureOrigin.lng)
+    ) {
+      console.warn("[CarePage] Aborted loadFacilities: Missing verified departure coordinates.");
+      return;
+    }
+
     setLoading(true);
     setCurrentPage(1);
     try {
-      const departure = departureOrigin || userLocation;
       const activeSpec = targetSpecialty !== undefined ? targetSpecialty : specialtyFilter;
       const specialtyParam = activeSpec && activeSpec !== "all" ? `&specialty=${encodeURIComponent(activeSpec)}` : "";
       const res = await fetch(
-        `/api/hospitals?lat=${targetRegion.lat}&lng=${targetRegion.lng}&patientLat=${departure.lat}&patientLng=${departure.lng}${specialtyParam}`
+        `/api/hospitals?lat=${targetRegion.lat}&lng=${targetRegion.lng}&patientLat=${departureOrigin.lat}&patientLng=${departureOrigin.lng}${specialtyParam}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -234,16 +282,18 @@ export default function CarePage() {
         }
       }
       setSearchRegion(targetRegion);
-      if (departureOrigin) {
-        setUserLocation(departureOrigin);
-      }
+      setUserLocation(departureOrigin);
 
-      // Persist active locations so refresh preserves them
+      // Persist ONLY verified, explicitly resolved/selected location
       if (typeof window !== "undefined") {
         try {
           sessionStorage.setItem(
             STORAGE_KEY,
-            JSON.stringify({ userLocation: departure, searchRegion: targetRegion })
+            JSON.stringify({
+              userLocation: departureOrigin,
+              searchRegion: targetRegion,
+              resolvedAt: Date.now(),
+            })
           );
         } catch { }
       }
@@ -254,22 +304,31 @@ export default function CarePage() {
     }
   };
 
-  // Load facilities once initialized or when specialty filter changes
+  // Load facilities when specialty filter changes ONLY if location is already resolved/manually selected
   useEffect(() => {
-    if (isOriginInitialized) {
+    if (
+      (locationStatus === "LOCATION_RESOLVED" || locationStatus === "LOCATION_MANUALLY_SELECTED") &&
+      userLocation &&
+      searchRegion &&
+      Number.isFinite(userLocation.lat) &&
+      Number.isFinite(userLocation.lng) &&
+      Number.isFinite(searchRegion.lat) &&
+      Number.isFinite(searchRegion.lng)
+    ) {
       loadFacilities(searchRegion, userLocation, specialtyFilter);
     }
-  }, [isOriginInitialized, specialtyFilter]);
+  }, [specialtyFilter]);
 
-  // Handle GPS detection with high-to-low accuracy automatic fallback
-  const handleDetectLiveLocation = (isAutoInit = false) => {
+  // Handle GPS detection: strictly user-initiated
+  const handleDetectLiveLocation = () => {
     if (typeof window === "undefined") return;
 
     if (!("geolocation" in navigator)) {
-      if (isAutoInit) setIsOriginInitialized(true);
+      setLocationStatus("LOCATION_PERMISSION_DENIED");
       return;
     }
 
+    setLocationStatus("LOCATION_PERMISSION_REQUESTED");
     setIsDetectingGps(true);
 
     const onLocationSuccess = async (pos: GeolocationPosition) => {
@@ -301,53 +360,48 @@ export default function CarePage() {
         lng: longitude,
         label,
         source: "gps",
+        resolvedAt: Date.now(),
       };
 
       setUserLocation(newGpsOrigin);
       setSearchRegion(newGpsOrigin);
-      setIsOriginInitialized(true);
+      setLocationStatus("LOCATION_RESOLVED");
       setIsDetectingGps(false);
       setSearchQuery("");
-      loadFacilities(newGpsOrigin, newGpsOrigin);
+      loadFacilities(newGpsOrigin, newGpsOrigin, specialtyFilter);
     };
 
     const onLocationError = (err: GeolocationPositionError) => {
-      console.warn("[CarePage] High-accuracy GPS failed, trying Wi-Fi/IP location fallback:", err.message);
-      // Fallback with low accuracy (ideal for desktop/laptops without GPS chips)
-      navigator.geolocation.getCurrentPosition(
-        onLocationSuccess,
-        (fallbackErr) => {
-          console.warn("[CarePage] Geolocation unavailable:", fallbackErr.message);
-          setIsDetectingGps(false);
-          if (isAutoInit) {
-            setIsOriginInitialized(true);
-          } else {
-            alert("Could not detect precise location. You can select a city preset or use 'Map Pin' to set manually.");
-          }
-        },
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 600000 }
-      );
+      console.warn("[CarePage] Geolocation failed/denied:", err.message);
+      setIsDetectingGps(false);
+      setLocationStatus("LOCATION_PERMISSION_DENIED");
+      // NEVER silently substitute Vijayawada or trigger fallback discovery.
+      // ZERO hospital requests are triggered.
     };
 
     navigator.geolocation.getCurrentPosition(onLocationSuccess, onLocationError, {
       enableHighAccuracy: true,
-      timeout: 4500,
-      maximumAge: 180000,
+      timeout: 8000,
+      maximumAge: 60000,
     });
   };
 
-  // Handle preset city selection (Explores hospitals in target city from userLocation)
+  // Handle preset city selection: explicit user choice
   const handleSelectPreset = (preset: RegionPresetItem) => {
     setIsManualPicking(false);
     setSearchQuery("");
     setShowDropdown(false);
-    const targetRegion: CareOrigin = {
+    const chosenOrigin: CareOrigin = {
       lat: preset.lat,
       lng: preset.lng,
       label: preset.label,
       source: "preset",
+      resolvedAt: Date.now(),
     };
-    loadFacilities(targetRegion, userLocation);
+    setUserLocation(chosenOrigin);
+    setSearchRegion(chosenOrigin);
+    setLocationStatus("LOCATION_MANUALLY_SELECTED");
+    loadFacilities(chosenOrigin, chosenOrigin, specialtyFilter);
   };
 
   // Handle Search Input Autocomplete
@@ -388,22 +442,30 @@ export default function CarePage() {
   const handleSelectSearchResult = (result: { display_name: string; lat: string; lon: string }) => {
     const lat = parseFloat(result.lat);
     const lng = parseFloat(result.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
     setShowDropdown(false);
     setSearchQuery("");
     setIsManualPicking(false);
     const labelParts = result.display_name.split(",");
     const shortLabel = labelParts.slice(0, 2).join(",").trim();
-    const targetRegion: CareOrigin = {
+    const chosenOrigin: CareOrigin = {
       lat,
       lng,
       label: shortLabel,
       source: "search",
+      resolvedAt: Date.now(),
     };
-    loadFacilities(targetRegion, userLocation);
+    setUserLocation(chosenOrigin);
+    setSearchRegion(chosenOrigin);
+    setLocationStatus("LOCATION_MANUALLY_SELECTED");
+    loadFacilities(chosenOrigin, chosenOrigin, specialtyFilter);
   };
 
   const handleConfirmManualLocation = async (lat: number, lng: number) => {
     setIsManualPicking(false);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
     let label = `Selected Pin (${lat.toFixed(3)}°N, ${lng.toFixed(3)}°E)`;
     try {
       const revRes = await fetch(
@@ -431,12 +493,18 @@ export default function CarePage() {
       lng,
       label,
       source: "manual_pin",
+      resolvedAt: Date.now(),
     };
-    loadFacilities(newOrigin, newOrigin);
+    setUserLocation(newOrigin);
+    setSearchRegion(newOrigin);
+    setLocationStatus("LOCATION_MANUALLY_SELECTED");
+    loadFacilities(newOrigin, newOrigin, specialtyFilter);
   };
 
   const handleSetRegionAsDeparture = () => {
-    loadFacilities(searchRegion, searchRegion);
+    if (searchRegion) {
+      loadFacilities(searchRegion, searchRegion, specialtyFilter);
+    }
   };
 
   // Filter & Sort Hospitals: Prioritize specialized facilities first when a medical issue is selected
@@ -518,8 +586,10 @@ export default function CarePage() {
     return pages;
   }, [totalPages, currentPage]);
 
-  const currentGoogleMapsUrl = selectedHospital
+  const currentGoogleMapsUrl = selectedHospital && userLocation
     ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${selectedHospital.latitude},${selectedHospital.longitude}&travelmode=driving`
+    : selectedHospital
+    ? `https://www.google.com/maps/search/?api=1&query=${selectedHospital.latitude},${selectedHospital.longitude}`
     : "#";
 
   return (
@@ -549,40 +619,62 @@ export default function CarePage() {
             {/* Departure Origin & Target Region Status Badges */}
             <div className="flex items-center gap-2 flex-wrap text-xs font-mono font-semibold">
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs">
-                {isDetectingGps ? (
+                {isDetectingGps || locationStatus === "LOCATION_PERMISSION_REQUESTED" ? (
                   <div className="flex items-center gap-2 text-cyan-700">
                     <span className="w-2.5 h-2.5 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin" />
                     <span className="font-bold">Accessing your live GPS...</span>
                   </div>
-                ) : userLocation.source === "gps" ? (
+                ) : userLocation?.source === "gps" ? (
                   <>
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="text-emerald-700 font-bold">📍 Live GPS:</span>
                     <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
                     <button
-                      onClick={() => handleDetectLiveLocation(false)}
+                      onClick={() => handleDetectLiveLocation()}
                       title="Refresh current GPS location"
                       className="ml-1 text-[10.5px] text-cyan-700 hover:text-cyan-900 underline font-bold cursor-pointer"
                     >
                       Refresh
                     </button>
                   </>
-                ) : (
+                ) : userLocation ? (
                   <>
                     <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
                     <span className="text-cyan-700 font-bold">📍 Your Location:</span>
                     <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
                     <button
-                      onClick={() => handleDetectLiveLocation(false)}
+                      onClick={() => handleDetectLiveLocation()}
                       className="ml-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-cyan-600 text-white hover:bg-cyan-700 transition-colors shadow-2xs cursor-pointer"
                     >
                       Use My GPS
                     </button>
                   </>
+                ) : locationStatus === "LOCATION_PERMISSION_DENIED" ? (
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                    <span className="font-bold">Location Permission Denied</span>
+                    <button
+                      onClick={() => handleDetectLiveLocation()}
+                      className="ml-1 text-[10.5px] text-cyan-700 hover:text-cyan-900 underline font-bold cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                    <span className="font-bold">Location Unknown</span>
+                    <button
+                      onClick={() => handleDetectLiveLocation()}
+                      className="ml-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-cyan-600 text-white hover:bg-cyan-700 transition-colors shadow-2xs cursor-pointer"
+                    >
+                      Enable GPS
+                    </button>
+                  </div>
                 )}
               </div>
 
-              {searchRegion.label !== userLocation.label && (
+              {searchRegion && userLocation && searchRegion.label !== userLocation.label && (
                 <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-50/90 border border-cyan-200/90 text-cyan-900 shadow-2xs">
                   <span>Exploring: <strong className="text-cyan-950">{searchRegion.label}</strong></span>
                   <button
@@ -659,7 +751,7 @@ export default function CarePage() {
                     Mode: Showing All Verified Hospitals & Emergency Centers
                   </span>
                   <p className="text-xs text-slate-600 font-normal mt-0.5">
-                    Viewing all accredited healthcare facilities in <strong className="text-slate-800">{searchRegion.label}</strong>. Driving distance is calculated from <strong className="text-cyan-800">{userLocation.label}</strong>.
+                    Viewing all accredited healthcare facilities{searchRegion ? ` in ${searchRegion.label}` : ""}.{userLocation ? ` Driving distance is calculated from ${userLocation.label}.` : " Choose your location or select a region below."}
                   </p>
                 </div>
               </div>
@@ -761,10 +853,27 @@ export default function CarePage() {
                   </p>
                 </div>
               </div>
-              <span className="text-xs text-cyan-800 font-mono font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live Overpass POI Discovery Active Worldwide
-              </span>
+              {locationStatus === "LOCATION_UNKNOWN" ? (
+                <span className="text-xs text-slate-600 font-mono font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                  Location required to discover facilities
+                </span>
+              ) : locationStatus === "LOCATION_PERMISSION_REQUESTED" ? (
+                <span className="text-xs text-cyan-800 font-mono font-bold flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full border-2 border-cyan-600 border-t-transparent animate-spin" />
+                  Requesting GPS permission...
+                </span>
+              ) : locationStatus === "LOCATION_PERMISSION_DENIED" ? (
+                <span className="text-xs text-amber-700 font-mono font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  GPS unavailable — select a region or search
+                </span>
+              ) : (
+                <span className="text-xs text-cyan-800 font-mono font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live Overpass POI Discovery Active Worldwide
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -805,7 +914,7 @@ export default function CarePage() {
               {/* Action Buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleDetectLiveLocation(false)}
+                  onClick={() => handleDetectLiveLocation()}
                   disabled={isDetectingGps}
                   className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
                 >
@@ -826,63 +935,69 @@ export default function CarePage() {
               </div>
             </div>
 
-            {/* Regional Zone Filter Tabs */}
-            <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100 text-xs">
-              <span className="text-[11px] font-mono text-slate-400 uppercase font-bold mr-1">Zone:</span>
-              {[
-                { id: "all", label: "All Regions (36+)" },
-                { id: "ap_tg", label: "AP & Telangana (15)" },
-                { id: "south", label: "South (KA, TN, KL)" },
-                { id: "west", label: "West (MH, GJ, GA)" },
-                { id: "north", label: "North (DL, NCR, UP, RJ)" },
-                { id: "east_central", label: "East & Central" },
-              ].map((zone) => (
-                <button
-                  key={zone.id}
-                  onClick={() => setSelectedZone(zone.id)}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${selectedZone === zone.id
-                    ? "bg-slate-950 text-white shadow-2xs"
-                    : "bg-white hover:bg-slate-50 text-slate-600 border border-slate-200/80 shadow-2xs"
-                    }`}
-                >
-                  {zone.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Quick Regional Presets (Filtered by Zone) */}
-            <div className="flex items-center gap-1.5 flex-wrap pt-1 text-xs max-h-32 overflow-y-auto pr-1">
-              {ALL_REGION_PRESETS.filter(
-                (p) => selectedZone === "all" || p.zone === selectedZone
-              ).map((preset) => {
-                const isActive =
-                  searchRegion.label.toLowerCase().includes(preset.name.toLowerCase()) ||
-                  (Math.abs(searchRegion.lat - preset.lat) < 0.05 && Math.abs(searchRegion.lng - preset.lng) < 0.05);
-                return (
+            {/* Regional Zone Filter & Preset Pills */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 text-xs scrollbar-none">
+                <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1 shrink-0">Zone:</span>
+                {[
+                  { id: "all", label: "All Regions (36+)" },
+                  { id: "ap_tg", label: "AP & Telangana (15)" },
+                  { id: "south", label: "South (KA, TN, KL)" },
+                  { id: "west", label: "West (MH, GJ, GA)" },
+                  { id: "north", label: "North (DL, NCR, UP, RJ)" },
+                  { id: "east_central", label: "East & Central" },
+                ].map((zone) => (
                   <button
-                    key={preset.name}
-                    onClick={() => handleSelectPreset(preset)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${isActive
-                      ? "bg-cyan-50 text-cyan-800 border-cyan-300 shadow-2xs font-extrabold ring-1 ring-cyan-200"
-                      : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
-                      }`}
+                    key={zone.id}
+                    onClick={() => setSelectedZone(zone.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                      selectedZone === zone.id
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 hover:bg-slate-200/80 text-slate-600"
+                    }`}
                   >
-                    {preset.name}
+                    {zone.label}
                   </button>
-                );
-              })}
+                ))}
+              </div>
+
+              {/* Quick Regional Presets */}
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                {ALL_REGION_PRESETS.filter(
+                  (p) => selectedZone === "all" || p.zone === selectedZone
+                ).map((preset) => {
+                  const isActive = searchRegion
+                    ? (searchRegion.label.toLowerCase().includes(preset.name.toLowerCase()) ||
+                       (Math.abs(searchRegion.lat - preset.lat) < 0.05 && Math.abs(searchRegion.lng - preset.lng) < 0.05))
+                    : false;
+                  return (
+                    <button
+                      key={preset.name}
+                      onClick={() => handleSelectPreset(preset)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-cyan-600 text-white font-bold shadow-xs"
+                          : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80"
+                      }`}
+                    >
+                      {preset.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* 3. DENSE WORKSPACE: LIVE MAP (DOMINANT VISUAL ANCHOR) + SPECIALTY / ROUTE PANEL */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* 3. DENSE WORKSPACE: LIVE MAP (DOMINANT VISUAL ANCHOR) + UNIFIED DESTINATION INTELLIGENCE */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
 
           {/* LEFT: Dominant Live Route Map */}
           <div className="lg:col-span-8 rounded-3xl overflow-hidden shadow-sm border border-slate-200/80 bg-white">
             <InteractiveRouteMap
-              patientCoords={{ lat: userLocation.lat, lng: userLocation.lng }}
-              patientLocationName={userLocation.label}
+              patientCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
+              patientLocationName={userLocation?.label}
+              mapCenter={searchRegion ? { lat: searchRegion.lat, lng: searchRegion.lng } : undefined}
               selectedHospital={selectedHospital}
               allHospitals={filteredAndSortedHospitals.slice(0, 60)}
               isManualPicking={isManualPicking}
@@ -890,52 +1005,83 @@ export default function CarePage() {
               onConfirmManualLocation={handleConfirmManualLocation}
               onCancelManualPicking={() => setIsManualPicking(false)}
               onRouteCalculated={(stats) => setLiveRoadStats(stats)}
+              onRequestLocation={() => handleDetectLiveLocation()}
             />
           </div>
 
-          {/* RIGHT: Specialty Rotary Focus & Active Route Telemetry */}
-          <div className="lg:col-span-4 flex flex-col gap-4">
+          {/* RIGHT: Unified Destination Intelligence Panel */}
+          <div className="lg:col-span-4 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-200/90 shadow-sm p-4 sm:p-5 flex flex-col justify-between gap-4">
 
-            {/* Specialty Rotary Filter Card */}
-            <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col gap-3">
-              <div>
-                <span className="text-[11px] font-mono text-cyan-800 font-bold uppercase tracking-wider block">
-                  CLINICAL SPECIALTY FOCUS
+            {/* Section A: Panel Header & Clinical Specialty Rotary */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-800 text-xs font-bold font-mono">
+                    🎯
+                  </span>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-950 uppercase tracking-wider font-mono">
+                      Destination Intelligence
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      Specialty triage & active route telemetry
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200/80">
+                  Live Nav
                 </span>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Route destination centers by verified sub-specialty readiness.
-                </p>
               </div>
 
-              <OptionWheel
-                options={SPECIALTY_WHEEL_OPTIONS}
-                selectedId={specialtyFilter}
-                onChange={(opt) => {
-                  setSpecialtyFilter(opt.id);
-                  setCurrentPage(1);
-                }}
-                className="w-full"
-              />
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
+                    Clinical Specialty Focus
+                  </span>
+                  {specialtyFilter !== "all" && (
+                    <button
+                      onClick={() => {
+                        setSpecialtyFilter("all");
+                        setCurrentPage(1);
+                      }}
+                      className="text-[10px] font-mono font-bold text-cyan-700 hover:underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <OptionWheel
+                  plain
+                  options={SPECIALTY_WHEEL_OPTIONS}
+                  selectedId={specialtyFilter}
+                  onChange={(opt) => {
+                    setSpecialtyFilter(opt.id);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full"
+                />
+              </div>
             </div>
 
-            {/* Active Selected Destination / Telemetry Card */}
-            {selectedHospital && (
-              <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-cyan-500/30 p-4 sm:p-5 shadow-xs flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200">
-                    Active Destination Route
+            {/* Section B: Active Destination Card (Hero Telemetry & Emergency Actions) */}
+            {selectedHospital ? (
+              <div className="rounded-2xl bg-slate-50/80 border border-slate-200/90 p-3.5 sm:p-4 flex flex-col gap-3 shadow-2xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200/80">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse" />
+                    Active Destination
                   </span>
-                  <span className="text-xs font-mono font-bold text-slate-900">
-                    ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min ETA
+                  <span className="text-xs font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                    ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min drive
                   </span>
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-black text-slate-950 truncate">
+                  <h4 className="text-sm font-black text-slate-950 truncate" title={selectedHospital.name}>
                     {selectedHospital.name}
                   </h4>
-                  <div className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-50 text-amber-900 border border-amber-300 text-[11px] font-bold">
-                    <span>⭐ Famous for:</span>
+                  <div className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-50 text-amber-900 border border-amber-300 text-[11px] font-bold max-w-full">
+                    <span className="shrink-0">⭐ Famous for:</span>
                     <span className="truncate">{selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}</span>
                   </div>
                   <p className="text-xs text-slate-500 truncate mt-1">
@@ -943,11 +1089,11 @@ export default function CarePage() {
                   </p>
                 </div>
 
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-600">
-                    Distance: ~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km
+                <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-600 font-medium">
+                    Distance: <strong className="text-slate-900">~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km</strong>
                   </span>
-                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                  <span className="text-emerald-700 font-bold flex items-center gap-1 text-[11px]">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     Verified ED
                   </span>
@@ -971,6 +1117,32 @@ export default function CarePage() {
                     <span>Directions</span>
                   </a>
                 </div>
+              </div>
+            ) : !userLocation ? (
+              <div className="rounded-2xl border border-dashed border-cyan-200 bg-cyan-50/40 p-4 text-center flex flex-col items-center justify-center gap-2 text-slate-600">
+                <div className="w-10 h-10 rounded-xl bg-cyan-100 flex items-center justify-center text-cyan-700">
+                  <LocateFixed className="w-5 h-5" />
+                </div>
+                <h4 className="text-xs font-bold text-slate-900 uppercase font-mono">Location Required</h4>
+                <p className="text-[11px] text-slate-500 max-w-[220px]">
+                  Provide your location to calculate live driving distance, routing, and nearest emergency triage.
+                </p>
+                <button
+                  onClick={() => handleDetectLiveLocation()}
+                  disabled={isDetectingGps}
+                  className="mt-1 px-3 py-1.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <LocateFixed className="w-3 h-3" />
+                  <span>Use Live GPS</span>
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-center flex flex-col items-center justify-center gap-1.5 text-slate-500">
+                <MapPin className="w-5 h-5 text-slate-400" />
+                <span className="text-xs font-semibold text-slate-700">No destination selected</span>
+                <p className="text-[11px] text-slate-400 max-w-[220px]">
+                  Tap any hospital marker on the map or select from the list below to view live route telemetry.
+                </p>
               </div>
             )}
 
@@ -1053,7 +1225,7 @@ export default function CarePage() {
               </span>
               <div>
                 <span className="text-xs font-bold text-cyan-950 uppercase tracking-wide font-mono block">
-                  {specialtyFilter.toUpperCase()} SPECIALIZED CARE IN {searchRegion.label}
+                  {specialtyFilter.toUpperCase()} SPECIALIZED CARE IN {searchRegion?.label || "Selected Region"}
                 </span>
                 <span className="text-xs text-cyan-800 font-medium">
                   {specializedCount > 0
@@ -1080,6 +1252,37 @@ export default function CarePage() {
             <div className="py-12 text-center text-xs text-slate-400 font-mono flex items-center justify-center gap-2">
               <div className="w-4 h-4 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />
               <span>Scanning and evaluating clinically verified facilities nearby...</span>
+            </div>
+          ) : !userLocation ? (
+            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 text-center flex flex-col items-center justify-center gap-3 shadow-2xs">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700 shadow-2xs">
+                <LocateFixed className="w-6 h-6" />
+              </div>
+              <div className="max-w-md">
+                <h3 className="text-sm font-bold text-slate-950">Choose a Location to View Nearby Hospitals</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  We don't assume your location. Enable GPS or choose your city/region from the list above to discover emergency facilities and verified road routes.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  onClick={() => handleDetectLiveLocation()}
+                  disabled={isDetectingGps}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <LocateFixed className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{isDetectingGps ? "Locating..." : "Use Live GPS"}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const preset = ALL_REGION_PRESETS[0];
+                    if (preset) handleSelectPreset(preset);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs border border-slate-200/90 shadow-2xs transition-all cursor-pointer"
+                >
+                  <span>Select Region</span>
+                </button>
+              </div>
             </div>
           ) : pageHospitals.length === 0 ? (
             <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center flex flex-col items-center justify-center gap-2">
@@ -1109,7 +1312,7 @@ export default function CarePage() {
                     </span>
                     <div>
                       <span className="text-xs font-mono font-black text-slate-900 uppercase tracking-wide block">
-                        All Other Emergency Hospitals in {searchRegion.label}
+                        All Other Emergency Hospitals in {searchRegion?.label || "Selected Region"}
                       </span>
                       <span className="text-[11px] text-slate-500 font-medium">
                         General 24/7 facilities equipped for triage, trauma stabilization, and initial emergency care
@@ -1298,7 +1501,7 @@ export default function CarePage() {
                             View on Map
                           </button>
                           <a
-                            href={`https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving`}
+                            href={userLocation ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving` : `https://www.google.com/maps/search/?api=1&query=${hosp.latitude},${hosp.longitude}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}

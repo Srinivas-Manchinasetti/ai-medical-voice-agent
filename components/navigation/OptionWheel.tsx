@@ -18,6 +18,7 @@ export interface OptionWheelProps {
   selectedId: string;
   onChange: (option: OptionWheelItem) => void;
   className?: string;
+  plain?: boolean;
 }
 
 export function OptionWheel({
@@ -25,6 +26,7 @@ export function OptionWheel({
   selectedId,
   onChange,
   className = "",
+  plain = false,
 }: OptionWheelProps) {
   const currentIndex = options.findIndex((opt) => opt.id === selectedId);
   const activeIdx = currentIndex >= 0 ? currentIndex : 0;
@@ -41,7 +43,11 @@ export function OptionWheel({
 
   return (
     <div
-      className={`relative inline-flex flex-col items-center bg-white/90 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-3 shadow-[0_12px_36px_-8px_rgba(15,23,42,0.08)] ${className}`}
+      className={
+        plain
+          ? `relative flex flex-col items-center w-full ${className}`
+          : `relative inline-flex flex-col items-center bg-white/90 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-3 shadow-[0_12px_36px_-8px_rgba(15,23,42,0.08)] ${className}`
+      }
     >
       {/* Up Button */}
       <button
@@ -53,7 +59,7 @@ export function OptionWheel({
       </button>
 
       {/* Wheel Slots (Visible 3 at a time) */}
-      <div className="flex flex-col gap-1.5 py-1 w-full max-w-[280px]">
+      <div className={`flex flex-col gap-1.5 py-1 w-full ${plain ? "" : "max-w-[280px]"}`}>
         {options.map((opt, idx) => {
           const isSelected = idx === activeIdx;
           const isAdjacent = Math.abs(idx - activeIdx) === 1 || (activeIdx === 0 && idx === options.length - 1) || (activeIdx === options.length - 1 && idx === 0);
