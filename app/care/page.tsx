@@ -22,7 +22,9 @@ import {
   Activity,
   Sparkles,
   Check,
+  Star,
 } from "lucide-react";
+import { SpecialtyIcon } from "@/components/care/SpecialtyIcon";
 import { Navbar } from "../_components/Navbar";
 import { AppFooter } from "../_components/AppFooter";
 import { HospitalItem } from "../_components/InteractiveRouteMap";
@@ -922,7 +924,13 @@ export default function CarePage() {
                 </div>
 
                 <div className="relative flex items-center">
-                  <Activity className="w-4 h-4 text-[#0F6B6D] absolute left-3.5 pointer-events-none" />
+                  <div className="absolute left-3.5 pointer-events-none flex items-center justify-center">
+                    {specialtyFilter !== "all" ? (
+                      <SpecialtyIcon id={specialtyFilter} className="w-4 h-4" />
+                    ) : (
+                      <Activity className="w-4 h-4 text-[#0F6B6D]" />
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={issueSearchText}
@@ -955,7 +963,7 @@ export default function CarePage() {
                         }`}
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-sm shrink-0">{item.icon}</span>
+                          <SpecialtyIcon id={item.id} className="w-4 h-4 shrink-0" />
                           <span className="text-xs truncate">{item.label}</span>
                         </div>
                         <span className={`text-[10px] truncate ${isActive ? "text-[#0F6B6D]" : "text-[#5A6B75]"}`}>
@@ -1044,7 +1052,7 @@ export default function CarePage() {
                         {selectedHospital.name}
                       </h4>
                       <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-md bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] text-[10.5px] font-semibold max-w-full">
-                        <span className="shrink-0">★</span>
+                        <Star className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
                         <span className="truncate">{selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}</span>
                       </div>
                       <p className="text-xs text-[#5A6B75] truncate mt-1">
@@ -1215,8 +1223,9 @@ export default function CarePage() {
                             <span className="text-sm font-semibold text-[#172026] truncate">
                               {hosp.name}
                             </span>
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8]">
-                              ★ {hosp.famousFor || getHospitalFamousFor(hosp)}
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] inline-flex items-center gap-1">
+                              <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-400 shrink-0" />
+                              <span>{hosp.famousFor || getHospitalFamousFor(hosp)}</span>
                             </span>
                             {isSpecMatch && (
                               <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF]">

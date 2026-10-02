@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Navigation, ExternalLink, Plus, Minus, Locate, Check, MapPin } from "lucide-react";
-import { getHospitalFamousFor } from "@/lib/hospitals-india-data";
+import { Navigation, ExternalLink, Plus, Minus, Locate, Check, MapPin, Layers, PhoneCall, Sparkles } from "lucide-react";
+import { getHospitalFamousFor, calculateDistanceKm, INDIAN_HOSPITALS_DATASET } from "@/lib/hospitals-india-data";
 
 export interface HospitalItem {
   id: string;
@@ -48,6 +48,26 @@ export function calculateCalibratedDriveTime(distanceKm: number, rawOsrmSeconds?
   }
 }
 
+export const TILE_LAYERS = {
+  voyager: {
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    options: {
+      subdomains: "abcd",
+      maxZoom: 20,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+  },
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    options: {
+      maxZoom: 19,
+      attribution:
+        "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP",
+    },
+  },
+};
+
 export interface InteractiveRouteMapProps {
   patientCoords: { lat: number; lng: number } | null;
   patientLocationName?: string;
@@ -80,7 +100,16 @@ export function InteractiveRouteMap({
   const leafletRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const markersLayerRef = useRef<any>(null);
+  const baseLayerRef = useRef<any>(null);
   const hospitalMarkersMapRef = useRef<Map<string, { marker: any; hosp: HospitalItem }>>(new Map());
+
+  // Keep references to latest props to prevent stale closure in map event listeners
+  const allHospitalsRef = useRef(allHospitals);
+  allHospitalsRef.current = allHospitals;
+  const patientCoordsRef = useRef(patientCoords);
+  patientCoordsRef.current = patientCoords;
+  const onSelectHospitalRef = useRef(onSelectHospital);
+  onSelectHospitalRef.current = onSelectHospital;
 
   // Track sequence ID to cancel older routing requests and prevent race conditions
   const routingRequestIdRef = useRef<number>(0);
@@ -89,6 +118,9 @@ export function InteractiveRouteMap({
 
   const prevCoordsRef = useRef<string>("");
   const prevHospitalIdRef = useRef<string>("");
+
+  const [mapStyle, setMapStyle] = useState<"voyager" | "satellite">("voyager");
+  const [poiResolving, setPoiResolving] = useState<boolean>(false);
 
   const [routeInfo, setRouteInfo] = useState<{
     distanceKm: number;
@@ -100,6 +132,26 @@ export function InteractiveRouteMap({
     roadGeometryAvailable: false,
   });
   const [isRouting, setIsRouting] = useState<boolean>(false);
+
+  // Switch between clean CartoDB Voyager and ESRI World Satellite
+  const switchMapStyle = useCallback((newStyle: "voyager" | "satellite") => {
+    setMapStyle(newStyle);
+    if (!mapInstanceRef.current || !leafletRef.current) return;
+    const L = leafletRef.current;
+    const map = mapInstanceRef.current;
+    if (baseLayerRef.current) {
+      map.removeLayer(baseLayerRef.current);
+    }
+    const config = TILE_LAYERS[newStyle];
+    const isRetina = typeof window !== "undefined" && window.devicePixelRatio >= 1.5;
+    const layer = L.tileLayer(config.url, {
+      ...config.options,
+      r: isRetina && newStyle === "voyager" ? "@2x" : "",
+    } as any);
+    baseLayerRef.current = layer;
+    layer.addTo(map);
+    layer.bringToBack();
+  }, []);
 
   // Helper to generate natural bezier highway spline between coordinates
   function generateHighwaySpline(
@@ -156,17 +208,17 @@ export function InteractiveRouteMap({
             ${isSelected
               ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
               : isEligible
-              ? `<span style="font-size:10px; line-height:1;">★</span>`
+              ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
               : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
             }
           </div>
           ${isSelected
           ? `<div style="position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#172026; font-family:system-ui,-apple-system,sans-serif; padding:4px 9px; border-radius:8px; box-shadow:0 4px 14px rgba(23,32,38,0.18); z-index:9999; border:1px solid #E5E3DC; pointer-events:none;">
                   <div style="font-size:11px; font-weight:700; color:#172026; display:flex; align-items:center; gap:4px; line-height:1.2;">
-                    <span>🏥</span> ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km)</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0F6B6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1px; flex-shrink:0;"><path d="M12 6v4"/><path d="M14 14h-4"/><path d="M14 18h-4"/><path d="M14 8h-4"/><path d="M18 12h-4"/><path d="M6 12h4"/><path d="M3 21h18"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/></svg> ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km)</span>
                   </div>
-                  <div style="font-size:9.5px; font-weight:600; color:#8C6D32; background:#FBF7EE; border:1px solid #E7DBB8; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-block;">
-                    ★ ${famousFor}
+                  <div style="font-size:9.5px; font-weight:600; color:#8C6D32; background:#FBF7EE; border:1px solid #E7DBB8; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-flex; align-items:center;">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1px; margin-right:3px; flex-shrink:0;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>${famousFor}
                   </div>
                 </div>`
           : ""
@@ -188,8 +240,8 @@ export function InteractiveRouteMap({
     return `
       <div style="font-family:system-ui,-apple-system,sans-serif; padding:8px 6px; line-height:1.4; max-width:270px; color:#172026;">
         <b style="font-size:13px; font-weight:700; color:#172026; display:block; margin-bottom:4px; line-height:1.3;">${hosp.name}</b>
-        <div style="display:inline-block; margin-bottom:6px; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
-          ★ ${famousFor}
+        <div style="display:inline-flex; align-items:center; margin-bottom:6px; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1px; margin-right:3px; flex-shrink:0;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>${famousFor}
         </div>
         <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-bottom:4px; color:${hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D"};">
           <span>~${hosp.distanceKm} km</span>
@@ -267,22 +319,31 @@ export function InteractiveRouteMap({
 
       const previewGlowLine = L.polyline(previewPoints, {
         color: "#0F6B6D",
-        weight: 7,
-        opacity: 0.2,
+        weight: 9,
+        opacity: 0.22,
+        lineCap: "round",
+        lineJoin: "round",
+      });
+
+      const previewCasingLine = L.polyline(previewPoints, {
+        color: "#083334",
+        weight: 5,
+        opacity: 0.85,
         lineCap: "round",
         lineJoin: "round",
       });
 
       const previewCoreLine = L.polyline(previewPoints, {
-        color: "#0F6B6D",
-        weight: 4,
-        opacity: 0.9,
+        color: "#14B8A6",
+        weight: 3.5,
+        opacity: 1,
         lineCap: "round",
         lineJoin: "round",
         dashArray: "6, 6",
       });
 
       routeLayerRef.current.addLayer(previewGlowLine);
+      routeLayerRef.current.addLayer(previewCasingLine);
       routeLayerRef.current.addLayer(previewCoreLine);
 
       if (autoFrame && previewPoints.length > 1) {
@@ -327,26 +388,35 @@ export function InteractiveRouteMap({
             dist = data.roadDistanceKm || dist;
             dur = data.etaMinutes || dur;
 
-            // Clear preview and draw accurate turn-by-turn geometry
+            // Clear preview and draw accurate turn-by-turn geometry with luminous navigation corridor
             routeLayerRef.current.clearLayers();
 
             const roadGlow = L.polyline(roadPoints, {
               color: "#0F6B6D",
-              weight: 7,
-              opacity: 0.22,
+              weight: 9.5,
+              opacity: 0.28,
+              lineCap: "round",
+              lineJoin: "round",
+            });
+
+            const roadCasing = L.polyline(roadPoints, {
+              color: "#083334",
+              weight: 5.5,
+              opacity: 0.92,
               lineCap: "round",
               lineJoin: "round",
             });
 
             const roadCore = L.polyline(roadPoints, {
-              color: "#0F6B6D",
-              weight: 4.5,
-              opacity: 0.95,
+              color: "#14B8A6",
+              weight: 3.5,
+              opacity: 1,
               lineCap: "round",
               lineJoin: "round",
             });
 
             routeLayerRef.current.addLayer(roadGlow);
+            routeLayerRef.current.addLayer(roadCasing);
             routeLayerRef.current.addLayer(roadCore);
 
             if (autoFrame && roadPoints.length > 1) {
@@ -419,7 +489,10 @@ export function InteractiveRouteMap({
         const userMarker = L.marker([origin.lat, origin.lng], { icon: userPinIcon, zIndexOffset: 1000 });
         userMarker.bindPopup(`
           <div style="font-family:sans-serif; padding:4px; line-height:1.4;">
-            <b style="color:#172026; font-size:12px;">📍 Your location</b><br/>
+            <b style="color:#172026; font-size:12px; display:inline-flex; align-items:center; gap:4px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0F6B6D" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+              Your location
+            </b><br/>
             <span style="color:#5A6B75; font-size:11px;">${patientLocationName}</span>
           </div>
         `);
@@ -453,8 +526,8 @@ export function InteractiveRouteMap({
           `
           <div style="font-family:system-ui,-apple-system,sans-serif; padding:3px 5px; line-height:1.35; max-width:240px;">
             <b style="color:#172026; font-size:11px; display:block;">${hosp.name}</b>
-            <div style="margin:2px 0; display:inline-block; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px;">
-              ★ ${famousFor}
+            <div style="margin:2px 0; display:inline-flex; align-items:center; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px;">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px; flex-shrink:0;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>${famousFor}
             </div><br/>
             <span style="color:#5A6B75; font-size:9.5px;">${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}</span>
           </div>
@@ -513,18 +586,25 @@ export function InteractiveRouteMap({
         attributionControl: false,
       });
 
-      // Standard OpenStreetMap tiles (100% free, zero watermarks)
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(map);
+      // Modern CartoDB Voyager tiles (crisp retina, clean geometry, zero clutter)
+      const isRetina = typeof window !== "undefined" && window.devicePixelRatio >= 1.5;
+      const initialLayerConfig = TILE_LAYERS[mapStyle];
+      const initialTileLayer = L.tileLayer(initialLayerConfig.url, {
+        ...initialLayerConfig.options,
+        r: isRetina && mapStyle === "voyager" ? "@2x" : "",
+      } as any).addTo(map);
+      baseLayerRef.current = initialTileLayer;
 
-      // Map click: if user clicks near any hospital marker, select it smoothly
-      map.on("click", (e: any) => {
+      // Smart on-map click: Resolves facility, building, or pin anywhere on map canvas
+      map.on("click", async (e: any) => {
         if (isManualPicking) return;
         const clickPoint = e.layerPoint;
+        const clickLat = e.latlng.lat;
+        const clickLng = e.latlng.lng;
+
+        // 1. Check if clicked near an existing rendered marker (within 35px)
         let closestHosp: HospitalItem | null = null;
-        let minDistancePx = 30;
+        let minDistancePx = 35;
 
         hospitalMarkersMapRef.current.forEach(({ marker, hosp }) => {
           const markerPoint = map.latLngToLayerPoint(marker.getLatLng());
@@ -536,7 +616,114 @@ export function InteractiveRouteMap({
         });
 
         if (closestHosp) {
-          onSelectHospital(closestHosp);
+          onSelectHospitalRef.current(closestHosp);
+          return;
+        }
+
+        // 2. Check if clicked near any hospital in allHospitals or INDIAN_HOSPITALS_DATASET (within ~450m)
+        let datasetMatch: HospitalItem | null = null;
+        let nearestDistKm = 0.45; // 450 meters tolerance
+
+        const currentAllHospitals = allHospitalsRef.current;
+        for (const h of currentAllHospitals) {
+          const d = calculateDistanceKm(clickLat, clickLng, h.latitude, h.longitude);
+          if (d < nearestDistKm) {
+            nearestDistKm = d;
+            datasetMatch = h;
+          }
+        }
+
+        if (!datasetMatch) {
+          for (const h of INDIAN_HOSPITALS_DATASET) {
+            const d = calculateDistanceKm(clickLat, clickLng, h.latitude, h.longitude);
+            if (d < nearestDistKm) {
+              nearestDistKm = d;
+              const curPatient = patientCoordsRef.current;
+              const userDist = curPatient
+                ? calculateDistanceKm(curPatient.lat, curPatient.lng, h.latitude, h.longitude)
+                : 1.2;
+              datasetMatch = {
+                id: h.id,
+                name: h.name,
+                specialty: h.specialty,
+                famousFor: h.famousFor || getHospitalFamousFor(h),
+                city: h.city,
+                address: h.address,
+                phone: h.phone,
+                emergencyPhone: h.emergencyPhone,
+                distanceKm: userDist,
+                latitude: h.latitude,
+                longitude: h.longitude,
+                isEmergency24x7: h.isEmergency24x7,
+                rating: h.rating,
+                ownership: h.ownership,
+                acceptsPublicInsurance: h.acceptsPublicInsurance,
+                etaMinutes: calculateCalibratedDriveTime(userDist),
+              };
+            }
+          }
+        }
+
+        if (datasetMatch) {
+          onSelectHospitalRef.current(datasetMatch);
+          return;
+        }
+
+        // 3. Dynamic reverse-geocode POI lookup (if user clicks any building, hospital label, or facility on map canvas)
+        setPoiResolving(true);
+        try {
+          const resp = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${clickLat}&lon=${clickLng}&zoom=18&addressdetails=1`,
+            { headers: { "Accept-Language": "en" } }
+          );
+          if (resp.ok) {
+            const data = await resp.json();
+            const placeName =
+              data.namedetails?.name ||
+              data.name ||
+              data.address?.hospital ||
+              data.address?.clinic ||
+              data.address?.doctors ||
+              data.address?.emergency ||
+              data.address?.amenity ||
+              data.address?.building ||
+              (data.display_name ? data.display_name.split(",")[0] : "Selected Medical Center");
+
+            const cityName =
+              data.address?.city ||
+              data.address?.town ||
+              data.address?.suburb ||
+              data.address?.state_district ||
+              "Local Area";
+
+            const curPatient = patientCoordsRef.current;
+            const userDist = curPatient
+              ? calculateDistanceKm(curPatient.lat, curPatient.lng, clickLat, clickLng)
+              : 1.2;
+
+            const dynamicHosp: HospitalItem = {
+              id: `poi-${data.osm_id || Math.round(clickLat * 10000)}`,
+              name: placeName,
+              specialty: ["Emergency Care", "Trauma & Triage", "General Medicine"],
+              famousFor: "Direct Map Pin Selection",
+              city: cityName,
+              address: data.display_name || `${clickLat.toFixed(4)}, ${clickLng.toFixed(4)}`,
+              phone: "108",
+              emergencyPhone: "108",
+              distanceKm: parseFloat(userDist.toFixed(1)),
+              latitude: clickLat,
+              longitude: clickLng,
+              isEmergency24x7: true,
+              rating: 4.5,
+              etaMinutes: calculateCalibratedDriveTime(userDist),
+            };
+
+            onSelectHospitalRef.current(dynamicHosp);
+          }
+        } catch (err) {
+          console.warn("[InteractiveRouteMap] POI reverse lookup error:", err);
+        } finally {
+          setPoiResolving(false);
         }
       });
 
@@ -724,12 +911,13 @@ export function InteractiveRouteMap({
       )}
 
       {/* ============================================================ COMPACT LIVE ROUTE PILL */}
+      {/* ============================================================ MODERN NAVIGATION HUD (Apple Maps / Google Maps style) */}
       {!isManualPicking && patientCoords && selectedHospital && (
-        <div className="absolute top-3.5 left-3.5 z-10 max-w-[270px] sm:max-w-[290px] rounded-xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] shadow-xs p-2.5 text-xs text-[#172026] pointer-events-auto">
+        <div className="absolute top-3.5 left-3.5 z-10 max-w-[320px] sm:max-w-[340px] rounded-2xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] shadow-lg p-3 text-xs text-[#172026] pointer-events-auto transition-all animate-in fade-in duration-200">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-[#0F6B6D] animate-pulse shrink-0" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5A6B75]">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A6B75]">
                 Active Route
               </span>
             </div>
@@ -739,32 +927,85 @@ export function InteractiveRouteMap({
                 Updating...
               </span>
             ) : (
-              <span className="text-[10px] font-semibold text-[#0F6B6D] bg-[#E8F3F3] px-2 py-0.5 rounded border border-[#C2DFDF]">
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                 Live
               </span>
             )}
           </div>
 
-          <div className="font-semibold text-[#172026] truncate text-xs mt-1 leading-snug" title={selectedHospital.name}>
+          <div className="font-bold text-[#172026] truncate text-sm mt-1.5 leading-snug" title={selectedHospital.name}>
             {selectedHospital.name}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] mt-1.5 pt-1.5 border-t border-[#E5E3DC]">
-            <span className="font-bold text-[#172026]">
-              {routeInfo.distanceKm} km <span className="text-[#A8B7A1] font-normal">·</span> ~{routeInfo.etaMinutes} min
-            </span>
-            <a
-              href={directGoogleMapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0F6B6D] hover:text-[#0A5254] transition-colors"
-            >
-              <span>Maps</span>
-              <ExternalLink className="w-2.5 h-2.5" />
-            </a>
+          <div className="text-[11px] text-[#5A6B75] truncate mt-0.5">
+            {selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}
+          </div>
+
+          <div className="flex items-center justify-between text-xs mt-2.5 pt-2 border-t border-[#E5E3DC]">
+            <div className="flex items-center gap-1.5 font-bold text-[#172026]">
+              <Navigation className="w-3.5 h-3.5 text-[#0F6B6D]" />
+              <span>{routeInfo.distanceKm} km</span>
+              <span className="text-[#A8B7A1] font-normal">·</span>
+              <span className="text-[#0F6B6D]">~{routeInfo.etaMinutes} min</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <a
+                href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
+                title="Call Emergency"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <PhoneCall className="w-3 h-3" />
+                <span>Call ED</span>
+              </a>
+              <a
+                href={directGoogleMapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open in Google Maps"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-[#0F6B6D] hover:bg-[#0A5254] px-2.5 py-1 rounded-lg shadow-xs transition-colors"
+              >
+                <span>Nav</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
           </div>
         </div>
       )}
+
+      {/* ============================================================ POI RESOLVER CHIP */}
+      {poiResolving && (
+        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-slate-950/90 text-white border border-slate-700/60 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-lg backdrop-blur-md animate-in fade-in duration-150">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+          <span>Resolving medical facility at map pin...</span>
+        </div>
+      )}
+
+      {/* ============================================================ MAP / SATELLITE SWITCHER */}
+      <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-1 p-1 rounded-xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] shadow-sm pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => switchMapStyle("voyager")}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            mapStyle === "voyager"
+              ? "bg-[#0F6B6D] text-white shadow-xs"
+              : "text-[#5A6B75] hover:text-[#172026] hover:bg-slate-100/60"
+          }`}
+        >
+          <Layers className="w-3 h-3" />
+          <span>Map</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => switchMapStyle("satellite")}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            mapStyle === "satellite"
+              ? "bg-[#0F6B6D] text-white shadow-xs"
+              : "text-[#5A6B75] hover:text-[#172026] hover:bg-slate-100/60"
+          }`}
+        >
+          <span>Satellite</span>
+        </button>
+      </div>
 
       {/* ============================================================ LOCATION REQUIRED OVERLAY */}
       {!isManualPicking && !patientCoords && allHospitals.length === 0 && (
@@ -838,14 +1079,6 @@ export function InteractiveRouteMap({
           <span>Driving route</span>
         </div>
       </div>
-
-      {/* TOP-RIGHT ROUTING NOTIFICATION */}
-      {isRouting && (
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-white/95 text-[#172026] border border-[#C2DFDF] px-3 py-1.5 rounded-full text-xs font-semibold shadow-xs backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-2.5 h-2.5 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
-          <span>Calculating live route...</span>
-        </div>
-      )}
     </div>
   );
 }
