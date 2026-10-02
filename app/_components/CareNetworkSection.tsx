@@ -1,10 +1,25 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { PhoneCall, ExternalLink, Navigation, Search, MapPin, LocateFixed, Compass, Sparkles } from "lucide-react";
+import {
+  PhoneCall,
+  ExternalLink,
+  Navigation,
+  Search,
+  MapPin,
+  LocateFixed,
+  Compass,
+  Sparkles,
+  Hospital,
+  Target,
+  Star,
+  Check,
+  ArrowRight,
+} from "lucide-react";
 import dynamic from "next/dynamic";
 import { HospitalItem } from "./InteractiveRouteMap";
 import CountUp from "@/components/CountUp";
+import { SpecialtyIcon } from "@/components/care/SpecialtyIcon";
 import {
   ALL_REGION_PRESETS,
   RegionPresetItem,
@@ -382,7 +397,7 @@ export function CareNetworkSection() {
                   : "text-slate-600 hover:text-slate-950"
               }`}
             >
-              <span>🏥</span>
+              <Hospital className="w-4 h-4 text-cyan-700" />
               <span>All Hospitals</span>
             </button>
 
@@ -399,7 +414,7 @@ export function CareNetworkSection() {
                   : "text-slate-600 hover:text-slate-950"
               }`}
             >
-              <span>🎯</span>
+              <Target className="w-3.5 h-3.5 text-cyan-600" />
               <span>By Health Issue</span>
             </button>
           </div>
@@ -430,7 +445,7 @@ export function CareNetworkSection() {
                         : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
                     }`}
                   >
-                    <span>{opt.icon}</span>
+                    <SpecialtyIcon id={opt.id} className="w-3.5 h-3.5 shrink-0" />
                     <span>{opt.label}</span>
                   </button>
                 );
@@ -518,10 +533,11 @@ export function CareNetworkSection() {
                         </div>
 
                         {/* Famous For Badge */}
-                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-block ${
+                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-flex items-center gap-1 ${
                           isSelected ? "bg-amber-400/20 text-amber-300 border border-amber-400/30" : "bg-amber-50 text-amber-900 border border-amber-200"
                         }`}>
-                          ⭐ {hosp.famousFor || getHospitalFamousFor(hosp)}
+                          <Star className={`w-2.5 h-2.5 shrink-0 ${isSelected ? "text-amber-300 fill-amber-300" : "text-amber-600 fill-amber-500"}`} />
+                          <span>{hosp.famousFor || getHospitalFamousFor(hosp)}</span>
                         </div>
 
                         <p className={`text-[11px] line-clamp-1 ${isSelected ? "text-slate-400" : "text-slate-500"}`}>
@@ -532,7 +548,7 @@ export function CareNetworkSection() {
                       {isSelected && (
                         <div className="pt-3 mt-3 border-t border-slate-800 flex items-center justify-between text-[11px] font-bold text-emerald-400">
                           <span>Active Route Destination</span>
-                          <span>→</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </div>
                       )}
                     </button>
@@ -548,8 +564,9 @@ export function CareNetworkSection() {
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-extrabold text-base sm:text-lg text-slate-950">{selectedHospital.name}</h3>
-                  <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-900 font-bold text-xs">
-                    ⭐ Famous for: {selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-900 font-bold text-xs">
+                    <Star className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
+                    <span>Famous for: {selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}</span>
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-800 font-bold text-xs">
                     24/7 Emergency Care
@@ -558,8 +575,9 @@ export function CareNetworkSection() {
                     <CountUp to={liveRoadStats ? liveRoadStats.roadDistanceKm : selectedHospital.distanceKm} duration={1.2} /> km away • ~<CountUp to={liveRoadStats ? liveRoadStats.etaMinutes : selectedHospital.etaMinutes || 12} duration={1} /> min drive (traffic)
                   </span>
                   {selectedHospital.rating && (
-                    <span className="px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs">
-                      ★ {selectedHospital.rating}
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs">
+                      <Star className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
+                      <span>{selectedHospital.rating}</span>
                     </span>
                   )}
                 </div>
@@ -569,8 +587,9 @@ export function CareNetworkSection() {
                 {selectedHospital.matchReasons && selectedHospital.matchReasons.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {selectedHospital.matchReasons.map((reason, rIdx) => (
-                      <span key={rIdx} className="text-[11px] text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                        ✓ {reason}
+                      <span key={rIdx} className="inline-flex items-center gap-1 text-[11px] text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                        <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>{reason}</span>
                       </span>
                     ))}
                   </div>

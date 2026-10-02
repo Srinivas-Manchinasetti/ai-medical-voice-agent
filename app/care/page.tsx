@@ -30,7 +30,6 @@ import { AppFooter } from "../_components/AppFooter";
 import { HospitalItem } from "../_components/InteractiveRouteMap";
 import { CardNav, RegionCardItem } from "@/components/navigation/CardNav";
 import { MovingBorder } from "@/components/motion/MovingBorder";
-import { OptionWheel, OptionWheelItem } from "@/components/navigation/OptionWheel";
 import {
   ALL_REGION_PRESETS,
   RegionPresetItem,
@@ -38,20 +37,6 @@ import {
   MedicalIssueOption,
   getHospitalFamousFor,
 } from "@/lib/hospitals-india-data";
-
-const SPECIALTY_WHEEL_OPTIONS: OptionWheelItem[] = [
-  { id: "all", label: "All Hospitals & 24/7 ERs", category: "Comprehensive 24/7 Care", badge: "24/7 Emergency", badgeStyle: "bg-[#E8F3F3] text-[#0F6B6D] border-[#C2DFDF]" },
-  { id: "ayurveda", label: "Ayurveda & Traditional", category: "Panchakarma & Holistic", badge: "Ayurvedic Care", badgeStyle: "bg-[#FBF7EE] text-[#8C6D32] border-[#E7DBB8]" },
-  { id: "cardiology", label: "Interventional Cardiology", category: "Cath Lab / Door-to-Balloon", badge: "Door-to-Balloon", badgeStyle: "bg-rose-50 text-rose-800 border-rose-200" },
-  { id: "neurology", label: "Comprehensive Stroke", category: "Thrombolysis & Neuro ICU", badge: "BE-FAST Unit", badgeStyle: "bg-purple-50 text-purple-800 border-purple-200" },
-  { id: "cancer", label: "Surgical Oncology", category: "Tumor Board & Infusion", badge: "Oncology Care", badgeStyle: "bg-amber-50 text-amber-800 border-amber-200" },
-  { id: "orthopedics", label: "Orthopedics & Joint Trauma", category: "Fracture & Joint Replacement", badge: "Bone & Joint", badgeStyle: "bg-slate-100 text-slate-800 border-slate-200" },
-  { id: "pediatrics", label: "Pediatric Emergency", category: "PICU / NICU Level-3", badge: "Pediatric Resuscitation", badgeStyle: "bg-[#E8F3F3] text-[#0F6B6D] border-[#C2DFDF]" },
-  { id: "maternity", label: "Maternity & Obstetrics", category: "High-Risk Delivery & Labor", badge: "Maternity Unit", badgeStyle: "bg-pink-50 text-pink-800 border-pink-200" },
-  { id: "kidney", label: "Kidney Care & Dialysis", category: "Nephrology & Renal ICU", badge: "Dialysis Center", badgeStyle: "bg-indigo-50 text-indigo-800 border-indigo-200" },
-  { id: "pulmonology", label: "Pulmonology & Respiratory", category: "Chest Care & Asthma ICU", badge: "Respiratory ICU", badgeStyle: "bg-teal-50 text-teal-800 border-teal-200" },
-  { id: "eye", label: "Eye Care & Ophthalmology", category: "Retina, Cataract & Lasik", badge: "Eye Institute", badgeStyle: "bg-[#FBF7EE] text-[#8C6D32] border-[#E7DBB8]" },
-];
 
 // Leaflet map dynamically imported with SSR disabled
 const InteractiveRouteMap = dynamic(
@@ -89,7 +74,12 @@ const PAGE_SIZE = 10;
 
 export default function CarePage() {
   const [hospitals, setHospitals] = useState<HospitalItem[]>([]);
-  const [selectedHospital, setSelectedHospital] = useState<HospitalItem | null>(null);
+  const [userSelectedId, setUserSelectedId] = useState<string | null>(null);
+  const [categoryFallback, setCategoryFallback] = useState<boolean>(false);
+  const [fallbackBanner, setFallbackBanner] = useState<string | null>(null);
+  const [categoryLabel, setCategoryLabel] = useState<string>("All Hospitals & 24/7 ERs");
+  const [categoryClass, setCategoryClass] = useState<"emergency" | "elective">("emergency");
+  const [showAllInRanked, setShowAllInRanked] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
 
   // Authoritative location state machine
@@ -143,6 +133,7 @@ export default function CarePage() {
         setIssueSearchText("Heart & Cardiology");
       }
     }
+    setUserSelectedId(null);
     setCurrentPage(1);
   };
 
@@ -151,6 +142,7 @@ export default function CarePage() {
     setViewMode("issues");
     setSpecialtyFilter(id);
     setIssueSearchText(id === "all" ? "" : (label || id));
+    setUserSelectedId(null);
     setCurrentPage(1);
   };
 
@@ -160,18 +152,20 @@ export default function CarePage() {
     const trimmed = val.trim().toLowerCase();
     setViewMode("issues");
     setSpecialtyFilter(trimmed.length > 0 ? trimmed : "all");
+    setUserSelectedId(null);
     setCurrentPage(1);
   };
 
   const handleClearIssue = () => {
     setIssueSearchText("");
     setSpecialtyFilter("all");
+    setUserSelectedId(null);
     setCurrentPage(1);
   };
 
   // Unified hospital selection handler: updates selection, resets/syncs road stats, and triggers map route
   const handleSelectHospital = (hosp: HospitalItem, shouldScrollToMap: boolean = false) => {
-    setSelectedHospital(hosp);
+    setUserSelectedId(hosp.id);
     setLiveRoadStats({
       roadDistanceKm: hosp.distanceKm,
       etaMinutes: hosp.etaMinutes || Math.max(3, Math.round(hosp.distanceKm * 1.5)),
@@ -181,6 +175,16 @@ export default function CarePage() {
       if (mapEl) {
         mapEl.scrollIntoView({ behavior: "smooth", block: "start" });
       }
+    }
+  };
+
+  const handleResetToRecommended = () => {
+    setUserSelectedId(null);
+    if (recommendedHospital) {
+      setLiveRoadStats({
+        roadDistanceKm: recommendedHospital.distanceKm,
+        etaMinutes: recommendedHospital.etaMinutes || Math.max(3, Math.round(recommendedHospital.distanceKm * 1.5)),
+      });
     }
   };
 
@@ -264,7 +268,9 @@ export default function CarePage() {
     setSearchRegion(null);
     setLocationStatus("LOCATION_UNKNOWN");
     setHospitals([]);
-    setSelectedHospital(null);
+    setUserSelectedId(null);
+    setCategoryFallback(false);
+    setFallbackBanner(null);
     setLiveRoadStats(null);
     setIsChoosingCity(false);
   };
@@ -298,11 +304,15 @@ export default function CarePage() {
       );
       if (res.ok) {
         const data = await res.json();
+        setCategoryFallback(Boolean(data.categoryFallback));
+        setFallbackBanner(data.fallbackBanner || null);
+        setCategoryLabel(data.categoryLabel || "All Hospitals & 24/7 ERs");
+        setCategoryClass(data.categoryClass || "emergency");
         if (data.hospitals && data.hospitals.length > 0) {
           const list: HospitalItem[] = data.hospitals;
           setHospitals(list);
+          setUserSelectedId(null);
           const first = list[0] || null;
-          setSelectedHospital(first);
           if (first) {
             setLiveRoadStats({
               roadDistanceKm: first.distanceKm,
@@ -311,7 +321,7 @@ export default function CarePage() {
           }
         } else {
           setHospitals([]);
-          setSelectedHospital(null);
+          setUserSelectedId(null);
           setLiveRoadStats(null);
         }
       }
@@ -585,8 +595,22 @@ export default function CarePage() {
       });
     }
 
-    return list;
+    return list.map((h, idx) => ({
+      ...h,
+      rank: idx + 1,
+    }));
   }, [hospitals, ownershipFilter, sortBy, specialtyFilter]);
+
+  // Primary recommended facility (#1)
+  const recommendedHospital = useMemo(() => {
+    return filteredAndSortedHospitals[0] || null;
+  }, [filteredAndSortedHospitals]);
+
+  // Authoritative selected facility: user clicked override OR default recommended #1
+  const selectedHospital = useMemo(() => {
+    if (!userSelectedId) return recommendedHospital;
+    return filteredAndSortedHospitals.find((h) => h.id === userSelectedId) || recommendedHospital;
+  }, [userSelectedId, recommendedHospital, filteredAndSortedHospitals]);
 
   // Breakdown of specialized vs other facilities
   const specializedCount = useMemo(() => {
@@ -949,14 +973,14 @@ export default function CarePage() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-1">
+                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-2.5 pt-1">
                   {MEDICAL_ISSUE_OPTIONS.map((item) => {
                     const isActive = specialtyFilter === item.id;
                     return (
                       <button
                         key={item.id}
                         onClick={() => handleSelectSpecialty(item.id, item.label)}
-                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-0.5 ${
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-0.5 ${
                           isActive
                             ? "bg-[#E8F3F3] text-[#0F6B6D] border-[#0F6B6D] shadow-xs font-semibold"
                             : "bg-white hover:bg-[#F6F5F1] text-[#172026] border-[#E5E3DC]"
@@ -964,7 +988,7 @@ export default function CarePage() {
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
                           <SpecialtyIcon id={item.id} className="w-4 h-4 shrink-0" />
-                          <span className="text-xs truncate">{item.label}</span>
+                          <span className="text-xs font-semibold truncate">{item.label}</span>
                         </div>
                         <span className={`text-[10px] truncate ${isActive ? "text-[#0F6B6D]" : "text-[#5A6B75]"}`}>
                           {item.famousFor}
@@ -976,11 +1000,11 @@ export default function CarePage() {
               </div>
             )}
 
-            {/* DOMINANT WORKSPACE: LIVE MAP + DESTINATION INTELLIGENCE */}
+            {/* DOMINANT WORKSPACE: LIVE MAP + RANKED FACILITIES LIST */}
             <div id="care-map-section" className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch scroll-mt-24">
 
-              {/* LEFT: Dominant Live Route Map */}
-              <div className="lg:col-span-8 rounded-2xl overflow-hidden shadow-xs border border-[#E5E3DC] bg-white min-h-[460px]">
+              {/* LEFT: Dominant Live Route Map (58% width on large screens) */}
+              <div className="lg:col-span-7 rounded-2xl overflow-hidden shadow-xs border border-[#E5E3DC] bg-white min-h-[460px] lg:min-h-[580px] flex flex-col">
                 <InteractiveRouteMap
                   patientCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
                   patientLocationName={userLocation?.label}
@@ -992,125 +1016,216 @@ export default function CarePage() {
                   onConfirmManualLocation={handleConfirmManualLocation}
                   onCancelManualPicking={() => setIsManualPicking(false)}
                   onRouteCalculated={(stats) => setLiveRoadStats(stats)}
+                  onResetToRecommended={handleResetToRecommended}
                   onRequestLocation={() => handleDetectLiveLocation()}
                 />
               </div>
 
-              {/* RIGHT: Unified Destination Intelligence Panel */}
-              <div className="lg:col-span-4 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs p-4 sm:p-5 flex flex-col justify-between gap-4">
+              {/* RIGHT: Ranked Facilities List (42% width on large screens) */}
+              <div className="lg:col-span-5 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs p-4 sm:p-5 flex flex-col gap-3 max-h-[620px] overflow-hidden">
 
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between pb-2.5 border-b border-[#E5E3DC]">
-                    <div>
-                      <h3 className="text-xs font-semibold text-[#172026] uppercase tracking-wider">
-                        Current destination
-                      </h3>
-                      <p className="text-[11px] text-[#5A6B75]">
-                        Live routing and verified readiness
-                      </p>
+                {/* CATEGORY FALLBACK ALERT BANNER */}
+                {categoryFallback && fallbackBanner && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-start gap-2.5 shadow-xs shrink-0">
+                    <span className="text-base leading-none shrink-0 mt-0.5">⚠️</span>
+                    <div className="flex-1 leading-snug">
+                      <strong className="font-bold text-amber-900 block mb-0.5">Category fallback active</strong>
+                      <span className="text-[11px] text-amber-800">{fallbackBanner}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-[#0F6B6D] bg-[#E8F3F3] px-2 py-0.5 rounded-full border border-[#C2DFDF]">
-                      Active
-                    </span>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5A6B75]">
-                        Care type
-                      </span>
-                      {specialtyFilter !== "all" && (
-                        <button
-                          onClick={() => {
-                            setSpecialtyFilter("all");
-                            setCurrentPage(1);
-                          }}
-                          className="text-[10px] font-semibold text-[#0F6B6D] hover:underline cursor-pointer"
-                        >
-                          Reset
-                        </button>
-                      )}
-                    </div>
-                    <OptionWheel
-                      plain
-                      options={SPECIALTY_WHEEL_OPTIONS}
-                      selectedId={specialtyFilter}
-                      onChange={(opt) => {
-                        setSpecialtyFilter(opt.id);
-                        setCurrentPage(1);
-                      }}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-
-                {/* Active Destination Card */}
-                {selectedHospital ? (
-                  <div className="rounded-xl bg-[#F6F5F1] border border-[#E5E3DC] p-3.5 flex flex-col gap-2.5">
-                    <div>
-                      <h4 className="text-sm font-semibold text-[#172026] truncate" title={selectedHospital.name}>
-                        {selectedHospital.name}
-                      </h4>
-                      <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-md bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] text-[10.5px] font-semibold max-w-full">
-                        <Star className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
-                        <span className="truncate">{selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}</span>
-                      </div>
-                      <p className="text-xs text-[#5A6B75] truncate mt-1">
-                        {selectedHospital.address}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-white text-[#0F6B6D] border border-[#C2DFDF]">
-                        {selectedHospital.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}
-                      </span>
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-white text-[#5A6B75] border border-[#E5E3DC]">
-                        {(selectedHospital as any).ownership === "government" ? "Government" : "Private"}
-                      </span>
-                      {selectedHospital.acceptsPublicInsurance && (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8]">
-                          Ayushman / PM-JAY
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="pt-2 border-t border-[#E5E3DC] flex items-center justify-between text-xs">
-                      <span className="text-[#5A6B75]">
-                        Distance: <strong className="text-[#172026]">~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km</strong>
-                      </span>
-                      <span className="text-[#172026] font-semibold">
-                        ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <a
-                        href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#B42318] hover:bg-[#991B1B] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
-                      >
-                        <PhoneCall className="w-3.5 h-3.5" />
-                        <span>Call ED</span>
-                      </a>
-                      <a
-                        href={currentGoogleMapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#172026] hover:bg-[#2C3840] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
-                      >
-                        <Navigation className="w-3.5 h-3.5 text-[#6E9997]" />
-                        <span>Directions</span>
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-[#E5E3DC] p-4 text-center flex flex-col items-center justify-center gap-1 text-[#5A6B75]">
-                    <MapPin className="w-5 h-5 text-[#8C9AA2]" />
-                    <span className="text-xs font-semibold text-[#172026]">No destination selected</span>
-                    <p className="text-[11px] text-[#5A6B75]">
-                      Tap any marker on the map or select from the list below.
-                    </p>
                   </div>
                 )}
+
+                {/* NON-#1 SELECTION BANNER */}
+                {userSelectedId && selectedHospital && selectedHospital.id !== recommendedHospital?.id && (
+                  <div className="p-2.5 rounded-xl bg-[#E8F3F3] border border-[#C2DFDF] flex items-center justify-between text-xs shrink-0">
+                    <div className="flex items-center gap-2 truncate min-w-0">
+                      <span className="w-2 h-2 rounded-full bg-[#0F6B6D] shrink-0" />
+                      <span className="text-[#172026] truncate text-[11px]">
+                        Selected: <strong className="font-semibold">#{selectedHospital.rank} {selectedHospital.name}</strong>
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleResetToRecommended}
+                      className="text-[11px] font-bold text-[#0F6B6D] hover:underline cursor-pointer shrink-0 ml-2"
+                    >
+                      Return to #1 match
+                    </button>
+                  </div>
+                )}
+
+                {/* RANKED LIST HEADER & SORT */}
+                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-[#E5E3DC] shrink-0">
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-bold text-[#172026] uppercase tracking-wider truncate">
+                      Ranked for: {categoryLabel}
+                    </h3>
+                    <p className="text-[11px] text-[#5A6B75] truncate">
+                      {filteredAndSortedHospitals.length} facilities verified on road network
+                    </p>
+                  </div>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      setSortBy(e.target.value as any);
+                      setCurrentPage(1);
+                    }}
+                    aria-label="Sort order"
+                    className="text-xs font-semibold text-[#172026] bg-[#F6F5F1] border border-[#E5E3DC] rounded-lg px-2.5 py-1 focus:outline-none cursor-pointer shrink-0"
+                  >
+                    <option value="fastest">Best Match / Fastest</option>
+                    <option value="government">Government First</option>
+                    <option value="rating">Highest Rating</option>
+                  </select>
+                </div>
+
+                {/* SCROLLABLE RANKED FACILITIES CARDS */}
+                <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5">
+                  {loading ? (
+                    <div className="py-12 text-center text-xs text-[#5A6B75] flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
+                      <span>Evaluating verified facilities nearby...</span>
+                    </div>
+                  ) : filteredAndSortedHospitals.length === 0 ? (
+                    <div className="p-8 rounded-xl bg-[#F6F5F1] text-center flex flex-col items-center justify-center gap-2">
+                      <Building2 className="w-6 h-6 text-[#8C9AA2]" />
+                      <p className="text-xs font-semibold text-[#172026]">No facilities matching criteria</p>
+                    </div>
+                  ) : (
+                    (showAllInRanked ? filteredAndSortedHospitals : filteredAndSortedHospitals.slice(0, 6)).map((hosp) => {
+                      const isSelected = selectedHospital?.id === hosp.id;
+                      const isRecommended = recommendedHospital?.id === hosp.id;
+                      const distanceNum = isSelected && liveRoadStats ? liveRoadStats.roadDistanceKm : hosp.distanceKm;
+                      const durationNum = isSelected && liveRoadStats ? liveRoadStats.etaMinutes : hosp.etaMinutes || Math.max(3, Math.round(distanceNum * 1.5));
+                      const isGovernment = (hosp as any).ownership === "government";
+                      const actionLabel = hosp.actionType === "call_hospital" ? "Call hospital" : "Call ED";
+                      const actionColor = hosp.actionType === "call_hospital" ? "bg-[#0F6B6D] hover:bg-[#0A5254]" : "bg-[#B42318] hover:bg-[#991B1B]";
+                      const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
+
+                      return (
+                        <div
+                          key={hosp.id}
+                          onClick={() => handleSelectHospital(hosp)}
+                          className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-2 ${
+                            isSelected
+                              ? "bg-white border-[#0F6B6D] shadow-md ring-2 ring-[#0F6B6D]/25"
+                              : "bg-white hover:bg-[#FBF7EE]/40 border-[#E5E3DC] shadow-xs"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2.5">
+                            <div className="flex items-start gap-2 min-w-0">
+                              <div
+                                className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs shrink-0 ${
+                                  isRecommended
+                                    ? "bg-[#0F6B6D] text-white shadow-xs"
+                                    : isSelected
+                                    ? "bg-[#172026] text-white"
+                                    : "bg-[#F6F5F1] text-[#172026] border border-[#E5E3DC]"
+                                }`}
+                              >
+                                #{hosp.rank}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="text-xs sm:text-sm font-bold text-[#172026] truncate" title={hosp.name}>
+                                  {hosp.name}
+                                </h4>
+                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                  {hosp.isFallback ? (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                      Fallback · Nearest 24/7 ER
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF]">
+                                      Matched: {hosp.matchedCategory || categoryLabel} · {hosp.matchTier === "verified" ? "Verified" : "Inferred"}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] truncate max-w-[170px]">
+                                    {famousFor}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-[#5A6B75] truncate mt-0.5">{hosp.address}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col items-end shrink-0 text-right">
+                              <span className="text-xs font-bold text-[#172026]">
+                                ~{durationNum} min
+                              </span>
+                              <span className="text-[11px] text-[#5A6B75]">
+                                ~{distanceNum.toFixed(1)} km
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[#E5E3DC] text-xs">
+                            <div className="flex items-center gap-1 text-[10px] text-[#5A6B75] flex-wrap">
+                              <span className="px-1.5 py-0.5 rounded bg-[#F6F5F1] border border-[#E5E3DC]">
+                                {hosp.isEmergency24x7 ? "24/7 ER" : "Specialty OPD"}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-[#F6F5F1] border border-[#E5E3DC]">
+                                {isGovernment ? "Government" : "Private"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <a
+                                href={`tel:${hosp.emergencyPhone || hosp.phone || "108"}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer ${actionColor}`}
+                              >
+                                <PhoneCall className="w-3 h-3" />
+                                <span>{actionLabel}</span>
+                              </a>
+                              <a
+                                href={
+                                  userLocation
+                                    ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving`
+                                    : `https://www.google.com/maps/search/?api=1&query=${hosp.latitude},${hosp.longitude}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#172026] hover:bg-[#2C3840] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                              >
+                                <span>Directions</span>
+                                <ExternalLink className="w-3 h-3 text-[#6E9997]" />
+                              </a>
+                            </div>
+                          </div>
+
+                          {/* WHY #1 EXPLANATION FOR TOP MATCH */}
+                          {isRecommended && isSelected && hosp.matchReasons && hosp.matchReasons.length > 0 && (
+                            <div className="p-2 rounded-lg bg-[#FBF7EE] border border-[#E7DBB8] text-[11px] text-[#8C6D32] flex flex-col gap-1">
+                              <span className="font-bold flex items-center gap-1 text-[#8C6D32]">
+                                <Sparkles className="w-3 h-3" /> Why ranked #1:
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {hosp.matchReasons.map((reason, rIdx) => (
+                                  <span key={rIdx} className="inline-flex items-center gap-1 text-[10.5px]">
+                                    <Check className="w-3 h-3 text-[#0F6B6D]" /> {reason}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* EXPANDABLE TOGGLE */}
+                  {!loading && filteredAndSortedHospitals.length > 6 && (
+                    <button
+                      onClick={() => setShowAllInRanked(!showAllInRanked)}
+                      className="w-full py-2 rounded-xl border border-[#E5E3DC] bg-[#F6F5F1] hover:bg-[#E5E3DC] text-xs font-semibold text-[#172026] transition-colors cursor-pointer flex items-center justify-center gap-1 mt-1 shrink-0"
+                    >
+                      <span>
+                        {showAllInRanked
+                          ? "Show fewer options ▴"
+                          : `More facilities (${filteredAndSortedHospitals.length - 6}) ▾`}
+                      </span>
+                    </button>
+                  )}
+                </div>
 
               </div>
             </div>

@@ -18,9 +18,12 @@ import {
   HeartPulse,
   Building2,
   ArrowLeft,
-  RotateCcw
+  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import CountUp from "@/components/CountUp";
+import { SpecialtyIcon } from "@/components/care/SpecialtyIcon";
 
 interface HospitalItem {
   id: string;
@@ -43,16 +46,16 @@ interface HospitalItem {
   cancerSpecialistsAvailable?: boolean;
 }
 
-const POPULAR_SEARCH_CHIPS = [
-  { label: "Cancer / Oncology 🎗️", query: "cancer", type: "specialty" },
-  { label: "24/7 Emergency ER 🚨", query: "emergency", type: "specialty" },
-  { label: "Cardiology / Heart 🫀", query: "cardiology", type: "specialty" },
-  { label: "Pediatrics 👶", query: "pediatrics", type: "specialty" },
-  { label: "Guntur Hospitals 📍", query: "Guntur", type: "city" },
-  { label: "Hyderabad Hospitals 📍", query: "Hyderabad", type: "city" },
-  { label: "Mumbai Hospitals 📍", query: "Mumbai", type: "city" },
-  { label: "Delhi NCR Hospitals 📍", query: "Delhi", type: "city" },
-  { label: "Bengaluru Hospitals 📍", query: "Bengaluru", type: "city" },
+const POPULAR_SEARCH_CHIPS: { label: string; query: string; type: "specialty" | "city"; specialtyId?: string }[] = [
+  { label: "Cancer / Oncology", query: "cancer", type: "specialty", specialtyId: "cancer" },
+  { label: "24/7 Emergency ER", query: "emergency", type: "specialty", specialtyId: "emergency" },
+  { label: "Cardiology / Heart", query: "cardiology", type: "specialty", specialtyId: "cardiology" },
+  { label: "Pediatrics", query: "pediatrics", type: "specialty", specialtyId: "pediatrics" },
+  { label: "Guntur Hospitals", query: "Guntur", type: "city" },
+  { label: "Hyderabad Hospitals", query: "Hyderabad", type: "city" },
+  { label: "Mumbai Hospitals", query: "Mumbai", type: "city" },
+  { label: "Delhi NCR Hospitals", query: "Delhi", type: "city" },
+  { label: "Bengaluru Hospitals", query: "Bengaluru", type: "city" },
 ];
 
 export function EmergencyHospitalLocator() {
@@ -215,7 +218,7 @@ export function EmergencyHospitalLocator() {
                   ? "Locating..."
                   : locationStatus === "success"
                   ? "GPS Active"
-                  : "📍 Detect GPS Location"}
+                  : "Detect GPS Location"}
               </span>
             </button>
 
@@ -251,9 +254,14 @@ export function EmergencyHospitalLocator() {
                 <button
                   key={idx}
                   onClick={() => handleChipClick(chip)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80 text-xs font-semibold transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80 text-xs font-semibold transition-all cursor-pointer"
                 >
-                  {chip.label}
+                  {chip.specialtyId ? (
+                    <SpecialtyIcon id={chip.specialtyId} className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  )}
+                  <span>{chip.label}</span>
                 </button>
               ))}
             </div>
@@ -282,10 +290,10 @@ export function EmergencyHospitalLocator() {
                 <span className="text-xs font-bold text-slate-500">Filter Specialty:</span>
                 {[
                   { id: "all", label: "All Facilities" },
-                  { id: "24x7", label: "24/7 ER Open 🚨" },
-                  { id: "oncology", label: "Oncology / Cancer 🎗️" },
-                  { id: "cardiology", label: "Cardiology 🫀" },
-                  { id: "pediatrics", label: "Pediatrics 👶" },
+                  { id: "24x7", label: "24/7 ER Open", specialtyId: "emergency" },
+                  { id: "oncology", label: "Oncology / Cancer", specialtyId: "cancer" },
+                  { id: "cardiology", label: "Cardiology", specialtyId: "cardiology" },
+                  { id: "pediatrics", label: "Pediatrics", specialtyId: "pediatrics" },
                 ].map((filterBtn) => (
                   <button
                     key={filterBtn.id}
@@ -293,13 +301,16 @@ export function EmergencyHospitalLocator() {
                       setSelectedSpecialtyFilter(filterBtn.id);
                       setCurrentPage(1);
                     }}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       selectedSpecialtyFilter === filterBtn.id
                         ? "bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-2xs"
                         : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200"
                     }`}
                   >
-                    {filterBtn.label}
+                    {filterBtn.specialtyId && (
+                      <SpecialtyIcon id={filterBtn.specialtyId} className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{filterBtn.label}</span>
                   </button>
                 ))}
               </div>
@@ -450,9 +461,10 @@ export function EmergencyHospitalLocator() {
                       <button
                         disabled={currentPage === 1}
                         onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                        className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-bold transition-all cursor-pointer"
+                        className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-bold transition-all cursor-pointer"
                       >
-                        ← Previous
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>Previous</span>
                       </button>
 
                       {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
@@ -472,9 +484,10 @@ export function EmergencyHospitalLocator() {
                       <button
                         disabled={currentPage === totalPages}
                         onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                        className="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-bold transition-all cursor-pointer"
+                        className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-bold transition-all cursor-pointer"
                       >
-                        Next →
+                        <span>Next</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>

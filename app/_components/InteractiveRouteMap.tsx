@@ -25,6 +25,11 @@ export interface HospitalItem {
   isEligible?: boolean;
   acceptsPublicInsurance?: boolean;
   ownership?: string;
+  rank?: number;
+  matchTier?: "verified" | "inferred" | "fallback";
+  matchedCategory?: string;
+  isFallback?: boolean;
+  actionType?: "call_ed" | "call_hospital";
 }
 
 export function calculateCalibratedDriveTime(distanceKm: number, rawOsrmSeconds?: number): number {
@@ -77,6 +82,7 @@ export interface InteractiveRouteMapProps {
   onConfirmManualLocation: (lat: number, lng: number) => void;
   onCancelManualPicking: () => void;
   onRouteCalculated?: (info: { roadDistanceKm: number; etaMinutes: number }) => void;
+  onResetToRecommended?: () => void;
   mapCenter?: { lat: number; lng: number };
   onRequestLocation?: () => void;
 }
@@ -91,6 +97,7 @@ export function InteractiveRouteMap({
   onConfirmManualLocation,
   onCancelManualPicking,
   onRouteCalculated,
+  onResetToRecommended,
   mapCenter,
   onRequestLocation,
 }: InteractiveRouteMapProps) {
@@ -109,6 +116,8 @@ export function InteractiveRouteMap({
   patientCoordsRef.current = patientCoords;
   const onSelectHospitalRef = useRef(onSelectHospital);
   onSelectHospitalRef.current = onSelectHospital;
+  const onResetToRecommendedRef = useRef(onResetToRecommended);
+  onResetToRecommendedRef.current = onResetToRecommended;
 
   // Track sequence ID to cancel older routing requests and prevent race conditions
   const routingRequestIdRef = useRef<number>(0);
@@ -172,55 +181,71 @@ export function InteractiveRouteMap({
     return points;
   }
 
-  function createHospitalIcon(L: any, hosp: HospitalItem, isSelected: boolean) {
+  function createHospitalIcon(L: any, hosp: HospitalItem, isSelected: boolean, rank?: number) {
     const isEligible = Boolean(hosp.isEligible);
     const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
     const shortName = hosp.name.split("-")[0].split("(")[0].trim();
+    const effectiveRank = hosp.rank ?? rank;
+    const isTopRanked = typeof effectiveRank === "number" && effectiveRank >= 1 && effectiveRank <= 10;
 
-    const pinBg = isSelected
-      ? (hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D")
-      : isEligible
-      ? "#FBF7EE"
-      : "#FFFFFF";
-    const pinBorder = isSelected
-      ? "#FFFFFF"
-      : isEligible
-      ? "#B79A63"
-      : "#CBD5E1";
-    const iconColor = isSelected
-      ? "#FFFFFF"
-      : isEligible
-      ? "#B79A63"
-      : "#64748B";
+    if (isSelected) {
+      const pinColor = hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D";
+      const etaNum = hosp.etaMinutes || calculateCalibratedDriveTime(hosp.distanceKm);
 
+      return L.divIcon({
+        className: "custom-hospital-marker",
+        html: `
+          <div style="position:relative; width:44px; height:44px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:1000;">
+            <div style="position:absolute; width:44px; height:44px; border-radius:50%; background:${hosp.isEmergency24x7 ? "rgba(180,35,24,0.25)" : "rgba(15,107,109,0.25)"}; animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
+            <div style="position:relative; width:34px; height:34px; border-radius:10px; background:${pinColor}; border:2.5px solid #FFFFFF; box-shadow:0 4px 14px rgba(23,32,38,0.32); display:flex; align-items:center; justify-content:center; color:#FFFFFF; font-weight:800; font-size:13px; font-family:system-ui,-apple-system,sans-serif;">
+              ${effectiveRank ? `#${effectiveRank}` : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`}
+            </div>
+            <div style="position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#172026; font-family:system-ui,-apple-system,sans-serif; padding:4px 9px; border-radius:8px; box-shadow:0 4px 14px rgba(23,32,38,0.18); z-index:9999; border:1px solid #E5E3DC; pointer-events:none;">
+              <div style="font-size:11px; font-weight:700; color:#172026; display:flex; align-items:center; gap:4px; line-height:1.2;">
+                ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km · ~${etaNum}m)</span>
+              </div>
+              <div style="font-size:9.5px; font-weight:600; color:${hosp.isFallback ? "#92400E" : "#8C6D32"}; background:${hosp.isFallback ? "#FEF3C7" : "#FBF7EE"}; border:1px solid ${hosp.isFallback ? "#FCD34D" : "#E7DBB8"}; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-flex; align-items:center;">
+                ${hosp.isFallback ? "Fallback: 24/7 ER" : famousFor}
+              </div>
+            </div>
+          </div>
+        `,
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
+      });
+    }
+
+    if (isTopRanked) {
+      // Pins 1-10: Numbered circular badges matching list rank
+      const isFirst = effectiveRank === 1;
+      const borderCol = isFirst ? "#0F6B6D" : isEligible ? "#B79A63" : "#64748B";
+      const bgCol = isFirst ? "#E8F3F3" : isEligible ? "#FBF7EE" : "#FFFFFF";
+      const textCol = isFirst ? "#0F6B6D" : isEligible ? "#8C6D32" : "#172026";
+
+      return L.divIcon({
+        className: "custom-hospital-marker",
+        html: `
+          <div style="position:relative; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+            <div style="width:24px; height:24px; border-radius:50%; background:${bgCol}; border:2px solid ${borderCol}; box-shadow:0 2px 6px rgba(0,0,0,0.15); display:flex; align-items:center; justify-content:center; color:${textCol}; font-weight:700; font-size:11px; font-family:system-ui,-apple-system,sans-serif;">
+              ${effectiveRank}
+            </div>
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      });
+    }
+
+    // Rank > 10: Subtle small dot (14px)
     return L.divIcon({
       className: "custom-hospital-marker",
       html: `
-        <div style="position:relative; width:${isSelected ? "44px" : "28px"}; height:${isSelected ? "44px" : "28px"}; display:flex; align-items:center; justify-content:center; cursor:pointer; ${isSelected ? "z-index:1000;" : "opacity:0.85;"}">
-          ${isSelected ? `<div style="position:absolute; width:44px; height:44px; border-radius:50%; background:${hosp.isEmergency24x7 ? "rgba(180,35,24,0.25)" : "rgba(15,107,109,0.25)"}; animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
-          <div style="position:relative; width:${isSelected ? "34px" : "22px"}; height:${isSelected ? "34px" : "22px"}; border-radius:${isSelected ? "10px" : "6px"}; background:${pinBg}; border:${isSelected ? "2.5px" : "1.5px"} solid ${pinBorder}; box-shadow:${isSelected ? "0 4px 14px rgba(23,32,38,0.28)" : "0 1px 3px rgba(0,0,0,0.1)"}; display:flex; align-items:center; justify-content:center; color:${iconColor};">
-            ${isSelected
-              ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
-              : isEligible
-              ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
-              : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
-            }
-          </div>
-          ${isSelected
-          ? `<div style="position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#172026; font-family:system-ui,-apple-system,sans-serif; padding:4px 9px; border-radius:8px; box-shadow:0 4px 14px rgba(23,32,38,0.18); z-index:9999; border:1px solid #E5E3DC; pointer-events:none;">
-                  <div style="font-size:11px; font-weight:700; color:#172026; display:flex; align-items:center; gap:4px; line-height:1.2;">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0F6B6D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1px; flex-shrink:0;"><path d="M12 6v4"/><path d="M14 14h-4"/><path d="M14 18h-4"/><path d="M14 8h-4"/><path d="M18 12h-4"/><path d="M6 12h4"/><path d="M3 21h18"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/></svg> ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km)</span>
-                  </div>
-                  <div style="font-size:9.5px; font-weight:600; color:#8C6D32; background:#FBF7EE; border:1px solid #E7DBB8; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-flex; align-items:center;">
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1px; margin-right:3px; flex-shrink:0;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>${famousFor}
-                  </div>
-                </div>`
-          : ""
-        }
+        <div style="position:relative; width:14px; height:14px; display:flex; align-items:center; justify-content:center; cursor:pointer; opacity:0.75;">
+          <div style="width:10px; height:10px; border-radius:50%; background:#CBD5E1; border:1.5px solid #64748B;"></div>
         </div>
       `,
-      iconSize: [isSelected ? 44 : 28, isSelected ? 44 : 28],
-      iconAnchor: [isSelected ? 22 : 14, isSelected ? 22 : 14],
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
     });
   }
 
@@ -230,25 +255,37 @@ export function InteractiveRouteMap({
       ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving`
       : `https://www.google.com/maps/search/?api=1&query=${hosp.latitude},${hosp.longitude}`;
     const emergencyNum = hosp.emergencyPhone || hosp.phone || "108";
+    const actionLabel = hosp.actionType === "call_hospital" ? "Call hospital" : "Call ED";
+    const actionColor = hosp.actionType === "call_hospital" ? "#0F6B6D" : "#B42318";
+    const matchBadgeText = hosp.isFallback
+      ? "Fallback: Nearest 24/7 ER"
+      : hosp.matchTier
+      ? `Matched · ${hosp.matchTier === "verified" ? "Verified" : "Inferred"}`
+      : hosp.isEmergency24x7
+      ? "24/7 Emergency Care"
+      : "Specialty Center";
+    const etaNum = hosp.etaMinutes || calculateCalibratedDriveTime(hosp.distanceKm);
 
     return `
       <div style="font-family:system-ui,-apple-system,sans-serif; padding:8px 6px; line-height:1.4; max-width:270px; color:#172026;">
-        <b style="font-size:13px; font-weight:700; color:#172026; display:block; margin-bottom:4px; line-height:1.3;">${hosp.name}</b>
-        <div style="display:inline-flex; align-items:center; margin-bottom:6px; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1px; margin-right:3px; flex-shrink:0;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>${famousFor}
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+          <b style="font-size:13px; font-weight:700; color:#172026; line-height:1.3;">${hosp.rank ? `#${hosp.rank} ` : ""}${hosp.name}</b>
         </div>
-        <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-bottom:4px; color:${hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D"};">
-          <span>~${hosp.distanceKm} km</span>
+        <div style="display:inline-flex; align-items:center; margin-bottom:6px; background:${hosp.isFallback ? "#FEF3C7" : "#FBF7EE"}; color:${hosp.isFallback ? "#92400E" : "#8C6D32"}; border:1px solid ${hosp.isFallback ? "#FCD34D" : "#E7DBB8"}; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
+          ${matchBadgeText}
+        </div>
+        <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-bottom:4px; color:#172026;">
+          <span>${hosp.distanceKm} km by road</span>
           <span style="color:#A8B7A1;">•</span>
-          <span>${hosp.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}</span>
+          <span>~${etaNum} min</span>
         </div>
         <div style="color:#5A6B75; font-size:10.5px; line-height:1.35; margin-bottom:10px;">${hosp.address}</div>
         <div style="display:flex; gap:6px;">
           <a
             href="tel:${emergencyNum}"
-            style="flex:1; text-align:center; background:#B42318; color:#ffffff; font-weight:600; font-size:11px; padding:7px 8px; border-radius:8px; text-decoration:none; display:inline-block;"
+            style="flex:1; text-align:center; background:${actionColor}; color:#ffffff; font-weight:600; font-size:11px; padding:7px 8px; border-radius:8px; text-decoration:none; display:inline-block;"
           >
-            Call ED
+            ${actionLabel}
           </a>
           <a
             href="${googleMapsUrl}"
@@ -500,13 +537,14 @@ export function InteractiveRouteMap({
       };
 
       // 2. HOSPITAL DESTINATION MARKERS (Restrained, low noise, selected is primary)
-      allHospitals.forEach((hosp) => {
+      allHospitals.forEach((hosp, idx) => {
         const hLat = hosp.latitude;
         const hLng = hosp.longitude;
         if (!hLat || !hLng) return;
 
         const isSelected = selectedHospital?.id === hosp.id;
-        const hospIcon = createHospitalIcon(L, hosp, isSelected);
+        const effectiveRank = hosp.rank ?? (idx + 1);
+        const hospIcon = createHospitalIcon(L, hosp, isSelected, effectiveRank);
 
         const marker = L.marker([hLat, hLng], {
           icon: hospIcon,
@@ -519,11 +557,11 @@ export function InteractiveRouteMap({
         marker.bindTooltip(
           `
           <div style="font-family:system-ui,-apple-system,sans-serif; padding:3px 5px; line-height:1.35; max-width:240px;">
-            <b style="color:#172026; font-size:11px; display:block;">${hosp.name}</b>
+            <b style="color:#172026; font-size:11px; display:block;">${effectiveRank ? `#${effectiveRank} ` : ""}${hosp.name}</b>
             <div style="margin:2px 0; display:inline-flex; align-items:center; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px;">
               <svg width="8" height="8" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px; flex-shrink:0;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>${famousFor}
             </div><br/>
-            <span style="color:#5A6B75; font-size:9.5px;">${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}</span>
+            <span style="color:#5A6B75; font-size:9.5px;">${hosp.distanceKm} km by road • ~${hosp.etaMinutes || calculateCalibratedDriveTime(hosp.distanceKm)} min</span>
           </div>
         `,
           { direction: "top", offset: [0, -16], opacity: 0.96 }
@@ -603,8 +641,12 @@ export function InteractiveRouteMap({
 
         if (closestHosp) {
           onSelectHospitalRef.current(closestHosp);
+        } else {
+          // Empty map click: return to recommended (#1)
+          if (onResetToRecommendedRef.current) {
+            onResetToRecommendedRef.current();
+          }
         }
-        // Random clicks on roads or terrain are ignored (no random rerouting)
       });
 
       mapInstanceRef.current = map;
@@ -669,7 +711,7 @@ export function InteractiveRouteMap({
     // 1. Update marker visual highlights and popup state
     hospitalMarkersMapRef.current.forEach(({ marker, hosp }) => {
       const isSelected = selectedHospital?.id === hosp.id;
-      marker.setIcon(createHospitalIcon(L, hosp, isSelected));
+      marker.setIcon(createHospitalIcon(L, hosp, isSelected, hosp.rank));
       marker.setZIndexOffset(isSelected ? 1400 : hosp.isEligible ? 400 : 100);
       if (isSelected) {
         marker.openPopup();
@@ -704,6 +746,17 @@ export function InteractiveRouteMap({
       setIsRouting(false);
     }
   }, [selectedHospital, patientCoords?.lat, patientCoords?.lng, drawRouteToHospital]);
+
+  // Handle Escape key to reset selection to recommended
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onResetToRecommendedRef.current?.();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Custom Controls Handlers
   const handleZoomIn = () => {

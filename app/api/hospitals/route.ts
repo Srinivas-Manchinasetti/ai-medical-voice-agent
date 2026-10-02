@@ -18,6 +18,136 @@ export function calculateRealisticDriveTime(distanceKm: number): number {
   }
 }
 
+export interface CategoryRule {
+  class: "emergency" | "elective";
+  label: string;
+  mustHaveKeywords: string[];
+  boostKeywords: string[];
+  actionType: "call_ed" | "call_hospital";
+}
+
+export const CATEGORY_RULES: Record<string, CategoryRule> = {
+  cardiology: {
+    class: "emergency",
+    label: "Cardiology",
+    mustHaveKeywords: ["cardio", "heart", "cath lab", "chest pain", "angioplasty"],
+    boostKeywords: ["cath lab", "icu", "coronary care", "24/7 er"],
+    actionType: "call_ed",
+  },
+  neurology: {
+    class: "emergency",
+    label: "Neurology & Stroke",
+    mustHaveKeywords: ["neuro", "stroke", "brain", "paralysis", "nimhans", "spine", "neurosurgery"],
+    boostKeywords: ["ct scan", "mri", "neuro icu", "thrombolysis", "be-fast"],
+    actionType: "call_ed",
+  },
+  pediatrics: {
+    class: "emergency",
+    label: "Pediatrics & Child Care",
+    mustHaveKeywords: ["pediatric", "child", "children", "nicu", "picu", "infant", "newborn", "rainbow", "ankura"],
+    boostKeywords: ["nicu", "picu", "pediatric emergency"],
+    actionType: "call_ed",
+  },
+  pulmonology: {
+    class: "emergency",
+    label: "Pulmonology & Respiratory",
+    mustHaveKeywords: ["pulmo", "respiratory", "lung", "asthma", "copd", "pneumonia"],
+    boostKeywords: ["ventilator", "respiratory icu", "24/7 er"],
+    actionType: "call_ed",
+  },
+  dermatology: {
+    class: "elective",
+    label: "Skin & Dermatology",
+    mustHaveKeywords: ["derma", "skin", "burns", "plastic surgery", "allergy", "cosmetic"],
+    boostKeywords: ["opd", "dermatology clinic", "skin specialist"],
+    actionType: "call_hospital",
+  },
+  burns: {
+    class: "emergency",
+    label: "Burns & Trauma",
+    mustHaveKeywords: ["burn", "burns", "plastic surgery", "trauma"],
+    boostKeywords: ["burn unit", "icu", "trauma er"],
+    actionType: "call_ed",
+  },
+  eye: {
+    class: "elective",
+    label: "Eye & Ophthalmology",
+    mustHaveKeywords: ["eye", "ophthal", "netra", "vision", "cataract", "retina", "lvpei", "glaucoma"],
+    boostKeywords: ["lasik", "retina clinic", "eye hospital"],
+    actionType: "call_hospital",
+  },
+  dental: {
+    class: "elective",
+    label: "Dental & Maxillofacial",
+    mustHaveKeywords: ["dental", "tooth", "teeth", "maxillofacial", "oral", "dentist"],
+    boostKeywords: ["dental clinic", "oral surgery"],
+    actionType: "call_hospital",
+  },
+  ayurveda: {
+    class: "elective",
+    label: "Ayurveda & Traditional",
+    mustHaveKeywords: ["ayurved", "panchakarma", "herbal", "ayush", "naturopathy", "homeo"],
+    boostKeywords: ["panchakarma unit", "ayurvedic hospital"],
+    actionType: "call_hospital",
+  },
+  diabetes: {
+    class: "elective",
+    label: "Diabetes & Endocrinology",
+    mustHaveKeywords: ["diabet", "endocrin", "insulin", "thyroid", "sugar"],
+    boostKeywords: ["diabetic foot care", "endocrinology opd"],
+    actionType: "call_hospital",
+  },
+  cancer: {
+    class: "elective",
+    label: "Oncology & Cancer Care",
+    mustHaveKeywords: ["cancer", "oncol", "tumor", "chemo", "radiation", "surgical oncology"],
+    boostKeywords: ["surgical oncology", "pet-ct", "radiation bunker", "tumor board"],
+    actionType: "call_hospital",
+  },
+  orthopedics: {
+    class: "emergency",
+    label: "Orthopedics & Joint Trauma",
+    mustHaveKeywords: ["ortho", "bone", "fracture", "joint", "trauma", "spine"],
+    boostKeywords: ["joint replacement", "trauma er", "icu"],
+    actionType: "call_ed",
+  },
+  maternity: {
+    class: "emergency",
+    label: "Maternity & Obstetrics",
+    mustHaveKeywords: ["matern", "gynec", "obstet", "delivery", "pregnancy", "labor", "nicu"],
+    boostKeywords: ["nicu", "labor delivery suite", "high-risk obstetrics"],
+    actionType: "call_ed",
+  },
+  kidney: {
+    class: "emergency",
+    label: "Kidney & Dialysis",
+    mustHaveKeywords: ["kidney", "renal", "dialysis", "nephro", "urol"],
+    boostKeywords: ["hemodialysis", "nephrology icu"],
+    actionType: "call_ed",
+  },
+  gastroenterology: {
+    class: "elective",
+    label: "Gastroenterology & Liver",
+    mustHaveKeywords: ["gastro", "liver", "digestive", "endoscopy", "stomach", "hepat"],
+    boostKeywords: ["endoscopy suite", "liver transplant"],
+    actionType: "call_hospital",
+  },
+  ent: {
+    class: "elective",
+    label: "ENT & Head-Neck",
+    mustHaveKeywords: ["ent", "ear", "nose", "throat", "audiol", "sinus"],
+    boostKeywords: ["audiology", "micro-ear surgery"],
+    actionType: "call_hospital",
+  },
+  emergency: {
+    class: "emergency",
+    label: "Emergency & Trauma",
+    mustHaveKeywords: ["emergency", "trauma", "critical", "resuscitation", "casualty", "icu"],
+    boostKeywords: ["level-1 trauma", "24/7 er", "resuscitation bay"],
+    actionType: "call_ed",
+  },
+};
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -162,127 +292,156 @@ export async function GET(request: Request) {
       hospitals = sortedByProximity.slice(0, 10);
     }
 
-    // STEP 1: HARD CONSTRAINTS & ELIGIBILITY EVALUATION
-    const processedHospitals = hospitals.map((h) => {
+    // STEP 1: CATEGORY SPEC EVALUATION & MUST-HAVE MATCHING
+    const rule = specialtyFilter && specialtyFilter !== "all" ? CATEGORY_RULES[specialtyFilter] : null;
+    const isCategoryFilterActive = Boolean(rule);
+
+    interface EvaluatedHospital extends Hospital {
+      dist: number;
+      etaMinutes: number;
+      isSpecialtyMatch: boolean;
+      specialtyScore: number;
+      matchTier: "verified" | "inferred" | "fallback";
+      matchedCategory: string;
+      isFallback: boolean;
+      actionType: "call_ed" | "call_hospital";
+      matchReasons: string[];
+    }
+
+    const evaluatedHospitals: EvaluatedHospital[] = hospitals.map((h) => {
       const dist = calculateDistanceKm(originLat, originLng, h.latitude, h.longitude);
       const etaMinutes = calculateRealisticDriveTime(dist);
-
-      // Hard eligibility evaluation
-      let isEligible = true;
       const matchReasons: string[] = [];
 
-      // Check 24/7 ER constraint for Emergency cases
-      if (urgencyLevel === "emergency" && !h.isEmergency24x7) {
-        isEligible = false;
-      } else if (h.isEmergency24x7) {
+      const hospName = h.name.toLowerCase();
+      const hospSpecs = (h.specialty || []).map((s) => s.toLowerCase());
+      const famousFor = ((h as any).famousFor || getHospitalFamousFor(h)).toLowerCase();
+      const capabilities = ((h as any).capabilities || []).map((c: string) => c.toLowerCase());
+      const allText = `${hospName} ${hospSpecs.join(" ")} ${famousFor} ${capabilities.join(" ")}`;
+
+      let isSpecialtyMatch = false;
+      let specialtyScore = 0;
+
+      if (rule) {
+        // Must-have keyword verification
+        const hasMustHave = rule.mustHaveKeywords.some((kw) => allText.includes(kw));
+
+        if (hasMustHave) {
+          isSpecialtyMatch = true;
+          specialtyScore = 40;
+
+          // Check boost keywords (e.g. ICU, Cath Lab, NICU, Ventilator, etc.)
+          for (const bkw of rule.boostKeywords) {
+            if (allText.includes(bkw)) {
+              specialtyScore += 5;
+            }
+          }
+
+          matchReasons.push(`Matched: ${rule.label}`);
+        }
+      } else {
+        // When filter is "all", all 24/7 ERs and accredited hospitals match general care
+        isSpecialtyMatch = true;
+        specialtyScore = h.isEmergency24x7 ? 30 : 20;
+        matchReasons.push(h.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Care");
+      }
+
+      // Check tier
+      let matchTier: "verified" | "inferred" | "fallback" = "inferred";
+      if (!isSpecialtyMatch && isCategoryFilterActive) {
+        matchTier = "fallback";
+      } else if (h.sourceType === "official_registry" || (h.accreditation && h.accreditation.length > 0)) {
+        matchTier = "verified";
+      }
+
+      const isFallback = isCategoryFilterActive && !isSpecialtyMatch;
+      const actionType = rule ? rule.actionType : (h.isEmergency24x7 ? "call_ed" : "call_hospital");
+
+      if (h.isEmergency24x7) {
         matchReasons.push("24/7 Emergency Department");
       }
-
-      // Check Specialty capability match with robust medical synonym mapping
-      if (specialtyFilter && specialtyFilter !== "all") {
-        const sFilter = specialtyFilter.toLowerCase();
-        const hospName = h.name.toLowerCase();
-
-        // 1. Direct name match for specialized institutes
-        const nameMatches = 
-          hospName.includes(sFilter) ||
-          (sFilter.includes("cancer") && (hospName.includes("cancer") || hospName.includes("oncol") || hospName.includes("tumor"))) ||
-          (sFilter.includes("oncol") && (hospName.includes("cancer") || hospName.includes("oncol"))) ||
-          (sFilter.includes("heart") && (hospName.includes("heart") || hospName.includes("cardio") || hospName.includes("chest") || hospName.includes("hruday"))) ||
-          (sFilter.includes("cardio") && (hospName.includes("heart") || hospName.includes("cardio") || hospName.includes("chest") || hospName.includes("hruday"))) ||
-          (sFilter.includes("brain") && (hospName.includes("neuro") || hospName.includes("stroke") || hospName.includes("brain") || hospName.includes("nimhans"))) ||
-          (sFilter.includes("neuro") && (hospName.includes("neuro") || hospName.includes("stroke") || hospName.includes("brain"))) ||
-          (sFilter.includes("stroke") && (hospName.includes("neuro") || hospName.includes("stroke"))) ||
-          (sFilter.includes("child") && (hospName.includes("child") || hospName.includes("pediatric") || hospName.includes("rainbow") || hospName.includes("ankura") || hospName.includes("lotus"))) ||
-          (sFilter.includes("pediatric") && (hospName.includes("child") || hospName.includes("pediatric") || hospName.includes("rainbow") || hospName.includes("ankura"))) ||
-          (sFilter.includes("bone") && (hospName.includes("ortho") || hospName.includes("bone") || hospName.includes("joint") || hospName.includes("trauma") || hospName.includes("fracture"))) ||
-          (sFilter.includes("ortho") && (hospName.includes("ortho") || hospName.includes("bone") || hospName.includes("joint") || hospName.includes("trauma") || hospName.includes("fracture"))) ||
-          (sFilter.includes("kidney") && (hospName.includes("kidney") || hospName.includes("nephro") || hospName.includes("dialysis") || hospName.includes("renal") || hospName.includes("urol"))) ||
-          (sFilter.includes("renal") && (hospName.includes("kidney") || hospName.includes("nephro") || hospName.includes("dialysis") || hospName.includes("renal"))) ||
-          (sFilter.includes("dialysis") && (hospName.includes("kidney") || hospName.includes("nephro") || hospName.includes("dialysis") || hospName.includes("renal"))) ||
-          (sFilter.includes("ayurved") && (hospName.includes("ayurved") || hospName.includes("ayush") || hospName.includes("panchakarma") || hospName.includes("herbal"))) ||
-          (sFilter.includes("lung") && (hospName.includes("lung") || hospName.includes("pulmo") || hospName.includes("chest") || hospName.includes("resp"))) ||
-          (sFilter.includes("pulmo") && (hospName.includes("lung") || hospName.includes("pulmo") || hospName.includes("chest") || hospName.includes("resp"))) ||
-          (sFilter.includes("eye") && (hospName.includes("eye") || hospName.includes("ophthal") || hospName.includes("netra") || hospName.includes("lvpei") || hospName.includes("vision"))) ||
-          (sFilter.includes("matern") && (hospName.includes("matern") || hospName.includes("women") || hospName.includes("gynec") || hospName.includes("mother") || hospName.includes("birth"))) ||
-          (sFilter.includes("preg") && (hospName.includes("matern") || hospName.includes("women") || hospName.includes("gynec") || hospName.includes("mother"))) ||
-          (sFilter.includes("gastro") && (hospName.includes("gastro") || hospName.includes("liver") || hospName.includes("digestive") || hospName.includes("stomach"))) ||
-          (sFilter.includes("liver") && (hospName.includes("gastro") || hospName.includes("liver"))) ||
-          (sFilter.includes("ent") && (hospName.includes("ent") || hospName.includes("ear") || hospName.includes("throat"))) ||
-          (sFilter.includes("derma") && (hospName.includes("derma") || hospName.includes("skin"))) ||
-          (sFilter.includes("skin") && (hospName.includes("derma") || hospName.includes("skin"))) ||
-          (sFilter.includes("dental") && (hospName.includes("dental") || hospName.includes("tooth") || hospName.includes("teeth"))) ||
-          (sFilter.includes("diabetes") && (hospName.includes("diabet") || hospName.includes("endocrin")));
-
-        // 2. Specialty list match
-        const specialtyMatches = h.specialty.some((s) => {
-          const lower = s.toLowerCase();
-          if (lower.includes(sFilter)) return true;
-          if (sFilter.includes("cancer") && (lower.includes("oncol") || lower.includes("tumor") || h.cancerSpecialistsAvailable)) return true;
-          if (sFilter.includes("oncol") && (lower.includes("cancer") || lower.includes("tumor") || h.cancerSpecialistsAvailable)) return true;
-          if (sFilter.includes("tumor") && (lower.includes("cancer") || lower.includes("oncol") || h.cancerSpecialistsAvailable)) return true;
-          if (sFilter.includes("heart") && (lower.includes("cardio") || lower.includes("chest"))) return true;
-          if (sFilter.includes("cardio") && (lower.includes("heart") || lower.includes("chest"))) return true;
-          if (sFilter.includes("brain") && (lower.includes("neuro") || lower.includes("stroke"))) return true;
-          if (sFilter.includes("neuro") && (lower.includes("stroke") || lower.includes("brain"))) return true;
-          if (sFilter.includes("stroke") && lower.includes("neuro")) return true;
-          if (sFilter.includes("child") && (lower.includes("pediatric") || lower.includes("maternity") || lower.includes("nicu") || lower.includes("picu"))) return true;
-          if (sFilter.includes("pediatric") && (lower.includes("child") || lower.includes("maternity"))) return true;
-          if (sFilter.includes("bone") && (lower.includes("ortho") || lower.includes("fracture") || lower.includes("trauma"))) return true;
-          if (sFilter.includes("ortho") && (lower.includes("bone") || lower.includes("trauma") || lower.includes("fracture"))) return true;
-          if (sFilter.includes("fracture") && (lower.includes("ortho") || lower.includes("trauma"))) return true;
-          if (sFilter.includes("kidney") && (lower.includes("nephro") || lower.includes("dialysis") || lower.includes("renal") || lower.includes("urol"))) return true;
-          if (sFilter.includes("renal") && (lower.includes("nephro") || lower.includes("dialysis") || lower.includes("kidney"))) return true;
-          if (sFilter.includes("dialysis") && (lower.includes("nephro") || lower.includes("kidney") || lower.includes("renal"))) return true;
-          if (sFilter.includes("ayurved") && (lower.includes("ayurved") || lower.includes("traditional") || lower.includes("herbal"))) return true;
-          if (sFilter.includes("lung") && (lower.includes("pulmo") || lower.includes("respiratory") || lower.includes("chest"))) return true;
-          if (sFilter.includes("pulmo") && (lower.includes("pulmo") || lower.includes("respiratory") || lower.includes("chest"))) return true;
-          if (sFilter.includes("eye") && (lower.includes("ophthal") || lower.includes("eye"))) return true;
-          if (sFilter.includes("matern") && (lower.includes("gynec") || lower.includes("obstet") || lower.includes("nicu") || lower.includes("maternity"))) return true;
-          if (sFilter.includes("preg") && (lower.includes("gynec") || lower.includes("obstet") || lower.includes("maternity"))) return true;
-          if (sFilter.includes("gastro") && (lower.includes("gastro") || lower.includes("liver"))) return true;
-          if (sFilter.includes("liver") && (lower.includes("gastro") || lower.includes("liver"))) return true;
-          if (sFilter.includes("ent") && lower.includes("ent")) return true;
-          if (sFilter.includes("derma") && (lower.includes("derma") || lower.includes("skin"))) return true;
-          if (sFilter.includes("skin") && (lower.includes("derma") || lower.includes("skin"))) return true;
-          if (sFilter.includes("dental") && lower.includes("dental")) return true;
-          if (sFilter.includes("diabetes") && (lower.includes("diabet") || lower.includes("endocrin"))) return true;
-          if (sFilter.includes("emergency") && (lower.includes("emergency") || lower.includes("trauma"))) return true;
-          return false;
-        }) || (sFilter.includes("cancer") && Boolean(h.cancerSpecialistsAvailable));
-
-        if (!nameMatches && !specialtyMatches) {
-          isEligible = false;
-        } else {
-          matchReasons.push(`Specialized ${specialtyFilter.charAt(0).toUpperCase() + specialtyFilter.slice(1)} Department`);
-        }
-      }
-
-      // Check City/Search Query filter if specified
-      if (searchFilter || cityFilter) {
-        const term = searchFilter || cityFilter;
-        const matchesSearch = h.name.toLowerCase().includes(term) ||
-          h.city.toLowerCase().includes(term) ||
-          h.state.toLowerCase().includes(term) ||
-          h.address.toLowerCase().includes(term) ||
-          h.specialty.some((s) => s.toLowerCase().includes(term));
-
-        if (!matchesSearch) {
-          isEligible = false;
-        }
-      }
-
-      // Travel time match reason
-      if (dist <= 25) {
-        matchReasons.push(`Estimated drive time: ~${etaMinutes} mins`);
-      }
-
-      // Quality & Accreditation match reason
       if (h.accreditation && h.accreditation.length > 0) {
         matchReasons.push(`${h.accreditation.join(" & ")} Accredited`);
       }
 
+      return {
+        ...h,
+        dist,
+        etaMinutes,
+        isSpecialtyMatch,
+        specialtyScore,
+        matchTier,
+        matchedCategory: isFallback ? "Nearest 24/7 ER (Emergency Fallback)" : (rule ? rule.label : "General Care"),
+        isFallback,
+        actionType,
+        matchReasons,
+      };
+    });
+
+    // STEP 2: CATEGORY FALLBACK DETECTION & RANKING
+    let matchedFacilities = evaluatedHospitals.filter((h) => h.isSpecialtyMatch);
+    const nonMatchedFacilities = evaluatedHospitals.filter((h) => !h.isSpecialtyMatch);
+
+    let categoryFallback = false;
+    let fallbackBanner: string | null = null;
+
+    if (isCategoryFilterActive && matchedFacilities.length === 0) {
+      categoryFallback = true;
+      fallbackBanner = `No verified ${rule!.label} facility confirmed nearby. Showing nearest accredited 24/7 ERs for emergency care.`;
+      
+      // Fallback ranking: prioritize 24/7 ERs by distance
+      matchedFacilities = nonMatchedFacilities.map((h) => ({
+        ...h,
+        isFallback: true,
+        matchTier: "fallback" as const,
+        matchedCategory: "Nearest 24/7 ER",
+        actionType: "call_ed" as const,
+        matchReasons: [
+          `No confirmed ${rule!.label} facility nearby`,
+          "Nearest 24/7 emergency facility for stabilization",
+        ],
+      }));
+    }
+
+    // Rank matching facilities
+    if (rule?.class === "elective") {
+      // Elective care: sort by specialtyScore (desc), rating (desc), then distance (asc)
+      matchedFacilities.sort((a, b) => {
+        if (b.specialtyScore !== a.specialtyScore) return b.specialtyScore - a.specialtyScore;
+        const rA = a.rating || 4.0;
+        const rB = b.rating || 4.0;
+        if (rB !== rA) return rB - rA;
+        return a.dist - b.dist;
+      });
+    } else {
+      // Emergency care: prioritize 24/7 ER first, then proximity
+      matchedFacilities.sort((a, b) => {
+        const erA = a.isEmergency24x7 ? 1 : 0;
+        const erB = b.isEmergency24x7 ? 1 : 0;
+        if (erA !== erB) return erB - erA;
+        return a.dist - b.dist;
+      });
+    }
+
+    // Secondary non-matching facilities sorted by distance
+    nonMatchedFacilities.sort((a, b) => a.dist - b.dist);
+
+    const orderedPool = categoryFallback
+      ? matchedFacilities
+      : [...matchedFacilities, ...nonMatchedFacilities];
+
+    const sortedHospitals = orderedPool.map((h, idx) => {
+      const rank = idx + 1;
       const famousFor = (h as any).famousFor || getHospitalFamousFor(h);
+
+      let matchLabel = "FACILITY DIRECTORY";
+      if (h.isFallback) {
+        matchLabel = "24/7 ER FALLBACK";
+      } else if (rank === 1) {
+        matchLabel = "BEST MATCH";
+      } else if (h.isSpecialtyMatch) {
+        matchLabel = "SPECIALTY MATCH";
+      }
 
       return {
         id: h.id,
@@ -303,34 +462,31 @@ export async function GET(request: Request) {
         rating: h.rating,
         accreditation: h.accreditation,
         cancerSpecialistsAvailable: h.cancerSpecialistsAvailable,
-        distanceKm: dist,
-        etaMinutes: etaMinutes,
+        distanceKm: h.dist,
+        etaMinutes: h.etaMinutes,
         hasDistanceContext: true,
         distanceSource: locationContext.type,
-        isEligible,
-        matchReasons,
+        isEligible: !h.isFallback,
+        rank,
+        matchTier: h.matchTier,
+        matchedCategory: h.matchedCategory,
+        isFallback: h.isFallback,
+        actionType: h.actionType,
+        matchLabel,
+        matchReasons: h.matchReasons,
         googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${encodeURIComponent(
           `${h.name}, ${h.address}`
         )}`,
       };
     });
 
-    // STEP 2: RANKING (Sort by closest distance / drive time first)
-    const eligibleFacilities = processedHospitals.filter((h) => h.isEligible);
-    const nonEligibleFacilities = processedHospitals.filter((h) => !h.isEligible);
-
-    eligibleFacilities.sort((a, b) => a.distanceKm - b.distanceKm);
-    nonEligibleFacilities.sort((a, b) => a.distanceKm - b.distanceKm);
-
-    const sortedHospitals = [...eligibleFacilities, ...nonEligibleFacilities].map((h, idx) => ({
-      ...h,
-      matchLabel: idx === 0 && h.isEligible ? "CLOSEST ER" : h.isEligible ? "EMERGENCY CARE" : "FACILITY DIRECTORY",
-    }));
-
     return NextResponse.json({
       status: "success",
       count: sortedHospitals.length,
-      eligibleCount: eligibleFacilities.length,
+      categoryFallback,
+      fallbackBanner,
+      categoryClass: rule ? rule.class : "emergency",
+      categoryLabel: rule ? rule.label : "All Hospitals & 24/7 ERs",
       locationContext,
       userLocationDetected: latProvided && lngProvided,
       userCoordinates: { lat: refLat, lng: refLng },
