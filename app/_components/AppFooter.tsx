@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { ShieldCheck, Lock, PhoneCall } from "lucide-react";
+import { ShieldCheck, HeartPulse, PhoneCall } from "lucide-react";
 
 export function AppFooter() {
   const currentYear = new Date().getFullYear();
@@ -12,75 +12,218 @@ export function AppFooter() {
       {/* 1. SOFT ATMOSPHERIC TRANSITION: Smoothly fades light Aurora into deep slate */}
       <div className="w-full h-16 sm:h-20 bg-gradient-to-b from-transparent via-slate-950/60 to-slate-950 pointer-events-none" />
 
-      {/* 2. BALANCED CLINICAL FOOTER BODY */}
-      <div className="w-full bg-slate-950 border-t border-slate-800/80 px-4 sm:px-8 py-6 sm:py-7">
-        <div className="mx-auto max-w-6xl flex flex-col gap-3.5">
+      {/* 2. MAIN FOOTER BODY */}
+      <div className="w-full bg-slate-950 border-t border-slate-800/80 px-4 sm:px-8 pt-10 pb-8">
+        <div className="mx-auto max-w-6xl flex flex-col gap-10">
           
-          {/* Row 1: Brand & Navigation */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            {/* Brand & Subtitle with Capabilities */}
-            <div className="flex flex-col gap-0.5">
+          {/* Main Content Grid: 1 Brand Info Column + 4 Clean Link Columns */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-8 lg:gap-10">
+            {/* Brand Column (Col span: 2) */}
+            <div className="col-span-2 flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] animate-pulse" />
-                <span className="font-black text-white tracking-wider text-xs">MEDVOICE AI</span>
-                <span className="text-[10px] font-mono text-cyan-400/80 px-1.5 py-0.2 rounded bg-cyan-950/60 border border-cyan-800/40">
-                  Clinical Intelligence
+                <span className="font-extrabold text-white tracking-wider text-sm">MEDVOICE AI</span>
+                <span className="text-[10px] font-mono text-cyan-400/90 px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/50">
+                  Clinical
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium pl-4">
-                Voice Triage · Multi-Specialist Reasoning · FHIR R4 Documentation
+
+              <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
+                Investigational clinical decision support and voice triage architecture. Deterministic safety arbitration, live acoustic speech telemetry, and FHIR documentation.
               </p>
+
+              {/* Direct Emergency Pill */}
+              <div className="flex items-center gap-2 mt-1">
+                <a
+                  href="tel:108"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-950/50 hover:bg-rose-900/50 text-rose-300 border border-rose-800/40 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  <PhoneCall className="w-3 h-3 text-rose-400" />
+                  <span>Ambulance: 108</span>
+                </a>
+                <a
+                  href="tel:112"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  <span>National: 112</span>
+                </a>
+              </div>
             </div>
 
-            {/* Navigation Links with Emergency Badge */}
-            <nav className="flex flex-wrap items-center gap-4 sm:gap-5 text-xs font-semibold text-slate-300">
-              <Link href="/consult" className="hover:text-cyan-400 transition-colors">
-                Voice Consult
-              </Link>
-              <Link href="/dashboard" className="hover:text-cyan-400 transition-colors">
-                SOAP Notes
-              </Link>
-              <Link href="/care" className="hover:text-cyan-400 transition-colors">
-                Care Network
-              </Link>
-              <Link href="/privacy" className="hover:text-emerald-400 transition-colors flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Safety & Privacy</span>
-              </Link>
-              <a
-                href="tel:108"
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-400 hover:text-rose-300 bg-rose-950/40 border border-rose-800/40 px-2 py-0.5 rounded-md transition-colors"
-              >
-                <PhoneCall className="w-3 h-3 text-rose-400" />
-                <span>108 / 112 ER</span>
-              </a>
-            </nav>
-          </div>
+            {/* Column 1: Clinical Platform */}
+            <div className="col-span-1 flex flex-col gap-3">
+              <h3 className="text-xs font-bold text-white tracking-wide">
+                Clinical
+              </h3>
+              <ul className="space-y-2 text-xs">
+                <li>
+                  <Link href="/consult" className="hover:text-cyan-400 transition-colors">
+                    Voice Consult
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/dashboard" className="hover:text-cyan-400 transition-colors">
+                    SOAP Records
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/care" className="hover:text-cyan-400 transition-colors">
+                    Care Network
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-cyan-400 transition-colors">
+                    Safety Arbiter
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/consult" className="hover:text-cyan-400 transition-colors">
+                    Specialist Board
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/admin" className="hover:text-cyan-400 transition-colors">
+                    Admin Analytics
+                  </Link>
+                </li>
+              </ul>
+            </div>
 
-          {/* Micro Clinical Governance Notice */}
-          <div className="text-[10.5px] text-slate-500 leading-relaxed font-sans border-t border-slate-900 pt-2.5">
-            <span className="text-slate-400 font-medium">Investigational Clinical Decision Support:</span> MedVoice AI provides preliminary conversational triage, protocol scoring (ESI v4 / BE-FAST), and geographic facility routing. It does not replace clinical evaluation by an attending physician. In acute emergencies, immediately contact emergency services.
+            {/* Column 2: Protocols */}
+            <div className="col-span-1 flex flex-col gap-3">
+              <h3 className="text-xs font-bold text-white tracking-wide">
+                Protocols
+              </h3>
+              <ul className="space-y-2 text-xs">
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    ESI v4 Invariant
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    BE-FAST Stroke
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    TIMI Cardiac Risk
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    Centor Pharyngitis
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    PEWS Pediatric
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    Acoustic DSP
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 3: Architecture */}
+            <div className="col-span-1 flex flex-col gap-3">
+              <h3 className="text-xs font-bold text-white tracking-wide">
+                Architecture
+              </h3>
+              <ul className="space-y-2 text-xs">
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    Whisper STT
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    Kokoro-82M TTS
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    HL7® FHIR® R4
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    Zero Audio Spool
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    SHA-256 Ledger
+                  </span>
+                </li>
+                <li>
+                  <span className="text-slate-300 hover:text-cyan-400 transition-colors cursor-default">
+                    OSRM Road Router
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 4: Governance & Legal */}
+            <div className="col-span-1 flex flex-col gap-3">
+              <h3 className="text-xs font-bold text-white tracking-wide">
+                Legal & Safety
+              </h3>
+              <ul className="space-y-2 text-xs">
+                <li>
+                  <Link href="/privacy" className="hover:text-cyan-400 transition-colors">
+                    Privacy Policy
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-cyan-400 transition-colors">
+                    HIPAA Safeguards
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-cyan-400 transition-colors">
+                    Data Sovereignty
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-cyan-400 transition-colors">
+                    Terms of Clinical Use
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/privacy" className="hover:text-cyan-400 transition-colors">
+                    Security Architecture
+                  </Link>
+                </li>
+                <li>
+                  <a href="tel:108" className="text-rose-400 hover:text-rose-300 transition-colors font-medium">
+                    Emergency Helpline
+                  </a>
+                </li>
+              </ul>
+            </div>
+
           </div>
 
           {/* Divider */}
-          <div className="w-full h-px bg-slate-850 border-t border-slate-800/80" />
+          <div className="w-full h-px bg-slate-800/80" />
 
-          {/* Row 2: Security/Privacy & Regulatory/Emergency Disclaimer */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-[11px] font-mono text-slate-500">
-            <div className="flex flex-wrap items-center gap-2 text-slate-400">
-              <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-              <span>Zero Audio Retention</span>
-              <span className="text-slate-700">·</span>
-              <span>HIPAA 45 CFR § 164.312</span>
-              <span className="text-slate-700">·</span>
-              <span>HL7® FHIR® R4</span>
+          {/* Bottom Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] font-mono text-slate-500">
+            <div className="flex items-center gap-2">
+              <span>© {currentYear} MedVoice AI Clinical Technologies. All rights reserved.</span>
             </div>
 
             <div className="flex items-center gap-3">
-              <span>© {currentYear} MedVoice AI</span>
+              <span className="text-slate-400">
+                Investigational Decision Support
+              </span>
               <span className="text-slate-700">·</span>
-              <span className="text-amber-400/90 font-medium">
-                Emergency: 108 (Ambulance) / 112 (National)
+              <span className="text-amber-400/90 font-medium font-sans text-xs">
+                In acute emergency dial 108 / 112
               </span>
             </div>
           </div>
