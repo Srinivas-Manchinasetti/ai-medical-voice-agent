@@ -1004,13 +1004,13 @@ export default function CarePage() {
             <div id="care-map-section" className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch scroll-mt-24">
 
               {/* LEFT: Dominant Live Route Map (58% width on large screens) */}
-              <div className="lg:col-span-7 rounded-2xl overflow-hidden shadow-xs border border-[#E5E3DC] bg-white min-h-[460px] lg:min-h-[580px] flex flex-col">
+              <div className="lg:col-span-7 rounded-2xl overflow-hidden shadow-xs border border-[#E5E3DC] bg-white min-h-[480px] lg:min-h-[640px] flex flex-col">
                 <InteractiveRouteMap
                   patientCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
                   patientLocationName={userLocation?.label}
                   mapCenter={searchRegion ? { lat: searchRegion.lat, lng: searchRegion.lng } : undefined}
                   selectedHospital={selectedHospital}
-                  allHospitals={filteredAndSortedHospitals.slice(0, 60)}
+                  allHospitals={filteredAndSortedHospitals}
                   isManualPicking={isManualPicking}
                   onSelectHospital={(h) => handleSelectHospital(h, false)}
                   onConfirmManualLocation={handleConfirmManualLocation}
@@ -1021,8 +1021,8 @@ export default function CarePage() {
                 />
               </div>
 
-              {/* RIGHT: Ranked Facilities List (42% width on large screens) */}
-              <div className="lg:col-span-5 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs p-4 sm:p-5 flex flex-col gap-3 max-h-[620px] overflow-hidden">
+              {/* RIGHT: Decoupled Current Destination + All Matching Facilities Rail (42% width) */}
+              <div className="lg:col-span-5 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs p-4 sm:p-5 flex flex-col gap-3.5 max-h-[640px] lg:max-h-[680px] overflow-hidden">
 
                 {/* CATEGORY FALLBACK ALERT BANNER */}
                 {categoryFallback && fallbackBanner && (
@@ -1035,196 +1035,244 @@ export default function CarePage() {
                   </div>
                 )}
 
-                {/* NON-#1 SELECTION BANNER */}
-                {userSelectedId && selectedHospital && selectedHospital.id !== recommendedHospital?.id && (
-                  <div className="p-2.5 rounded-xl bg-[#E8F3F3] border border-[#C2DFDF] flex items-center justify-between text-xs shrink-0">
-                    <div className="flex items-center gap-2 truncate min-w-0">
-                      <span className="w-2 h-2 rounded-full bg-[#0F6B6D] shrink-0" />
-                      <span className="text-[#172026] truncate text-[11px]">
-                        Selected: <strong className="font-semibold">#{selectedHospital.rank} {selectedHospital.name}</strong>
+                {/* SECTION 1: CURRENT DESTINATION CARD (Driven by selectedHospital) */}
+                <div className="rounded-xl bg-[#F6F5F1] border border-[#E5E3DC] p-3.5 flex flex-col gap-2.5 shrink-0 shadow-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#E5E3DC]">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-[#0F6B6D] animate-pulse" />
+                      <span className="text-[10.5px] font-bold text-[#172026] uppercase tracking-wider">
+                        Current Destination
                       </span>
                     </div>
-                    <button
-                      onClick={handleResetToRecommended}
-                      className="text-[11px] font-bold text-[#0F6B6D] hover:underline cursor-pointer shrink-0 ml-2"
-                    >
-                      Return to #1 match
-                    </button>
+                    {selectedHospital && selectedHospital.id !== recommendedHospital?.id && (
+                      <button
+                        onClick={handleResetToRecommended}
+                        className="text-[11px] font-bold text-[#0F6B6D] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <span>Return to #1 Match</span>
+                      </button>
+                    )}
                   </div>
-                )}
 
-                {/* RANKED LIST HEADER & SORT */}
-                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-[#E5E3DC] shrink-0">
-                  <div className="min-w-0">
-                    <h3 className="text-xs font-bold text-[#172026] uppercase tracking-wider truncate">
-                      Ranked for: {categoryLabel}
-                    </h3>
-                    <p className="text-[11px] text-[#5A6B75] truncate">
-                      {filteredAndSortedHospitals.length} facilities verified on road network
-                    </p>
-                  </div>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => {
-                      setSortBy(e.target.value as any);
-                      setCurrentPage(1);
-                    }}
-                    aria-label="Sort order"
-                    className="text-xs font-semibold text-[#172026] bg-[#F6F5F1] border border-[#E5E3DC] rounded-lg px-2.5 py-1 focus:outline-none cursor-pointer shrink-0"
-                  >
-                    <option value="fastest">Best Match / Fastest</option>
-                    <option value="government">Government First</option>
-                    <option value="rating">Highest Rating</option>
-                  </select>
-                </div>
+                  {selectedHospital ? (
+                    <>
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span
+                              className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs text-white shrink-0 ${
+                                selectedHospital.id === recommendedHospital?.id ? "bg-[#0F6B6D]" : "bg-[#172026]"
+                              }`}
+                            >
+                              #{selectedHospital.rank}
+                            </span>
+                            <h4 className="text-xs sm:text-sm font-bold text-[#172026] truncate" title={selectedHospital.name}>
+                              {selectedHospital.name}
+                            </h4>
+                          </div>
 
-                {/* SCROLLABLE RANKED FACILITIES CARDS */}
-                <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5">
-                  {loading ? (
-                    <div className="py-12 text-center text-xs text-[#5A6B75] flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
-                      <span>Evaluating verified facilities nearby...</span>
-                    </div>
-                  ) : filteredAndSortedHospitals.length === 0 ? (
-                    <div className="p-8 rounded-xl bg-[#F6F5F1] text-center flex flex-col items-center justify-center gap-2">
-                      <Building2 className="w-6 h-6 text-[#8C9AA2]" />
-                      <p className="text-xs font-semibold text-[#172026]">No facilities matching criteria</p>
-                    </div>
-                  ) : (
-                    (showAllInRanked ? filteredAndSortedHospitals : filteredAndSortedHospitals.slice(0, 6)).map((hosp) => {
-                      const isSelected = selectedHospital?.id === hosp.id;
-                      const isRecommended = recommendedHospital?.id === hosp.id;
-                      const distanceNum = isSelected && liveRoadStats ? liveRoadStats.roadDistanceKm : hosp.distanceKm;
-                      const durationNum = isSelected && liveRoadStats ? liveRoadStats.etaMinutes : hosp.etaMinutes || Math.max(3, Math.round(distanceNum * 1.5));
-                      const isGovernment = (hosp as any).ownership === "government";
-                      const actionLabel = hosp.actionType === "call_hospital" ? "Call hospital" : "Call ED";
-                      const actionColor = hosp.actionType === "call_hospital" ? "bg-[#0F6B6D] hover:bg-[#0A5254]" : "bg-[#B42318] hover:bg-[#991B1B]";
-                      const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
+                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                            {selectedHospital.isFallback ? (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                Fallback · Nearest 24/7 ER
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF]">
+                                Matched: {selectedHospital.matchedCategory || categoryLabel} · {selectedHospital.matchTier === "verified" ? "Verified" : "Inferred"}
+                              </span>
+                            )}
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] truncate max-w-[190px]">
+                              {selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}
+                            </span>
+                          </div>
 
-                      return (
-                        <div
-                          key={hosp.id}
-                          onClick={() => handleSelectHospital(hosp)}
-                          className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-2 ${
-                            isSelected
-                              ? "bg-white border-[#0F6B6D] shadow-md ring-2 ring-[#0F6B6D]/25"
-                              : "bg-white hover:bg-[#FBF7EE]/40 border-[#E5E3DC] shadow-xs"
+                          <p className="text-[11px] text-[#5A6B75] truncate mt-1">
+                            {selectedHospital.address}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col items-end shrink-0 text-right">
+                          <span className="text-xs sm:text-sm font-bold text-[#172026]">
+                            ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min
+                          </span>
+                          <span className="text-[11px] text-[#5A6B75]">
+                            ~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km by road
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Verified capability tags */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-[#5A6B75]">
+                        <span className="px-2 py-0.5 rounded bg-white border border-[#E5E3DC]">
+                          ✓ {selectedHospital.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty OPD"}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-white border border-[#E5E3DC]">
+                          ✓ {(selectedHospital as any).ownership === "government" ? "Government" : "Private"}
+                        </span>
+                        {selectedHospital.acceptsPublicInsurance && (
+                          <span className="px-2 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8]">
+                            ✓ Ayushman / PM-JAY
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Why Ranked #1 Box (when #1 is selected) */}
+                      {selectedHospital.id === recommendedHospital?.id && selectedHospital.matchReasons && selectedHospital.matchReasons.length > 0 && (
+                        <div className="p-2.5 rounded-lg bg-[#FBF7EE] border border-[#E7DBB8] text-[10.5px] text-[#8C6D32] flex flex-col gap-1">
+                          <span className="font-bold flex items-center gap-1 text-[#8C6D32]">
+                            <Sparkles className="w-3 h-3" /> Why ranked #1:
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {selectedHospital.matchReasons.map((reason, rIdx) => (
+                              <span key={rIdx} className="inline-flex items-center gap-1 text-[10px]">
+                                <Check className="w-3 h-3 text-[#0F6B6D]" /> {reason}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <a
+                          href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
+                          className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer ${
+                            selectedHospital.actionType === "call_hospital"
+                              ? "bg-[#0F6B6D] hover:bg-[#0A5254]"
+                              : "bg-[#B42318] hover:bg-[#991B1B]"
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-2.5">
-                            <div className="flex items-start gap-2 min-w-0">
-                              <div
-                                className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs shrink-0 ${
-                                  isRecommended
-                                    ? "bg-[#0F6B6D] text-white shadow-xs"
-                                    : isSelected
-                                    ? "bg-[#172026] text-white"
-                                    : "bg-[#F6F5F1] text-[#172026] border border-[#E5E3DC]"
-                                }`}
-                              >
-                                #{hosp.rank}
-                              </div>
-                              <div className="min-w-0">
-                                <h4 className="text-xs sm:text-sm font-bold text-[#172026] truncate" title={hosp.name}>
-                                  {hosp.name}
-                                </h4>
-                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                                  {hosp.isFallback ? (
-                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
-                                      Fallback · Nearest 24/7 ER
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF]">
-                                      Matched: {hosp.matchedCategory || categoryLabel} · {hosp.matchTier === "verified" ? "Verified" : "Inferred"}
-                                    </span>
-                                  )}
-                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] truncate max-w-[170px]">
-                                    {famousFor}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-[#5A6B75] truncate mt-0.5">{hosp.address}</p>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-col items-end shrink-0 text-right">
-                              <span className="text-xs font-bold text-[#172026]">
-                                ~{durationNum} min
-                              </span>
-                              <span className="text-[11px] text-[#5A6B75]">
-                                ~{distanceNum.toFixed(1)} km
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[#E5E3DC] text-xs">
-                            <div className="flex items-center gap-1 text-[10px] text-[#5A6B75] flex-wrap">
-                              <span className="px-1.5 py-0.5 rounded bg-[#F6F5F1] border border-[#E5E3DC]">
-                                {hosp.isEmergency24x7 ? "24/7 ER" : "Specialty OPD"}
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded bg-[#F6F5F1] border border-[#E5E3DC]">
-                                {isGovernment ? "Government" : "Private"}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <a
-                                href={`tel:${hosp.emergencyPhone || hosp.phone || "108"}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer ${actionColor}`}
-                              >
-                                <PhoneCall className="w-3 h-3" />
-                                <span>{actionLabel}</span>
-                              </a>
-                              <a
-                                href={
-                                  userLocation
-                                    ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving`
-                                    : `https://www.google.com/maps/search/?api=1&query=${hosp.latitude},${hosp.longitude}`
-                                }
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#172026] hover:bg-[#2C3840] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
-                              >
-                                <span>Directions</span>
-                                <ExternalLink className="w-3 h-3 text-[#6E9997]" />
-                              </a>
-                            </div>
-                          </div>
-
-                          {/* WHY #1 EXPLANATION FOR TOP MATCH */}
-                          {isRecommended && isSelected && hosp.matchReasons && hosp.matchReasons.length > 0 && (
-                            <div className="p-2 rounded-lg bg-[#FBF7EE] border border-[#E7DBB8] text-[11px] text-[#8C6D32] flex flex-col gap-1">
-                              <span className="font-bold flex items-center gap-1 text-[#8C6D32]">
-                                <Sparkles className="w-3 h-3" /> Why ranked #1:
-                              </span>
-                              <div className="flex flex-wrap gap-1">
-                                {hosp.matchReasons.map((reason, rIdx) => (
-                                  <span key={rIdx} className="inline-flex items-center gap-1 text-[10.5px]">
-                                    <Check className="w-3 h-3 text-[#0F6B6D]" /> {reason}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
+                          <PhoneCall className="w-3.5 h-3.5" />
+                          <span>{selectedHospital.actionType === "call_hospital" ? "Call hospital" : "Call ED"}</span>
+                        </a>
+                        <a
+                          href={
+                            userLocation
+                              ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${selectedHospital.latitude},${selectedHospital.longitude}&travelmode=driving`
+                              : `https://www.google.com/maps/search/?api=1&query=${selectedHospital.latitude},${selectedHospital.longitude}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-[#172026] hover:bg-[#2C3840] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                        >
+                          <Navigation className="w-3.5 h-3.5 text-[#6E9997]" />
+                          <span>Directions</span>
+                        </a>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-3 text-center text-xs text-[#5A6B75]">
+                      No destination selected. Select any facility below or on the map.
+                    </div>
                   )}
+                </div>
 
-                  {/* EXPANDABLE TOGGLE */}
-                  {!loading && filteredAndSortedHospitals.length > 6 && (
-                    <button
-                      onClick={() => setShowAllInRanked(!showAllInRanked)}
-                      className="w-full py-2 rounded-xl border border-[#E5E3DC] bg-[#F6F5F1] hover:bg-[#E5E3DC] text-xs font-semibold text-[#172026] transition-colors cursor-pointer flex items-center justify-center gap-1 mt-1 shrink-0"
+                {/* SECTION 2: ALL MATCHING FACILITIES RAIL */}
+                <div className="flex flex-col gap-2 min-h-0 flex-1">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[#E5E3DC] shrink-0">
+                    <div className="min-w-0">
+                      <h3 className="text-xs font-bold text-[#172026] uppercase tracking-wider truncate">
+                        {filteredAndSortedHospitals.length} Matching Facilities
+                      </h3>
+                      <p className="text-[10.5px] text-[#5A6B75] truncate">
+                        Ranked for {categoryLabel} · Select any to route
+                      </p>
+                    </div>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => {
+                        setSortBy(e.target.value as any);
+                        setCurrentPage(1);
+                      }}
+                      aria-label="Sort order"
+                      className="text-xs font-semibold text-[#172026] bg-[#F6F5F1] border border-[#E5E3DC] rounded-lg px-2.5 py-1 focus:outline-none cursor-pointer shrink-0"
                     >
-                      <span>
-                        {showAllInRanked
-                          ? "Show fewer options ▴"
-                          : `More facilities (${filteredAndSortedHospitals.length - 6}) ▾`}
-                      </span>
-                    </button>
-                  )}
+                      <option value="fastest">Best Match / Fastest</option>
+                      <option value="government">Government First</option>
+                      <option value="rating">Highest Rating</option>
+                    </select>
+                  </div>
+
+                  {/* SCROLLABLE LIST OF ALL FACILITIES */}
+                  <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 min-h-0">
+                    {loading ? (
+                      <div className="py-12 text-center text-xs text-[#5A6B75] flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
+                        <span>Evaluating verified facilities nearby...</span>
+                      </div>
+                    ) : filteredAndSortedHospitals.length === 0 ? (
+                      <div className="p-8 rounded-xl bg-[#F6F5F1] text-center flex flex-col items-center justify-center gap-2">
+                        <Building2 className="w-6 h-6 text-[#8C9AA2]" />
+                        <p className="text-xs font-semibold text-[#172026]">No facilities matching criteria</p>
+                      </div>
+                    ) : (
+                      filteredAndSortedHospitals.map((hosp) => {
+                        const isSelected = selectedHospital?.id === hosp.id;
+                        const isBest = recommendedHospital?.id === hosp.id;
+                        const distanceNum = isSelected && liveRoadStats ? liveRoadStats.roadDistanceKm : hosp.distanceKm;
+                        const durationNum = isSelected && liveRoadStats ? liveRoadStats.etaMinutes : hosp.etaMinutes || Math.max(3, Math.round(distanceNum * 1.5));
+                        const isGovernment = (hosp as any).ownership === "government";
+                        const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
+
+                        return (
+                          <div
+                            key={hosp.id}
+                            onClick={() => handleSelectHospital(hosp)}
+                            className={`p-2.5 rounded-xl border transition-all cursor-pointer flex flex-col gap-1.5 ${
+                              isSelected
+                                ? "bg-[#E8F3F3]/40 border-[#0F6B6D] shadow-xs ring-2 ring-[#0F6B6D]/30"
+                                : "bg-white hover:bg-[#FBF7EE]/40 border-[#E5E3DC] shadow-xs"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2 min-w-0">
+                                <div
+                                  className={`w-5 h-5 rounded-md flex items-center justify-center font-bold text-[11px] shrink-0 ${
+                                    isSelected
+                                      ? "bg-[#0F6B6D] text-white shadow-xs"
+                                      : isBest
+                                      ? "bg-[#E8F3F3] text-[#0F6B6D] border border-[#0F6B6D]"
+                                      : "bg-[#F6F5F1] text-[#172026] border border-[#E5E3DC]"
+                                  }`}
+                                >
+                                  #{hosp.rank}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <h4 className="text-xs font-bold text-[#172026] truncate" title={hosp.name}>
+                                      {hosp.name}
+                                    </h4>
+                                    {isSelected && (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#0F6B6D] text-white uppercase tracking-wider">
+                                        Destination
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                    <span className="text-[9.5px] font-semibold px-1.5 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] truncate max-w-[160px]">
+                                      {famousFor}
+                                    </span>
+                                    <span className="text-[10px] text-[#5A6B75]">
+                                      {hosp.isEmergency24x7 ? "24/7 ER" : "OPD"} · {isGovernment ? "Govt" : "Private"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col items-end shrink-0 text-right">
+                                <span className="text-xs font-bold text-[#172026]">
+                                  ~{durationNum}m
+                                </span>
+                                <span className="text-[10px] text-[#5A6B75]">
+                                  ~{distanceNum.toFixed(1)} km
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
 
               </div>

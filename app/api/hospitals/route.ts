@@ -363,6 +363,10 @@ export async function GET(request: Request) {
       if (h.accreditation && h.accreditation.length > 0) {
         matchReasons.push(`${h.accreditation.join(" & ")} Accredited`);
       }
+      matchReasons.push(`${dist.toFixed(1)} km away · ~${etaMinutes}m drive`);
+      if (h.acceptsPublicInsurance) {
+        matchReasons.push("Ayushman / PM-JAY Empanelled");
+      }
 
       return {
         ...h,
