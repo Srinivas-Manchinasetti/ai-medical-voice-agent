@@ -80,6 +80,7 @@ export function InteractiveRouteMap({
   const leafletRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const markersLayerRef = useRef<any>(null);
+  const hospitalMarkersMapRef = useRef<Map<string, { marker: any; hosp: HospitalItem }>>(new Map());
 
   // Track sequence ID to cancel older routing requests and prevent race conditions
   const routingRequestIdRef = useRef<number>(0);
@@ -123,6 +124,97 @@ export function InteractiveRouteMap({
       points.push([parseFloat(lat.toFixed(6)), parseFloat(lng.toFixed(6))]);
     }
     return points;
+  }
+
+  function createHospitalIcon(L: any, hosp: HospitalItem, isSelected: boolean) {
+    const isEligible = Boolean(hosp.isEligible);
+    const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
+    const shortName = hosp.name.split("-")[0].split("(")[0].trim();
+
+    const pinBg = isSelected
+      ? (hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D")
+      : isEligible
+      ? "#FBF7EE"
+      : "#FFFFFF";
+    const pinBorder = isSelected
+      ? "#FFFFFF"
+      : isEligible
+      ? "#B79A63"
+      : "#CBD5E1";
+    const iconColor = isSelected
+      ? "#FFFFFF"
+      : isEligible
+      ? "#B79A63"
+      : "#64748B";
+
+    return L.divIcon({
+      className: "custom-hospital-marker",
+      html: `
+        <div style="position:relative; width:${isSelected ? "44px" : "28px"}; height:${isSelected ? "44px" : "28px"}; display:flex; align-items:center; justify-content:center; cursor:pointer; ${isSelected ? "z-index:1000;" : "opacity:0.85;"}">
+          ${isSelected ? `<div style="position:absolute; width:44px; height:44px; border-radius:50%; background:${hosp.isEmergency24x7 ? "rgba(180,35,24,0.25)" : "rgba(15,107,109,0.25)"}; animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
+          <div style="position:relative; width:${isSelected ? "34px" : "22px"}; height:${isSelected ? "34px" : "22px"}; border-radius:${isSelected ? "10px" : "6px"}; background:${pinBg}; border:${isSelected ? "2.5px" : "1.5px"} solid ${pinBorder}; box-shadow:${isSelected ? "0 4px 14px rgba(23,32,38,0.28)" : "0 1px 3px rgba(0,0,0,0.1)"}; display:flex; align-items:center; justify-content:center; color:${iconColor};">
+            ${isSelected
+              ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+              : isEligible
+              ? `<span style="font-size:10px; line-height:1;">★</span>`
+              : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+            }
+          </div>
+          ${isSelected
+          ? `<div style="position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#172026; font-family:system-ui,-apple-system,sans-serif; padding:4px 9px; border-radius:8px; box-shadow:0 4px 14px rgba(23,32,38,0.18); z-index:9999; border:1px solid #E5E3DC; pointer-events:none;">
+                  <div style="font-size:11px; font-weight:700; color:#172026; display:flex; align-items:center; gap:4px; line-height:1.2;">
+                    <span>🏥</span> ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km)</span>
+                  </div>
+                  <div style="font-size:9.5px; font-weight:600; color:#8C6D32; background:#FBF7EE; border:1px solid #E7DBB8; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-block;">
+                    ★ ${famousFor}
+                  </div>
+                </div>`
+          : ""
+        }
+        </div>
+      `,
+      iconSize: [isSelected ? 44 : 28, isSelected ? 44 : 28],
+      iconAnchor: [isSelected ? 22 : 14, isSelected ? 22 : 14],
+    });
+  }
+
+  function createPopupHtml(hosp: HospitalItem, origin?: { lat: number; lng: number } | null) {
+    const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
+    const googleMapsUrl = origin
+      ? `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving`
+      : `https://www.google.com/maps/search/?api=1&query=${hosp.latitude},${hosp.longitude}`;
+    const emergencyNum = hosp.emergencyPhone || hosp.phone || "108";
+
+    return `
+      <div style="font-family:system-ui,-apple-system,sans-serif; padding:8px 6px; line-height:1.4; max-width:270px; color:#172026;">
+        <b style="font-size:13px; font-weight:700; color:#172026; display:block; margin-bottom:4px; line-height:1.3;">${hosp.name}</b>
+        <div style="display:inline-block; margin-bottom:6px; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
+          ★ ${famousFor}
+        </div>
+        <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; margin-bottom:4px; color:${hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D"};">
+          <span>~${hosp.distanceKm} km</span>
+          <span style="color:#A8B7A1;">•</span>
+          <span>${hosp.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}</span>
+        </div>
+        <div style="color:#5A6B75; font-size:10.5px; line-height:1.35; margin-bottom:10px;">${hosp.address}</div>
+        <div style="display:flex; gap:6px;">
+          <a
+            href="tel:${emergencyNum}"
+            style="flex:1; text-align:center; background:#B42318; color:#ffffff; font-weight:600; font-size:11px; padding:7px 8px; border-radius:8px; text-decoration:none; display:inline-block;"
+          >
+            Call ED
+          </a>
+          <a
+            href="${googleMapsUrl}"
+            target="_blank"
+            rel="noopener noreferrer"
+            style="flex:1; text-align:center; background:#172026; color:#ffffff; font-weight:600; font-size:11px; padding:7px 8px; border-radius:8px; text-decoration:none; display:inline-block;"
+          >
+            Directions
+          </a>
+        </div>
+      </div>
+    `;
   }
 
   // Draw driving route from user coordinates to selected hospital
@@ -194,11 +286,14 @@ export function InteractiveRouteMap({
       routeLayerRef.current.addLayer(previewCoreLine);
 
       if (autoFrame && previewPoints.length > 1) {
+        if (map.invalidateSize) map.invalidateSize();
         const bounds = L.latLngBounds([
           [origin.lat, origin.lng],
           [destination.lat, destination.lng],
         ]);
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15, animate: true });
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15, animate: true });
+        }
       }
 
       // Immediately show route stats
@@ -255,7 +350,11 @@ export function InteractiveRouteMap({
             routeLayerRef.current.addLayer(roadCore);
 
             if (autoFrame && roadPoints.length > 1) {
-              map.fitBounds(L.latLngBounds(roadPoints), { padding: [60, 60], maxZoom: 15, animate: true });
+              if (map.invalidateSize) map.invalidateSize();
+              const roadBounds = L.latLngBounds(roadPoints);
+              if (roadBounds.isValid()) {
+                map.fitBounds(roadBounds, { padding: [60, 60], maxZoom: 15, animate: true });
+              }
             }
 
             setRouteInfo({
@@ -293,6 +392,7 @@ export function InteractiveRouteMap({
       if (!map || !markersLayerRef.current || !L) return;
 
       markersLayerRef.current.clearLayers();
+      hospitalMarkersMapRef.current.clear();
 
       if (isManualPicking) return;
 
@@ -339,69 +439,19 @@ export function InteractiveRouteMap({
         if (!hLat || !hLng) return;
 
         const isSelected = selectedHospital?.id === hosp.id;
-        const isEligible = Boolean(hosp.isEligible);
-        const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
-        const shortName = hosp.name.split("-")[0].split("(")[0].trim();
-
-        // Quiet luxury marker colors:
-        // Unselected: soft white/slate with neutral border (not screaming red)
-        // Eligible/Specialized: warm gold accent
-        // Selected: high saturation clinical teal or emergency danger
-        const pinBg = isSelected
-          ? (hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D")
-          : isEligible
-          ? "#FBF7EE"
-          : "#FFFFFF";
-        const pinBorder = isSelected
-          ? "#FFFFFF"
-          : isEligible
-          ? "#B79A63"
-          : "#CBD5E1";
-        const iconColor = isSelected
-          ? "#FFFFFF"
-          : isEligible
-          ? "#B79A63"
-          : "#64748B";
-
-        const hospIcon = L.divIcon({
-          className: "custom-hospital-marker",
-          html: `
-            <div style="position:relative; width:${isSelected ? "40px" : "24px"}; height:${isSelected ? "40px" : "24px"}; display:flex; align-items:center; justify-content:center; cursor:pointer; ${isSelected ? "z-index:1000;" : "opacity:0.8;"}">
-              ${isSelected ? `<div style="position:absolute; width:40px; height:40px; border-radius:50%; background:${hosp.isEmergency24x7 ? "rgba(180,35,24,0.2)" : "rgba(15,107,109,0.2)"}; animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
-              <div style="position:relative; width:${isSelected ? "30px" : "20px"}; height:${isSelected ? "30px" : "20px"}; border-radius:${isSelected ? "8px" : "5px"}; background:${pinBg}; border:${isSelected ? "2.5px" : "1.5px"} solid ${pinBorder}; box-shadow:${isSelected ? "0 4px 14px rgba(23,32,38,0.25)" : "0 1px 3px rgba(0,0,0,0.08)"}; display:flex; align-items:center; justify-content:center; color:${iconColor};">
-                ${isSelected
-                  ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
-                  : isEligible
-                  ? `<span style="font-size:9px;">★</span>`
-                  : `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
-                }
-              </div>
-              ${isSelected
-              ? `<div style="position:absolute; bottom:-46px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#172026; font-family:sans-serif; padding:4px 8px; border-radius:8px; box-shadow:0 4px 14px rgba(23,32,38,0.12); z-index:9999; border:1px solid #E5E3DC; pointer-events:none;">
-                      <div style="font-size:11px; font-weight:700; color:#172026; display:flex; align-items:center; gap:4px; line-height:1.2;">
-                        <span>🏥</span> ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km)</span>
-                      </div>
-                      <div style="font-size:9.5px; font-weight:600; color:#8C6D32; background:#FBF7EE; border:1px solid #E7DBB8; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-block;">
-                        ★ ${famousFor}
-                      </div>
-                    </div>`
-              : ""
-            }
-            </div>
-          `,
-          iconSize: [isSelected ? 40 : 24, isSelected ? 40 : 24],
-          iconAnchor: [isSelected ? 20 : 12, isSelected ? 20 : 12],
-        });
+        const hospIcon = createHospitalIcon(L, hosp, isSelected);
 
         const marker = L.marker([hLat, hLng], {
           icon: hospIcon,
-          zIndexOffset: isSelected ? 1200 : isEligible ? 400 : 100,
+          zIndexOffset: isSelected ? 1400 : hosp.isEligible ? 400 : 100,
         });
+
+        const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
 
         // Hover tooltip
         marker.bindTooltip(
           `
-          <div style="font-family:sans-serif; padding:3px 5px; line-height:1.35; max-width:240px;">
+          <div style="font-family:system-ui,-apple-system,sans-serif; padding:3px 5px; line-height:1.35; max-width:240px;">
             <b style="color:#172026; font-size:11px; display:block;">${hosp.name}</b>
             <div style="margin:2px 0; display:inline-block; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px;">
               ★ ${famousFor}
@@ -413,34 +463,19 @@ export function InteractiveRouteMap({
         );
 
         // Click popup
-        marker.bindPopup(`
-          <div style="font-family:sans-serif; padding:6px; line-height:1.4; max-width:260px;">
-            <b style="color:#172026; font-size:12px; display:block; margin-bottom:4px;">${hosp.name}</b>
-            <div style="display:inline-block; margin-bottom:5px; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
-              ★ ${famousFor}
-            </div>
-            <div style="color:${hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D"}; font-size:11px; font-weight:600; margin-bottom:3px;">
-              ${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 Verified Emergency" : "Care Center"}
-            </div>
-            <div style="color:#5A6B75; font-size:10px; line-height:1.3; margin-bottom:8px;">${hosp.address}</div>
-            <button 
-              onclick="window.medvoiceSelectHospitalById('${hosp.id}')"
-              style="width:100%; background:#0F6B6D; color:#ffffff; font-weight:600; font-size:11px; padding:7px 10px; border-radius:8px; border:none; cursor:pointer;"
-            >
-              Directions from your location
-            </button>
-          </div>
-        `);
+        marker.bindPopup(createPopupHtml(hosp, patientCoords));
 
         // Clicking marker immediately selects this hospital and changes route
-        marker.on("click", () => {
+        marker.on("click", (e: any) => {
+          if (L.DomEvent) L.DomEvent.stopPropagation(e);
           onSelectHospital(hosp);
         });
 
+        hospitalMarkersMapRef.current.set(hosp.id, { marker, hosp });
         markersLayerRef.current.addLayer(marker);
       });
     },
-    [patientCoords?.lat, patientCoords?.lng, patientLocationName, isManualPicking, selectedHospital?.id, allHospitals, onSelectHospital]
+    [patientCoords?.lat, patientCoords?.lng, patientLocationName, isManualPicking, allHospitals, onSelectHospital]
   );
 
   // Initialize Leaflet Map on Mount
@@ -483,6 +518,27 @@ export function InteractiveRouteMap({
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(map);
+
+      // Map click: if user clicks near any hospital marker, select it smoothly
+      map.on("click", (e: any) => {
+        if (isManualPicking) return;
+        const clickPoint = e.layerPoint;
+        let closestHosp: HospitalItem | null = null;
+        let minDistancePx = 30;
+
+        hospitalMarkersMapRef.current.forEach(({ marker, hosp }) => {
+          const markerPoint = map.latLngToLayerPoint(marker.getLatLng());
+          const distPx = clickPoint.distanceTo(markerPoint);
+          if (distPx < minDistancePx) {
+            minDistancePx = distPx;
+            closestHosp = hosp;
+          }
+        });
+
+        if (closestHosp) {
+          onSelectHospital(closestHosp);
+        }
+      });
 
       mapInstanceRef.current = map;
       markersLayerRef.current = L.layerGroup().addTo(map);
@@ -531,16 +587,29 @@ export function InteractiveRouteMap({
     };
   }, []);
 
-  // Update Markers Layer when allHospitals or selectedHospital changes
+  // Update Markers Layer ONLY when allHospitals or patientCoords or isManualPicking changes
   useEffect(() => {
     if (!mapInstanceRef.current || !leafletRef.current) return;
     renderMarkers(leafletRef.current, mapInstanceRef.current);
   }, [renderMarkers]);
 
-  // Update Route when selectedHospital changes or patientCoords changes
+  // Update Route & Marker Selection Highlights without rebuilding layer
   useEffect(() => {
     if (!mapInstanceRef.current || !leafletRef.current) return;
+    const L = leafletRef.current;
+    const map = mapInstanceRef.current;
 
+    // 1. Update marker visual highlights and popup state
+    hospitalMarkersMapRef.current.forEach(({ marker, hosp }) => {
+      const isSelected = selectedHospital?.id === hosp.id;
+      marker.setIcon(createHospitalIcon(L, hosp, isSelected));
+      marker.setZIndexOffset(isSelected ? 1400 : hosp.isEligible ? 400 : 100);
+      if (isSelected) {
+        marker.openPopup();
+      }
+    });
+
+    // 2. Draw route
     if (!patientCoords || !Number.isFinite(patientCoords.lat) || !Number.isFinite(patientCoords.lng)) {
       if (routeLayerRef.current) {
         routeLayerRef.current.clearLayers();
@@ -562,7 +631,7 @@ export function InteractiveRouteMap({
     prevHospitalIdRef.current = hospitalKey;
 
     if (selectedHospital && selectedHospital.latitude && selectedHospital.longitude) {
-      drawRouteToHospital(leafletRef.current, mapInstanceRef.current, selectedHospital, true);
+      drawRouteToHospital(L, map, selectedHospital, true);
     } else if (routeLayerRef.current) {
       routeLayerRef.current.clearLayers();
       setIsRouting(false);

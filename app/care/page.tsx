@@ -21,6 +21,7 @@ import {
   Navigation,
   Activity,
   Sparkles,
+  Check,
 } from "lucide-react";
 import { Navbar } from "../_components/Navbar";
 import { AppFooter } from "../_components/AppFooter";
@@ -167,12 +168,18 @@ export default function CarePage() {
   };
 
   // Unified hospital selection handler: updates selection, resets/syncs road stats, and triggers map route
-  const handleSelectHospital = (hosp: HospitalItem) => {
+  const handleSelectHospital = (hosp: HospitalItem, shouldScrollToMap: boolean = false) => {
     setSelectedHospital(hosp);
     setLiveRoadStats({
       roadDistanceKm: hosp.distanceKm,
       etaMinutes: hosp.etaMinutes || Math.max(3, Math.round(hosp.distanceKm * 1.5)),
     });
+    if (shouldScrollToMap && typeof window !== "undefined") {
+      const mapEl = document.getElementById("care-map-section");
+      if (mapEl) {
+        mapEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
   };
 
   // 1. Session Storage on Mount: Non-authoritative suggestion ONLY.
@@ -962,7 +969,7 @@ export default function CarePage() {
             )}
 
             {/* DOMINANT WORKSPACE: LIVE MAP + DESTINATION INTELLIGENCE */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+            <div id="care-map-section" className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch scroll-mt-24">
 
               {/* LEFT: Dominant Live Route Map */}
               <div className="lg:col-span-8 rounded-2xl overflow-hidden shadow-xs border border-[#E5E3DC] bg-white min-h-[460px]">
@@ -973,7 +980,7 @@ export default function CarePage() {
                   selectedHospital={selectedHospital}
                   allHospitals={filteredAndSortedHospitals.slice(0, 60)}
                   isManualPicking={isManualPicking}
-                  onSelectHospital={handleSelectHospital}
+                  onSelectHospital={(h) => handleSelectHospital(h, false)}
                   onConfirmManualLocation={handleConfirmManualLocation}
                   onCancelManualPicking={() => setIsManualPicking(false)}
                   onRouteCalculated={(stats) => setLiveRoadStats(stats)}
@@ -1043,6 +1050,20 @@ export default function CarePage() {
                       <p className="text-xs text-[#5A6B75] truncate mt-1">
                         {selectedHospital.address}
                       </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-white text-[#0F6B6D] border border-[#C2DFDF]">
+                        {selectedHospital.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}
+                      </span>
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-white text-[#5A6B75] border border-[#E5E3DC]">
+                        {(selectedHospital as any).ownership === "government" ? "Government" : "Private"}
+                      </span>
+                      {selectedHospital.acceptsPublicInsurance && (
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8]">
+                          Ayushman / PM-JAY
+                        </span>
+                      )}
                     </div>
 
                     <div className="pt-2 border-t border-[#E5E3DC] flex items-center justify-between text-xs">
@@ -1253,6 +1274,101 @@ export default function CarePage() {
                           </a>
                         </div>
                       </div>
+
+                      {/* EXPANDED HOSPITAL & ROUTE INTELLIGENCE DETAILS */}
+                      {isSelected && (
+                        <div className="pt-3 border-t border-[#E5E3DC] flex flex-col gap-3 animate-in fade-in duration-200">
+                          {/* Live route banner with scroll to map button */}
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-[#E8F3F3] border border-[#C2DFDF] text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#0F6B6D] animate-pulse shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="font-bold text-[#0F6B6D]">
+                                  Active Route: ~{distanceNum.toFixed(1)} km · ~{durationNum} min drive
+                                </span>
+                                <span className="text-[11px] text-[#5A6B75]">
+                                  Live road route calculated and plotted on map above
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectHospital(hosp, true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F6B6D] hover:bg-[#0A5254] text-white font-semibold text-xs transition-colors shadow-xs cursor-pointer shrink-0"
+                            >
+                              <MapPin className="w-3.5 h-3.5" />
+                              <span>View route on map</span>
+                            </button>
+                          </div>
+
+                          {/* Specialties List */}
+                          {hosp.specialty && hosp.specialty.length > 0 && (
+                            <div>
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5A6B75] block mb-1">
+                                Clinical capabilities & departments
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {hosp.specialty.map((s, sIdx) => (
+                                  <span
+                                    key={sIdx}
+                                    className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-[#F6F5F1] text-[#172026] border border-[#E5E3DC]"
+                                  >
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Match reasons */}
+                          {hosp.matchReasons && hosp.matchReasons.length > 0 && (
+                            <div>
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5A6B75] block mb-1">
+                                Why this facility
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {hosp.matchReasons.map((reason, rIdx) => (
+                                  <span
+                                    key={rIdx}
+                                    className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] flex items-center gap-1.5"
+                                  >
+                                    <Check className="w-3.5 h-3.5 text-[#8C6D32]" />
+                                    <span>{reason}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Contact details */}
+                          <div className="flex items-center justify-between text-xs text-[#5A6B75] pt-1">
+                            <div>
+                              <span>Emergency ED: </span>
+                              <a
+                                href={`tel:${hosp.emergencyPhone || hosp.phone || "108"}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-bold text-[#B42318] hover:underline"
+                              >
+                                {hosp.emergencyPhone || hosp.phone || "108"}
+                              </a>
+                            </div>
+                            {hosp.phone && hosp.phone !== hosp.emergencyPhone && (
+                              <div>
+                                <span>Reception: </span>
+                                <a
+                                  href={`tel:${hosp.phone}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="font-semibold text-[#172026] hover:underline"
+                                >
+                                  {hosp.phone}
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })

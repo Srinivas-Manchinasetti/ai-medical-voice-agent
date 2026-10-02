@@ -22,6 +22,7 @@ function getGridKey(lat: number, lng: number): string {
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
 /**
@@ -34,13 +35,18 @@ async function queryOverpassHospitals(
   radiusKm: number = 30
 ): Promise<Hospital[]> {
   const radiusMeters = Math.min(50000, Math.round(radiusKm * 1000));
-  const query = `[out:json][timeout:8];(
+  const query = `[out:json][timeout:10];(
     node["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
     way["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
+    relation["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
     node["healthcare"="hospital"](around:${radiusMeters},${lat},${lng});
     way["healthcare"="hospital"](around:${radiusMeters},${lat},${lng});
-    node["amenity"="clinic"]["emergency"="yes"](around:${radiusMeters},${lat},${lng});
-  );out center 50;`;
+    relation["healthcare"="hospital"](around:${radiusMeters},${lat},${lng});
+    node["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
+    way["amenity"="clinic"](around:${radiusMeters},${lat},${lng});
+    node["healthcare"="centre"](around:${radiusMeters},${lat},${lng});
+    node["healthcare"="clinic"](around:${radiusMeters},${lat},${lng});
+  );out center 80;`;
 
   const body = `data=${encodeURIComponent(query)}`;
 
