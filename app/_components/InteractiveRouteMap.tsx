@@ -49,13 +49,12 @@ export function calculateCalibratedDriveTime(distanceKm: number, rawOsrmSeconds?
 }
 
 export const TILE_LAYERS = {
-  voyager: {
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+  osm: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     options: {
-      subdomains: "abcd",
-      maxZoom: 20,
+      maxZoom: 19,
       attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     },
   },
   satellite: {
@@ -119,7 +118,7 @@ export function InteractiveRouteMap({
   const prevCoordsRef = useRef<string>("");
   const prevHospitalIdRef = useRef<string>("");
 
-  const [mapStyle, setMapStyle] = useState<"voyager" | "satellite">("voyager");
+  const [mapStyle, setMapStyle] = useState<"osm" | "satellite">("osm");
   const [poiResolving, setPoiResolving] = useState<boolean>(false);
 
   const [routeInfo, setRouteInfo] = useState<{
@@ -133,8 +132,8 @@ export function InteractiveRouteMap({
   });
   const [isRouting, setIsRouting] = useState<boolean>(false);
 
-  // Switch between clean CartoDB Voyager and ESRI World Satellite
-  const switchMapStyle = useCallback((newStyle: "voyager" | "satellite") => {
+  // Switch between clean OpenStreetMap and ESRI World Satellite
+  const switchMapStyle = useCallback((newStyle: "osm" | "satellite") => {
     setMapStyle(newStyle);
     if (!mapInstanceRef.current || !leafletRef.current) return;
     const L = leafletRef.current;
@@ -143,11 +142,7 @@ export function InteractiveRouteMap({
       map.removeLayer(baseLayerRef.current);
     }
     const config = TILE_LAYERS[newStyle];
-    const isRetina = typeof window !== "undefined" && window.devicePixelRatio >= 1.5;
-    const layer = L.tileLayer(config.url, {
-      ...config.options,
-      r: isRetina && newStyle === "voyager" ? "@2x" : "",
-    } as any);
+    const layer = L.tileLayer(config.url, config.options);
     baseLayerRef.current = layer;
     layer.addTo(map);
     layer.bringToBack();
@@ -586,13 +581,9 @@ export function InteractiveRouteMap({
         attributionControl: false,
       });
 
-      // Modern CartoDB Voyager tiles (crisp retina, clean geometry, zero clutter)
-      const isRetina = typeof window !== "undefined" && window.devicePixelRatio >= 1.5;
+      // 100% Free OpenStreetMap standard tiles (Zero API keys, zero watermarks)
       const initialLayerConfig = TILE_LAYERS[mapStyle];
-      const initialTileLayer = L.tileLayer(initialLayerConfig.url, {
-        ...initialLayerConfig.options,
-        r: isRetina && mapStyle === "voyager" ? "@2x" : "",
-      } as any).addTo(map);
+      const initialTileLayer = L.tileLayer(initialLayerConfig.url, initialLayerConfig.options).addTo(map);
       baseLayerRef.current = initialTileLayer;
 
       // Smart on-map click: Resolves facility, building, or pin anywhere on map canvas
@@ -984,9 +975,9 @@ export function InteractiveRouteMap({
       <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-1 p-1 rounded-xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] shadow-sm pointer-events-auto">
         <button
           type="button"
-          onClick={() => switchMapStyle("voyager")}
+          onClick={() => switchMapStyle("osm")}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-            mapStyle === "voyager"
+            mapStyle === "osm"
               ? "bg-[#0F6B6D] text-white shadow-xs"
               : "text-[#5A6B75] hover:text-[#172026] hover:bg-slate-100/60"
           }`}

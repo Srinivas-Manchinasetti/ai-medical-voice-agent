@@ -22,7 +22,6 @@ function getGridKey(lat: number, lng: number): string {
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
 /**
@@ -35,7 +34,7 @@ async function queryOverpassHospitals(
   radiusKm: number = 30
 ): Promise<Hospital[]> {
   const radiusMeters = Math.min(50000, Math.round(radiusKm * 1000));
-  const query = `[out:json][timeout:10];(
+  const query = `[out:json][timeout:5];(
     node["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
     way["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
     relation["amenity"="hospital"](around:${radiusMeters},${lat},${lng});
@@ -59,7 +58,7 @@ async function queryOverpassHospitals(
           "User-Agent": "MedVoiceAI/2.0 (healthcare-triage-locator; contact: care@medvoice.ai)",
         },
         body,
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(2000),
       });
 
       if (!res.ok) continue;
