@@ -174,20 +174,20 @@ export function InteractiveRouteMap({
       let dur = calculateCalibratedDriveTime(dist);
 
       const previewGlowLine = L.polyline(previewPoints, {
-        color: "#0284c7",
-        weight: 8,
-        opacity: 0.3,
+        color: "#0F6B6D",
+        weight: 7,
+        opacity: 0.2,
         lineCap: "round",
         lineJoin: "round",
       });
 
       const previewCoreLine = L.polyline(previewPoints, {
-        color: "#0284c7",
+        color: "#0F6B6D",
         weight: 4,
         opacity: 0.9,
         lineCap: "round",
         lineJoin: "round",
-        dashArray: "8, 8",
+        dashArray: "6, 6",
       });
 
       routeLayerRef.current.addLayer(previewGlowLine);
@@ -236,15 +236,15 @@ export function InteractiveRouteMap({
             routeLayerRef.current.clearLayers();
 
             const roadGlow = L.polyline(roadPoints, {
-              color: "#0284c7",
-              weight: 8,
-              opacity: 0.35,
+              color: "#0F6B6D",
+              weight: 7,
+              opacity: 0.22,
               lineCap: "round",
               lineJoin: "round",
             });
 
             const roadCore = L.polyline(roadPoints, {
-              color: "#0284c7",
+              color: "#0F6B6D",
               weight: 4.5,
               opacity: 0.95,
               lineCap: "round",
@@ -303,12 +303,12 @@ export function InteractiveRouteMap({
           className: "custom-user-pin",
           html: `
             <div style="position:relative; width:34px; height:34px; display:flex; align-items:center; justify-content:center;">
-              <div style="position:absolute; width:32px; height:32px; border-radius:50%; background:rgba(2,132,199,0.25); animation:ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-              <div style="position:relative; width:22px; height:22px; border-radius:50%; background:#0284c7; border:3px solid #ffffff; box-shadow:0 2px 10px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center;">
-                <div style="width:6px; height:6px; border-radius:50%; background:#ffffff;"></div>
+              <div style="position:absolute; width:32px; height:32px; border-radius:50%; background:rgba(15,107,109,0.2); animation:ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+              <div style="position:relative; width:20px; height:20px; border-radius:50%; background:#0F6B6D; border:2.5px solid #ffffff; box-shadow:0 2px 8px rgba(23,32,38,0.25); display:flex; align-items:center; justify-content:center;">
+                <div style="width:5px; height:5px; border-radius:50%; background:#ffffff;"></div>
               </div>
-              <div style="position:absolute; top:-22px; white-space:nowrap; background:#0f172a; color:#ffffff; font-family:sans-serif; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; box-shadow:0 2px 6px rgba(0,0,0,0.25); pointer-events:none;">
-                Your Location
+              <div style="position:absolute; top:-22px; white-space:nowrap; background:#172026; color:#ffffff; font-family:sans-serif; font-size:10px; font-weight:600; padding:2px 7px; border-radius:6px; box-shadow:0 2px 6px rgba(0,0,0,0.2); pointer-events:none;">
+                Your location
               </div>
             </div>
           `,
@@ -319,8 +319,8 @@ export function InteractiveRouteMap({
         const userMarker = L.marker([origin.lat, origin.lng], { icon: userPinIcon, zIndexOffset: 1000 });
         userMarker.bindPopup(`
           <div style="font-family:sans-serif; padding:4px; line-height:1.4;">
-            <b style="color:#0f172a; font-size:12px;">📍 Your Location</b><br/>
-            <span style="color:#64748b; font-size:11px;">${patientLocationName}</span>
+            <b style="color:#172026; font-size:12px;">📍 Your location</b><br/>
+            <span style="color:#5A6B75; font-size:11px;">${patientLocationName}</span>
           </div>
         `);
         markersLayerRef.current.addLayer(userMarker);
@@ -332,7 +332,7 @@ export function InteractiveRouteMap({
         if (found) onSelectHospital(found);
       };
 
-      // 2. HOSPITAL DESTINATION MARKERS
+      // 2. HOSPITAL DESTINATION MARKERS (Restrained, low noise, selected is primary)
       allHospitals.forEach((hosp) => {
         const hLat = hosp.latitude;
         const hLng = hosp.longitude;
@@ -343,37 +343,54 @@ export function InteractiveRouteMap({
         const famousFor = hosp.famousFor || getHospitalFamousFor(hosp);
         const shortName = hosp.name.split("-")[0].split("(")[0].trim();
 
-        const pinBg = isSelected ? "#e11d48" : isEligible ? "#f0f9ff" : "#ffffff";
-        const pinBorder = isSelected ? "#ffffff" : isEligible ? "#0284c7" : "#94a3b8";
+        // Quiet luxury marker colors:
+        // Unselected: soft white/slate with neutral border (not screaming red)
+        // Eligible/Specialized: warm gold accent
+        // Selected: high saturation clinical teal or emergency danger
+        const pinBg = isSelected
+          ? (hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D")
+          : isEligible
+          ? "#FBF7EE"
+          : "#FFFFFF";
+        const pinBorder = isSelected
+          ? "#FFFFFF"
+          : isEligible
+          ? "#B79A63"
+          : "#CBD5E1";
+        const iconColor = isSelected
+          ? "#FFFFFF"
+          : isEligible
+          ? "#B79A63"
+          : "#64748B";
 
         const hospIcon = L.divIcon({
           className: "custom-hospital-marker",
           html: `
-            <div style="position:relative; width:${isSelected ? "44px" : "26px"}; height:${isSelected ? "44px" : "26px"}; display:flex; align-items:center; justify-content:center; cursor:pointer; ${isSelected ? "z-index:1000;" : "opacity:0.75;"}">
-              ${isSelected ? `<div style="position:absolute; width:44px; height:44px; border-radius:50%; background:rgba(225,29,72,0.25); animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
-              <div style="position:relative; width:${isSelected ? "32px" : "20px"}; height:${isSelected ? "32px" : "20px"}; border-radius:${isSelected ? "10px" : "6px"}; background:${pinBg}; border:${isSelected ? "2.5px" : "1.5px"} solid ${pinBorder}; box-shadow:${isSelected ? "0 4px 14px rgba(225,29,72,0.4)" : "0 1px 4px rgba(0,0,0,0.12)"}; display:flex; align-items:center; justify-content:center; color:${isSelected ? "#ffffff" : isEligible ? "#0284c7" : "#64748b"};">
+            <div style="position:relative; width:${isSelected ? "40px" : "24px"}; height:${isSelected ? "40px" : "24px"}; display:flex; align-items:center; justify-content:center; cursor:pointer; ${isSelected ? "z-index:1000;" : "opacity:0.8;"}">
+              ${isSelected ? `<div style="position:absolute; width:40px; height:40px; border-radius:50%; background:${hosp.isEmergency24x7 ? "rgba(180,35,24,0.2)" : "rgba(15,107,109,0.2)"}; animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>` : ""}
+              <div style="position:relative; width:${isSelected ? "30px" : "20px"}; height:${isSelected ? "30px" : "20px"}; border-radius:${isSelected ? "8px" : "5px"}; background:${pinBg}; border:${isSelected ? "2.5px" : "1.5px"} solid ${pinBorder}; box-shadow:${isSelected ? "0 4px 14px rgba(23,32,38,0.25)" : "0 1px 3px rgba(0,0,0,0.08)"}; display:flex; align-items:center; justify-content:center; color:${iconColor};">
                 ${isSelected
-                  ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+                  ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
                   : isEligible
-                  ? `<span style="font-size:10px;">⭐</span>`
-                  : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+                  ? `<span style="font-size:9px;">★</span>`
+                  : `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
                 }
               </div>
               ${isSelected
-              ? `<div style="position:absolute; bottom:-48px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#0f172a; font-family:sans-serif; padding:4px 8px; border-radius:8px; box-shadow:0 6px 18px -2px rgba(15,23,42,0.2); z-index:9999; border:1.5px solid #e11d48; pointer-events:none;">
-                      <div style="font-size:10.5px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:4px; line-height:1.2;">
-                        <span>🏥</span> ${shortName} <span style="color:#e11d48; font-weight:700;">(${hosp.distanceKm} km)</span>
+              ? `<div style="position:absolute; bottom:-46px; left:50%; transform:translateX(-50%); white-space:nowrap; background:#ffffff; color:#172026; font-family:sans-serif; padding:4px 8px; border-radius:8px; box-shadow:0 4px 14px rgba(23,32,38,0.12); z-index:9999; border:1px solid #E5E3DC; pointer-events:none;">
+                      <div style="font-size:11px; font-weight:700; color:#172026; display:flex; align-items:center; gap:4px; line-height:1.2;">
+                        <span>🏥</span> ${shortName} <span style="color:#0F6B6D; font-weight:600;">(${hosp.distanceKm} km)</span>
                       </div>
-                      <div style="font-size:9px; font-weight:700; color:#92400e; background:#fef3c7; border:1px solid #fde68a; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-block;">
-                        ⭐ Famous for: ${famousFor}
+                      <div style="font-size:9.5px; font-weight:600; color:#8C6D32; background:#FBF7EE; border:1px solid #E7DBB8; padding:1px 5px; border-radius:4px; margin-top:2px; line-height:1.2; display:inline-block;">
+                        ★ ${famousFor}
                       </div>
                     </div>`
               : ""
             }
             </div>
           `,
-          iconSize: [isSelected ? 44 : 26, isSelected ? 44 : 26],
-          iconAnchor: [isSelected ? 22 : 13, isSelected ? 22 : 13],
+          iconSize: [isSelected ? 40 : 24, isSelected ? 40 : 24],
+          iconAnchor: [isSelected ? 20 : 12, isSelected ? 20 : 12],
         });
 
         const marker = L.marker([hLat, hLng], {
@@ -385,11 +402,11 @@ export function InteractiveRouteMap({
         marker.bindTooltip(
           `
           <div style="font-family:sans-serif; padding:3px 5px; line-height:1.35; max-width:240px;">
-            <b style="color:#0f172a; font-size:11px; display:block;">${hosp.name}</b>
-            <div style="margin:2px 0; display:inline-block; background:#fef3c7; color:#92400e; border:1px solid #fde68a; font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:4px;">
-              ⭐ ${famousFor}
+            <b style="color:#172026; font-size:11px; display:block;">${hosp.name}</b>
+            <div style="margin:2px 0; display:inline-block; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:9.5px; font-weight:600; padding:1px 5px; border-radius:4px;">
+              ★ ${famousFor}
             </div><br/>
-            <span style="color:#64748b; font-size:9.5px;">${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}</span>
+            <span style="color:#5A6B75; font-size:9.5px;">${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Center"}</span>
           </div>
         `,
           { direction: "top", offset: [0, -16], opacity: 0.96 }
@@ -398,19 +415,19 @@ export function InteractiveRouteMap({
         // Click popup
         marker.bindPopup(`
           <div style="font-family:sans-serif; padding:6px; line-height:1.4; max-width:260px;">
-            <b style="color:#0f172a; font-size:12px; display:block; margin-bottom:4px;">${hosp.name}</b>
-            <div style="display:inline-block; margin-bottom:5px; background:#fef3c7; color:#92400e; border:1px solid #fde68a; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px;">
-              ⭐ Famous for: ${famousFor}
+            <b style="color:#172026; font-size:12px; display:block; margin-bottom:4px;">${hosp.name}</b>
+            <div style="display:inline-block; margin-bottom:5px; background:#FBF7EE; color:#8C6D32; border:1px solid #E7DBB8; font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px;">
+              ★ ${famousFor}
             </div>
-            <div style="color:#e11d48; font-size:11px; font-weight:bold; margin-bottom:3px;">
-              ${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 ER Verified" : "Care Center"}
+            <div style="color:${hosp.isEmergency24x7 ? "#B42318" : "#0F6B6D"}; font-size:11px; font-weight:600; margin-bottom:3px;">
+              ${hosp.distanceKm} km away • ${hosp.isEmergency24x7 ? "24/7 Verified Emergency" : "Care Center"}
             </div>
-            <div style="color:#64748b; font-size:10px; line-height:1.3; margin-bottom:8px;">${hosp.address}</div>
+            <div style="color:#5A6B75; font-size:10px; line-height:1.3; margin-bottom:8px;">${hosp.address}</div>
             <button 
               onclick="window.medvoiceSelectHospitalById('${hosp.id}')"
-              style="width:100%; background:#0284c7; color:#ffffff; font-weight:700; font-size:11px; padding:6px 10px; border-radius:8px; border:none; cursor:pointer;"
+              style="width:100%; background:#0F6B6D; color:#ffffff; font-weight:600; font-size:11px; padding:7px 10px; border-radius:8px; border:none; cursor:pointer;"
             >
-              🚗 Show Route from Your Location
+              Directions from your location
             </button>
           </div>
         `);
@@ -639,39 +656,39 @@ export function InteractiveRouteMap({
 
       {/* ============================================================ COMPACT LIVE ROUTE PILL */}
       {!isManualPicking && patientCoords && selectedHospital && (
-        <div className="absolute top-3.5 left-3.5 z-10 max-w-[270px] sm:max-w-[290px] rounded-xl bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-md p-2.5 text-xs text-slate-900 pointer-events-auto">
+        <div className="absolute top-3.5 left-3.5 z-10 max-w-[270px] sm:max-w-[290px] rounded-xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] shadow-xs p-2.5 text-xs text-[#172026] pointer-events-auto">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
-                Route Active
+              <span className="w-2 h-2 rounded-full bg-[#0F6B6D] animate-pulse shrink-0" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5A6B75]">
+                Active Route
               </span>
             </div>
             {isRouting ? (
-              <span className="text-[10px] font-mono font-bold text-sky-600 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full border border-sky-500 border-t-transparent animate-spin" />
+              <span className="text-[10px] font-semibold text-[#0F6B6D] flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full border border-[#0F6B6D] border-t-transparent animate-spin" />
                 Updating...
               </span>
             ) : (
-              <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/70">
+              <span className="text-[10px] font-semibold text-[#0F6B6D] bg-[#E8F3F3] px-2 py-0.5 rounded border border-[#C2DFDF]">
                 Live
               </span>
             )}
           </div>
 
-          <div className="font-bold text-slate-950 truncate text-xs mt-1 leading-snug" title={selectedHospital.name}>
+          <div className="font-semibold text-[#172026] truncate text-xs mt-1 leading-snug" title={selectedHospital.name}>
             {selectedHospital.name}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] mt-1.5 pt-1.5 border-t border-slate-100">
-            <span className="font-extrabold text-slate-900">
-              {routeInfo.distanceKm} km <span className="text-slate-400 font-normal">·</span> ~{routeInfo.etaMinutes} min
+          <div className="flex items-center justify-between text-[11px] mt-1.5 pt-1.5 border-t border-[#E5E3DC]">
+            <span className="font-bold text-[#172026]">
+              {routeInfo.distanceKm} km <span className="text-[#A8B7A1] font-normal">·</span> ~{routeInfo.etaMinutes} min
             </span>
             <a
               href={directGoogleMapsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-700 hover:text-sky-900 transition-colors"
+              className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0F6B6D] hover:text-[#0A5254] transition-colors"
             >
               <span>Maps</span>
               <ExternalLink className="w-2.5 h-2.5" />
@@ -682,24 +699,24 @@ export function InteractiveRouteMap({
 
       {/* ============================================================ LOCATION REQUIRED OVERLAY */}
       {!isManualPicking && !patientCoords && allHospitals.length === 0 && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-slate-900/15 backdrop-blur-[2px] pointer-events-none">
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-xl p-5 max-w-sm text-center flex flex-col items-center gap-3 pointer-events-auto">
-            <div className="w-10 h-10 rounded-full bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700">
+        <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-[#172026]/10 backdrop-blur-[2px] pointer-events-none">
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-[#E5E3DC] shadow-sm p-6 max-w-sm text-center flex flex-col items-center gap-3 pointer-events-auto">
+            <div className="w-10 h-10 rounded-full bg-[#E8F3F3] border border-[#C2DFDF] flex items-center justify-center text-[#0F6B6D]">
               <MapPin className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-950">Find Emergency Care Near You</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Enable GPS or select a regional preset below to discover accredited hospitals, live ETAs, and verified specialty readiness.
+              <h3 className="text-sm font-semibold text-[#172026]">Find Care Near You</h3>
+              <p className="text-xs text-[#5A6B75] mt-1">
+                Enable GPS or select a region to view emergency hospitals, live road travel times, and on-duty specialists.
               </p>
             </div>
             {onRequestLocation && (
               <button
                 onClick={onRequestLocation}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0F6B6D] hover:bg-[#0A5254] text-white font-semibold text-xs shadow-xs transition-all cursor-pointer"
               >
-                <Locate className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Use My Live Location</span>
+                <Locate className="w-3.5 h-3.5" />
+                <span>Use my live location</span>
               </button>
             )}
           </div>
@@ -708,18 +725,18 @@ export function InteractiveRouteMap({
 
       {/* ============================================================ MAP CONTROLS */}
       <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1.5 pointer-events-auto">
-        <div className="flex flex-col rounded-xl bg-white/95 backdrop-blur-md border border-slate-200 shadow-md overflow-hidden divide-y divide-slate-100">
+        <div className="flex flex-col rounded-xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] shadow-xs overflow-hidden divide-y divide-[#E5E3DC]">
           <button
             onClick={handleZoomIn}
             aria-label="Zoom In"
-            className="flex h-8 w-8 items-center justify-center text-slate-700 hover:bg-slate-100 hover:text-slate-950 transition-colors cursor-pointer"
+            className="flex h-8 w-8 items-center justify-center text-[#172026] hover:bg-[#F6F5F1] transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
           </button>
           <button
             onClick={handleZoomOut}
             aria-label="Zoom Out"
-            className="flex h-8 w-8 items-center justify-center text-slate-700 hover:bg-slate-100 hover:text-slate-950 transition-colors cursor-pointer"
+            className="flex h-8 w-8 items-center justify-center text-[#172026] hover:bg-[#F6F5F1] transition-colors cursor-pointer"
           >
             <Minus className="w-4 h-4" />
           </button>
@@ -729,34 +746,34 @@ export function InteractiveRouteMap({
           onClick={handleRecenter}
           aria-label="Recenter on My Location"
           title="Recenter on My Location"
-          className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/95 backdrop-blur-md border border-slate-200 text-slate-700 hover:bg-slate-100 hover:text-sky-600 shadow-md transition-all cursor-pointer"
+          className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/95 backdrop-blur-md border border-[#E5E3DC] text-[#172026] hover:bg-[#F6F5F1] hover:text-[#0F6B6D] shadow-xs transition-all cursor-pointer"
         >
           <Locate className="w-4 h-4" />
         </button>
       </div>
 
       {/* ============================================================ MAP LEGEND */}
-      <div className="hidden sm:flex absolute bottom-3.5 left-3.5 z-10 items-center gap-2.5 rounded-lg bg-white/95 backdrop-blur-md px-3 py-1.5 text-[10px] font-bold text-slate-600 border border-slate-200/90 shadow-sm pointer-events-auto">
+      <div className="hidden sm:flex absolute bottom-3.5 left-3.5 z-10 items-center gap-2.5 rounded-lg bg-white/95 backdrop-blur-md px-3 py-1.5 text-[10px] font-semibold text-[#5A6B75] border border-[#E5E3DC] shadow-xs pointer-events-auto">
         <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-[#0284c7] border border-white shadow-xs" />
-          <span>Your Location</span>
+          <span className="h-2 w-2 rounded-full bg-[#0F6B6D] border border-white shadow-xs" />
+          <span>Your location</span>
         </div>
-        <span className="text-slate-200">|</span>
+        <span className="text-[#E5E3DC]">|</span>
         <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-rose-600" />
-          <span>Selected ED</span>
+          <span className="h-2 w-2 rounded-sm bg-[#B42318]" />
+          <span>Selected hospital</span>
         </div>
-        <span className="text-slate-200">|</span>
+        <span className="text-[#E5E3DC]">|</span>
         <div className="flex items-center gap-1.5">
-          <span className="h-1.5 w-3.5 bg-[#0284c7] rounded-full" />
-          <span>Driving Route</span>
+          <span className="h-1.5 w-3.5 bg-[#0F6B6D] rounded-full" />
+          <span>Driving route</span>
         </div>
       </div>
 
       {/* TOP-RIGHT ROUTING NOTIFICATION */}
       {isRouting && (
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-white/95 text-slate-800 border border-sky-300 px-3 py-1.5 rounded-full text-xs font-semibold shadow-md backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-2.5 h-2.5 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-white/95 text-[#172026] border border-[#C2DFDF] px-3 py-1.5 rounded-full text-xs font-semibold shadow-xs backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-2.5 h-2.5 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
           <span>Calculating live route...</span>
         </div>
       )}

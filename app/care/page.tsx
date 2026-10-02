@@ -37,17 +37,17 @@ import {
 } from "@/lib/hospitals-india-data";
 
 const SPECIALTY_WHEEL_OPTIONS: OptionWheelItem[] = [
-  { id: "all", label: "All Hospitals & 24/7 ERs", category: "Comprehensive 24/7 Care", badge: "24/7 Emergency", badgeStyle: "bg-cyan-50 text-cyan-700 border-cyan-200" },
-  { id: "ayurveda", label: "Ayurveda & Traditional", category: "Panchakarma & Holistic", badge: "Ayurvedic Care", badgeStyle: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  { id: "cardiology", label: "Interventional Cardiology", category: "Cath Lab / Door-to-Balloon", badge: "Door-to-Balloon", badgeStyle: "bg-rose-50 text-rose-700 border-rose-200" },
-  { id: "neurology", label: "Comprehensive Stroke", category: "Thrombolysis & Neuro ICU", badge: "BE-FAST Unit", badgeStyle: "bg-purple-50 text-purple-700 border-purple-200" },
-  { id: "cancer", label: "Surgical Oncology", category: "Tumor Board & Infusion", badge: "Oncology Care", badgeStyle: "bg-amber-50 text-amber-700 border-amber-200" },
-  { id: "orthopedics", label: "Orthopedics & Joint Trauma", category: "Fracture & Joint Replacement", badge: "Bone & Joint", badgeStyle: "bg-blue-50 text-blue-700 border-blue-200" },
-  { id: "pediatrics", label: "Pediatric Emergency", category: "PICU / NICU Level-3", badge: "Pediatric Resuscitation", badgeStyle: "bg-teal-50 text-teal-700 border-teal-200" },
-  { id: "maternity", label: "Maternity & Obstetrics", category: "High-Risk Delivery & Labor", badge: "Maternity Unit", badgeStyle: "bg-pink-50 text-pink-700 border-pink-200" },
-  { id: "kidney", label: "Kidney Care & Dialysis", category: "Nephrology & Renal ICU", badge: "Dialysis Center", badgeStyle: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  { id: "pulmonology", label: "Pulmonology & Respiratory", category: "Chest Care & Asthma ICU", badge: "Respiratory ICU", badgeStyle: "bg-sky-50 text-sky-700 border-sky-200" },
-  { id: "eye", label: "Eye Care & Ophthalmology", category: "Retina, Cataract & Lasik", badge: "Eye Institute", badgeStyle: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  { id: "all", label: "All Hospitals & 24/7 ERs", category: "Comprehensive 24/7 Care", badge: "24/7 Emergency", badgeStyle: "bg-[#E8F3F3] text-[#0F6B6D] border-[#C2DFDF]" },
+  { id: "ayurveda", label: "Ayurveda & Traditional", category: "Panchakarma & Holistic", badge: "Ayurvedic Care", badgeStyle: "bg-[#FBF7EE] text-[#8C6D32] border-[#E7DBB8]" },
+  { id: "cardiology", label: "Interventional Cardiology", category: "Cath Lab / Door-to-Balloon", badge: "Door-to-Balloon", badgeStyle: "bg-rose-50 text-rose-800 border-rose-200" },
+  { id: "neurology", label: "Comprehensive Stroke", category: "Thrombolysis & Neuro ICU", badge: "BE-FAST Unit", badgeStyle: "bg-purple-50 text-purple-800 border-purple-200" },
+  { id: "cancer", label: "Surgical Oncology", category: "Tumor Board & Infusion", badge: "Oncology Care", badgeStyle: "bg-amber-50 text-amber-800 border-amber-200" },
+  { id: "orthopedics", label: "Orthopedics & Joint Trauma", category: "Fracture & Joint Replacement", badge: "Bone & Joint", badgeStyle: "bg-slate-100 text-slate-800 border-slate-200" },
+  { id: "pediatrics", label: "Pediatric Emergency", category: "PICU / NICU Level-3", badge: "Pediatric Resuscitation", badgeStyle: "bg-[#E8F3F3] text-[#0F6B6D] border-[#C2DFDF]" },
+  { id: "maternity", label: "Maternity & Obstetrics", category: "High-Risk Delivery & Labor", badge: "Maternity Unit", badgeStyle: "bg-pink-50 text-pink-800 border-pink-200" },
+  { id: "kidney", label: "Kidney Care & Dialysis", category: "Nephrology & Renal ICU", badge: "Dialysis Center", badgeStyle: "bg-indigo-50 text-indigo-800 border-indigo-200" },
+  { id: "pulmonology", label: "Pulmonology & Respiratory", category: "Chest Care & Asthma ICU", badge: "Respiratory ICU", badgeStyle: "bg-teal-50 text-teal-800 border-teal-200" },
+  { id: "eye", label: "Eye Care & Ophthalmology", category: "Retina, Cataract & Lasik", badge: "Eye Institute", badgeStyle: "bg-[#FBF7EE] text-[#8C6D32] border-[#E7DBB8]" },
 ];
 
 // Leaflet map dynamically imported with SSR disabled
@@ -91,10 +91,15 @@ export default function CarePage() {
 
   // Authoritative location state machine
   const [locationStatus, setLocationStatus] = useState<LocationStatus>("LOCATION_UNKNOWN");
-  // Patient departure location state (where the user actually is) - NULL on initial mount
+  // Patient departure location state (where the user actually is) - strictly NULL on initial mount
   const [userLocation, setUserLocation] = useState<CareOrigin | null>(null);
-  // Target hospital exploration region state - NULL on initial mount
+  // Target hospital exploration region state - strictly NULL on initial mount
   const [searchRegion, setSearchRegion] = useState<CareOrigin | null>(null);
+
+  // Non-authoritative previously saved location suggestion (requires explicit user action to activate)
+  const [savedSuggestion, setSavedSuggestion] = useState<CareOrigin | null>(null);
+  // Toggle for city picker dropdown/panel
+  const [isChoosingCity, setIsChoosingCity] = useState<boolean>(false);
 
   const [isDetectingGps, setIsDetectingGps] = useState<boolean>(false);
   const [isManualPicking, setIsManualPicking] = useState<boolean>(false);
@@ -170,7 +175,8 @@ export default function CarePage() {
     });
   };
 
-  // 1. Session Storage Restore on Mount: ONLY restore verified locations, discard unverified legacy defaults
+  // 1. Session Storage on Mount: Non-authoritative suggestion ONLY.
+  // Never automatically restores active location or triggers hospital discovery.
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -179,7 +185,6 @@ export default function CarePage() {
       if (saved) {
         const parsed = JSON.parse(saved);
         const candidate = parsed?.userLocation || parsed;
-        const target = parsed?.searchRegion || candidate;
 
         const allowedSources: LocationSource[] = ["gps", "preset", "search", "manual_pin"];
         const isValidSource = allowedSources.includes(candidate?.source);
@@ -207,33 +212,53 @@ export default function CarePage() {
             source: candidate.source,
             resolvedAt: candidate.resolvedAt || Date.now(),
           };
-          const restoredTarget: CareOrigin = {
-            lat: target.lat,
-            lng: target.lng,
-            label: target.label,
-            source: target.source || candidate.source,
-            resolvedAt: target.resolvedAt || Date.now(),
-          };
-          const nextStatus: LocationStatus =
-            candidate.source === "gps" ? "LOCATION_RESOLVED" : "LOCATION_MANUALLY_SELECTED";
 
-          setUserLocation(restoredOrigin);
-          setSearchRegion(restoredTarget);
-          setLocationStatus(nextStatus);
-          loadFacilities(restoredTarget, restoredOrigin, specialtyFilter);
+          // NON-AUTHORITATIVE: Store strictly as an unconfirmed suggestion.
+          // userLocation remains null, locationStatus remains LOCATION_UNKNOWN,
+          // and ZERO hospital fetch requests are made until user confirms.
+          setSavedSuggestion(restoredOrigin);
           return;
         } else {
           sessionStorage.removeItem(STORAGE_KEY);
         }
       }
     } catch (e) {
-      console.warn("Could not restore saved search origin:", e);
+      console.warn("Could not read saved search origin suggestion:", e);
       sessionStorage.removeItem(STORAGE_KEY);
     }
-
-    // CRITICAL: When no valid persisted location exists, status remains LOCATION_UNKNOWN
-    // and userLocation remains null. ZERO hospital discovery requests are made.
   }, []);
+
+  // Explicit user confirmation to apply saved location suggestion
+  const handleApplySuggestion = () => {
+    if (!savedSuggestion) return;
+    setUserLocation(savedSuggestion);
+    setSearchRegion(savedSuggestion);
+    const nextStatus: LocationStatus =
+      savedSuggestion.source === "gps" ? "LOCATION_RESOLVED" : "LOCATION_MANUALLY_SELECTED";
+    setLocationStatus(nextStatus);
+    loadFacilities(savedSuggestion, savedSuggestion, specialtyFilter);
+  };
+
+  // User dismissal of saved suggestion
+  const handleDismissSuggestion = () => {
+    setSavedSuggestion(null);
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem(STORAGE_KEY);
+      } catch { }
+    }
+  };
+
+  // User resets location to return to calm initial screen
+  const handleResetLocation = () => {
+    setUserLocation(null);
+    setSearchRegion(null);
+    setLocationStatus("LOCATION_UNKNOWN");
+    setHospitals([]);
+    setSelectedHospital(null);
+    setLiveRoadStats(null);
+    setIsChoosingCity(false);
+  };
 
   // 2. Fetch facilities based on target region and user departure location
   // STRICTLY GATED: Cannot run unless departureOrigin and targetRegion have valid numeric coordinates
@@ -593,1033 +618,696 @@ export default function CarePage() {
     : "#";
 
   return (
-    <div className="relative min-h-screen bg-[#FAF9F6] text-slate-900 font-sans flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
+    <div className="relative min-h-screen bg-[#F6F5F1] text-[#172026] font-sans flex flex-col justify-between selection:bg-[#0F6B6D] selection:text-white">
       <Navbar />
 
       <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-16 flex flex-col gap-6">
 
-        {/* COMPACT TOOL HEADER */}
-        <header className="flex flex-col gap-2 pt-1 pb-1">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-50/90 border border-cyan-200/90 shadow-2xs mb-2">
-                <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
-                <span className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-cyan-800">
-                  MEDVOICE — CLINICAL CARE NETWORK
-                </span>
-              </div>
-              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-slate-950 mt-1">
-                Care Network
+        {/* ========================================================================= */}
+        {/* CASE 1: LOCATION UNKNOWN — CALM, QUIET LUXURY FIRST IMPRESSION            */}
+        {/* The map, routes, and hospital fetches DO NOT appear until user authorizes */}
+        {/* ========================================================================= */}
+        {!userLocation && !isManualPicking ? (
+          <section className="py-10 sm:py-20 max-w-2xl mx-auto w-full flex flex-col items-center text-center gap-6">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF] text-xs font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#0F6B6D]" />
+              <span>Care Network · 36+ Regions</span>
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="text-3xl sm:text-5xl font-semibold tracking-tight text-[#172026]">
+                Find verified care near you
               </h1>
-              <p className="text-sm sm:text-base text-slate-600 font-normal mt-1 max-w-2xl leading-relaxed">
-                Find clinically appropriate care and see verified road reachability from your location across 36+ regions in India.
+              <p className="text-sm sm:text-base text-[#5A6B75] max-w-lg mx-auto leading-relaxed">
+                Choose where you're starting from to calculate road reachability, emergency travel times, and specialist on-duty coverage.
               </p>
             </div>
 
-            {/* Departure Origin & Target Region Status Badges */}
-            <div className="flex items-center gap-2 flex-wrap text-xs font-mono font-semibold">
-              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs">
-                {isDetectingGps || locationStatus === "LOCATION_PERMISSION_REQUESTED" ? (
-                  <div className="flex items-center gap-2 text-cyan-700">
-                    <span className="w-2.5 h-2.5 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin" />
-                    <span className="font-bold">Accessing your live GPS...</span>
+            {/* NON-AUTHORITATIVE SAVED SUGGESTION (Requires explicit user confirmation) */}
+            {savedSuggestion && (
+              <div className="w-full p-4 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-[#F6F5F1] border border-[#E5E3DC] flex items-center justify-center text-[#0F6B6D] shrink-0">
+                    <MapPin className="w-4 h-4" />
                   </div>
-                ) : userLocation?.source === "gps" ? (
-                  <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-emerald-700 font-bold">📍 Live GPS:</span>
-                    <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
-                    <button
-                      onClick={() => handleDetectLiveLocation()}
-                      title="Refresh current GPS location"
-                      className="ml-1 text-[10.5px] text-cyan-700 hover:text-cyan-900 underline font-bold cursor-pointer"
-                    >
-                      Refresh
-                    </button>
-                  </>
-                ) : userLocation ? (
-                  <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
-                    <span className="text-cyan-700 font-bold">📍 Your Location:</span>
-                    <span className="text-slate-800 truncate max-w-[150px] sm:max-w-[220px]">{userLocation.label}</span>
-                    <button
-                      onClick={() => handleDetectLiveLocation()}
-                      className="ml-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-cyan-600 text-white hover:bg-cyan-700 transition-colors shadow-2xs cursor-pointer"
-                    >
-                      Use My GPS
-                    </button>
-                  </>
-                ) : locationStatus === "LOCATION_PERMISSION_DENIED" ? (
-                  <div className="flex items-center gap-2 text-amber-700">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    <span className="font-bold">Location Permission Denied</span>
-                    <button
-                      onClick={() => handleDetectLiveLocation()}
-                      className="ml-1 text-[10.5px] text-cyan-700 hover:text-cyan-900 underline font-bold cursor-pointer"
-                    >
-                      Retry
-                    </button>
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-semibold text-[#6E9997] uppercase tracking-wide block">
+                      Last used location
+                    </span>
+                    <span className="text-xs sm:text-sm font-semibold text-[#172026] truncate block">
+                      {savedSuggestion.label}
+                    </span>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-slate-600">
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                    <span className="font-bold">Location Unknown</span>
-                    <button
-                      onClick={() => handleDetectLiveLocation()}
-                      className="ml-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-cyan-600 text-white hover:bg-cyan-700 transition-colors shadow-2xs cursor-pointer"
-                    >
-                      Enable GPS
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {searchRegion && userLocation && searchRegion.label !== userLocation.label && (
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-50/90 border border-cyan-200/90 text-cyan-900 shadow-2xs">
-                  <span>Exploring: <strong className="text-cyan-950">{searchRegion.label}</strong></span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                   <button
-                    onClick={handleSetRegionAsDeparture}
-                    title="Set this region as your starting point to view local distance (0 km)"
-                    className="ml-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-white text-cyan-800 hover:bg-cyan-100 border border-cyan-300 shadow-2xs cursor-pointer transition-colors"
+                    onClick={handleApplySuggestion}
+                    className="px-3.5 py-1.5 rounded-xl bg-[#0F6B6D] hover:bg-[#0A5254] text-white text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    Set starting point here
+                    Use this location
+                  </button>
+                  <button
+                    onClick={handleDismissSuggestion}
+                    className="px-2.5 py-1.5 text-xs text-[#5A6B75] hover:text-[#172026] transition-colors cursor-pointer"
+                  >
+                    Dismiss
                   </button>
                 </div>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* DISCOVERY MODE CHOICE: Show All Hospitals vs Filter by Health Issues */}
-        <div className="p-4 sm:p-5 rounded-3xl bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700 border border-cyan-200/80 text-xs">
-                <Sparkles className="w-3.5 h-3.5" />
-              </span>
-              <span className="text-xs font-mono font-bold uppercase tracking-[0.1em] text-cyan-800">
-                Hospital Discovery Mode
-              </span>
-            </div>
-            <h3 className="text-sm sm:text-base font-bold text-slate-950">
-              How would you like to explore hospitals?
-            </h3>
-            <p className="text-xs text-slate-600">
-              Choose whether to explore all 24/7 hospitals or filter by specific medical issues and clinical specialties.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-1.5 p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 shrink-0">
-            <button
-              onClick={() => handleSelectViewMode("all")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${viewMode === "all"
-                ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
-                : "text-slate-600 hover:text-slate-950"
-                }`}
-            >
-              <span className="text-sm">🏥</span>
-              <span>Show All Hospitals</span>
-            </button>
-
-            <button
-              onClick={() => handleSelectViewMode("issues")}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${viewMode === "issues"
-                ? "bg-white text-slate-950 shadow-sm border border-slate-200 font-bold"
-                : "text-slate-600 hover:text-slate-950"
-                }`}
-            >
-              <span className="text-sm">🎯</span>
-              <span>Based on Health Issues</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 2-STEP CLINICAL CARE & LOCATION FINDER */}
-        <div className="p-5 sm:p-6 rounded-3xl bg-white/90 backdrop-blur-md border border-slate-200/90 shadow-2xs flex flex-col gap-6">
-
-          {/* ============================================================ */}
-          {/* STEP 1: Medical Issue / Clinical Specialty */}
-          {/* ============================================================ */}
-          {viewMode === "all" ? (
-            <div className="p-4 rounded-2xl bg-cyan-50/70 border border-cyan-200/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-600 text-white text-base shadow-2xs shrink-0">
-                  🏥
-                </span>
-                <div>
-                  <span className="text-xs font-bold text-cyan-950 uppercase tracking-[0.08em] font-mono block">
-                    Mode: Showing All Verified Hospitals & Emergency Centers
-                  </span>
-                  <p className="text-xs text-slate-600 font-normal mt-0.5">
-                    Viewing all accredited healthcare facilities{searchRegion ? ` in ${searchRegion.label}` : ""}.{userLocation ? ` Driving distance is calculated from ${userLocation.label}.` : " Choose your location or select a region below."}
-                  </p>
-                </div>
               </div>
+            )}
+
+            {/* PRIMARY ONBOARDING ACTIONS */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
               <button
-                onClick={() => handleSelectViewMode("issues")}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-cyan-800 bg-white hover:bg-cyan-50 border border-cyan-200 shadow-2xs transition-colors cursor-pointer shrink-0"
+                onClick={() => handleDetectLiveLocation()}
+                disabled={isDetectingGps}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#0F6B6D] hover:bg-[#0A5254] text-white font-semibold text-sm shadow-xs transition-colors cursor-pointer disabled:opacity-50"
               >
-                Filter by Health Issue →
+                <LocateFixed className={`w-4 h-4 ${isDetectingGps ? "animate-spin" : ""}`} />
+                <span>{isDetectingGps ? "Locating..." : "Use my live location"}</span>
+              </button>
+
+              <button
+                onClick={() => setIsChoosingCity(!isChoosingCity)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-white hover:bg-[#F6F5F1] text-[#172026] font-semibold text-sm border border-[#E5E3DC] shadow-xs transition-colors cursor-pointer"
+              >
+                <Building2 className="w-4 h-4 text-[#6E9997]" />
+                <span>{isChoosingCity ? "Hide city selector" : "Choose a city or region"}</span>
               </button>
             </div>
-          ) : (
-            <div className="flex flex-col gap-3 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2.5">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-800 text-xs font-bold font-mono shadow-2xs">
-                    1
-                  </span>
+
+            {locationStatus === "LOCATION_PERMISSION_DENIED" && (
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2 max-w-md">
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                <span>Location permission was denied or timed out. Please choose a city or search below.</span>
+              </div>
+            )}
+
+            {/* EXPANDABLE CITY & REGION SELECTOR */}
+            {isChoosingCity && (
+              <div className="w-full p-5 sm:p-6 rounded-3xl bg-white border border-[#E5E3DC] shadow-xs flex flex-col gap-5 text-left animate-in fade-in duration-200">
+                <div className="flex items-center justify-between border-b border-[#E5E3DC] pb-3">
                   <div>
-                    <h2 className="text-xs sm:text-sm font-bold text-slate-950 uppercase font-mono tracking-wider">
-                      Select or Search Health Issue / Condition
-                    </h2>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      Prioritizes hospitals famous for or specializing in the exact condition you select
-                    </p>
+                    <h3 className="text-sm font-semibold text-[#172026]">Select Region or Search Any City</h3>
+                    <p className="text-xs text-[#5A6B75]">Coverage across 36+ verified healthcare networks in India</p>
                   </div>
-                </div>
-                {specialtyFilter !== "all" && (
-                  <span className="text-[11px] font-mono font-bold text-cyan-800 bg-cyan-50 px-2.5 py-1 rounded-full border border-cyan-200/90">
-                    Active Filter: {specialtyFilter.toUpperCase()}
-                  </span>
-                )}
-              </div>
-
-              {/* Direct Input for entering any issue or disease */}
-              <div className="relative flex items-center">
-                <Activity className="w-4 h-4 text-cyan-600 absolute left-3.5 pointer-events-none" />
-                <input
-                  type="text"
-                  value={issueSearchText}
-                  onChange={handleIssueInputChange}
-                  placeholder="Search any health issue (e.g. Heart Attack, Cancer, Stroke, Bone Fracture, Ayurveda, Kidney, Child, Maternity, Eye, Lungs, Liver, ENT)..."
-                  className="w-full pl-10 pr-16 py-3 rounded-2xl bg-white hover:bg-slate-50/50 focus:bg-white border border-slate-200 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 transition-all outline-none font-medium shadow-2xs"
-                />
-                {issueSearchText && (
                   <button
-                    type="button"
-                    onClick={handleClearIssue}
-                    className="absolute right-3 px-2.5 py-1 text-[11px] font-mono font-bold text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                    onClick={() => {
+                      setIsChoosingCity(false);
+                      setIsManualPicking(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E3DC] hover:bg-[#F6F5F1] text-xs font-semibold text-[#172026] transition-colors cursor-pointer"
                   >
-                    Clear
+                    <Compass className="w-3.5 h-3.5 text-[#0F6B6D]" />
+                    <span>Pick on map</span>
                   </button>
-                )}
-              </div>
-
-              {/* Comprehensive 17 Medical Issue Search Categories */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-1">
-                {MEDICAL_ISSUE_OPTIONS.map((item) => {
-                  const isActive = specialtyFilter === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => handleSelectSpecialty(item.id, item.label)}
-                      className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${isActive
-                        ? "bg-cyan-50 text-cyan-950 border-cyan-300 shadow-2xs ring-2 ring-cyan-200/80 font-bold"
-                        : "bg-white hover:bg-slate-50 text-slate-800 border-slate-200/90 shadow-2xs"
-                        }`}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-base shrink-0">{item.icon}</span>
-                        <span className="text-xs font-bold truncate">{item.label}</span>
-                      </div>
-                      <span className={`text-[10px] line-clamp-1 ${isActive ? "text-cyan-700 font-semibold" : "text-slate-500"}`}>
-                        {item.famousFor}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="h-px bg-slate-200/80" />
-
-          {/* ============================================================ */}
-          {/* STEP 2: Location Input with 36+ Regions & Zone Filters */}
-          {/* ============================================================ */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-800 text-xs font-bold font-mono shadow-2xs">
-                  2
-                </span>
-                <div>
-                  <h2 className="text-xs sm:text-sm font-bold text-slate-950 uppercase font-mono tracking-wider">
-                    Enter Location or Select from 36+ Indian Regions
-                  </h2>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Searches all specialized and emergency hospitals within reachable driving distance
-                  </p>
                 </div>
-              </div>
-              {locationStatus === "LOCATION_UNKNOWN" ? (
-                <span className="text-xs text-slate-600 font-mono font-medium flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                  Location required to discover facilities
-                </span>
-              ) : locationStatus === "LOCATION_PERMISSION_REQUESTED" ? (
-                <span className="text-xs text-cyan-800 font-mono font-bold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full border-2 border-cyan-600 border-t-transparent animate-spin" />
-                  Requesting GPS permission...
-                </span>
-              ) : locationStatus === "LOCATION_PERMISSION_DENIED" ? (
-                <span className="text-xs text-amber-700 font-mono font-medium flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  GPS unavailable — select a region or search
-                </span>
-              ) : (
-                <span className="text-xs text-cyan-800 font-mono font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Live Overpass POI Discovery Active Worldwide
-                </span>
-              )}
-            </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              {/* Autocomplete Input */}
-              <div className="relative flex-1">
-                <div className="relative flex items-center">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={handleSearchChange}
-                    onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
-                    placeholder="Search any city, town, village, or pincode across India & globally (e.g. Amaravati, Guntur, Vijayawada, Pune)..."
-                    className="w-full pl-10 pr-10 py-3 rounded-2xl bg-white border border-slate-200 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 transition-all outline-none font-medium shadow-2xs"
-                  />
-                  {isSearching && (
-                    <div className="w-4 h-4 rounded-full border-2 border-slate-400 border-t-transparent animate-spin absolute right-3.5" />
+                {/* Autocomplete Input */}
+                <div className="relative">
+                  <div className="relative flex items-center">
+                    <Search className="w-4 h-4 text-[#8C9AA2] absolute left-3.5 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={handleSearchChange}
+                      onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+                      placeholder="Search any city, town, or pincode (e.g. Pune, Bangalore, Amaravati, Guntur)..."
+                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-white border border-[#E5E3DC] focus:border-[#0F6B6D] focus:ring-2 focus:ring-[#E8F3F3] text-xs sm:text-sm text-[#172026] placeholder:text-[#8C9AA2] transition-all outline-none"
+                    />
+                    {isSearching && (
+                      <div className="w-4 h-4 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin absolute right-3.5" />
+                    )}
+                  </div>
+
+                  {/* Dropdown */}
+                  {showDropdown && searchResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-[#E5E3DC] shadow-lg z-50 overflow-hidden">
+                      {searchResults.map((item, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleSelectSearchResult(item)}
+                          className="w-full px-4 py-2.5 text-left text-xs text-[#172026] hover:bg-[#E8F3F3] hover:text-[#0F6B6D] flex items-center gap-2.5 transition-colors border-b border-[#E5E3DC] last:border-b-0 cursor-pointer"
+                        >
+                          <MapPin className="w-3.5 h-3.5 text-[#6E9997] shrink-0" />
+                          <span className="truncate">{item.display_name}</span>
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
 
-                {/* Autocomplete Dropdown */}
-                {showDropdown && searchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1.5 bg-white rounded-2xl border border-slate-200 shadow-xl z-50 overflow-hidden">
-                    {searchResults.map((item, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => handleSelectSearchResult(item)}
-                        className="w-full px-4 py-2.5 text-left text-xs text-slate-800 hover:bg-cyan-50 hover:text-cyan-900 flex items-center gap-2.5 transition-colors border-b border-slate-100 last:border-b-0 cursor-pointer"
-                      >
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="truncate">{item.display_name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                {/* Zone Filter */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                  <span className="text-[11px] font-semibold text-[#8C9AA2] mr-1 shrink-0">Zone:</span>
+                  {[
+                    { id: "all", label: "All Regions (36+)" },
+                    { id: "ap_tg", label: "AP & Telangana (15)" },
+                    { id: "south", label: "South (KA, TN, KL)" },
+                    { id: "west", label: "West (MH, GJ, GA)" },
+                    { id: "north", label: "North (DL, NCR, UP, RJ)" },
+                    { id: "east_central", label: "East & Central" },
+                  ].map((zone) => (
+                    <button
+                      key={zone.id}
+                      onClick={() => setSelectedZone(zone.id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                        selectedZone === zone.id
+                          ? "bg-[#172026] text-white"
+                          : "bg-[#F6F5F1] hover:bg-[#E5E3DC] text-[#5A6B75]"
+                      }`}
+                    >
+                      {zone.label}
+                    </button>
+                  ))}
+                </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDetectLiveLocation()}
-                  disabled={isDetectingGps}
-                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <LocateFixed className={`w-3.5 h-3.5 text-cyan-400 ${isDetectingGps ? "animate-spin" : ""}`} />
-                  <span>{isDetectingGps ? "Locating..." : "Use Live GPS"}</span>
-                </button>
-
-                <button
-                  onClick={() => setIsManualPicking(!isManualPicking)}
-                  className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${isManualPicking
-                    ? "bg-cyan-600 text-white border-cyan-600 shadow-xs ring-2 ring-cyan-200"
-                    : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-2xs"
-                    }`}
-                >
-                  <Compass className="w-3.5 h-3.5 text-cyan-600" />
-                  <span>{isManualPicking ? "Placing Pin..." : "Pick on Map"}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Regional Zone Filter & Preset Pills */}
-            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-1 overflow-x-auto pb-1 text-xs scrollbar-none">
-                <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1 shrink-0">Zone:</span>
-                {[
-                  { id: "all", label: "All Regions (36+)" },
-                  { id: "ap_tg", label: "AP & Telangana (15)" },
-                  { id: "south", label: "South (KA, TN, KL)" },
-                  { id: "west", label: "West (MH, GJ, GA)" },
-                  { id: "north", label: "North (DL, NCR, UP, RJ)" },
-                  { id: "east_central", label: "East & Central" },
-                ].map((zone) => (
-                  <button
-                    key={zone.id}
-                    onClick={() => setSelectedZone(zone.id)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                      selectedZone === zone.id
-                        ? "bg-slate-900 text-white"
-                        : "bg-slate-100 hover:bg-slate-200/80 text-slate-600"
-                    }`}
-                  >
-                    {zone.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Quick Regional Presets */}
-              <div className="flex items-center gap-1.5 flex-wrap text-xs">
-                {ALL_REGION_PRESETS.filter(
-                  (p) => selectedZone === "all" || p.zone === selectedZone
-                ).map((preset) => {
-                  const isActive = searchRegion
-                    ? (searchRegion.label.toLowerCase().includes(preset.name.toLowerCase()) ||
-                       (Math.abs(searchRegion.lat - preset.lat) < 0.05 && Math.abs(searchRegion.lng - preset.lng) < 0.05))
-                    : false;
-                  return (
+                {/* Preset Pills */}
+                <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                  {ALL_REGION_PRESETS.filter(
+                    (p) => selectedZone === "all" || p.zone === selectedZone
+                  ).map((preset) => (
                     <button
                       key={preset.name}
                       onClick={() => handleSelectPreset(preset)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                        isActive
-                          ? "bg-cyan-600 text-white font-bold shadow-xs"
-                          : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80"
-                      }`}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#F6F5F1] hover:bg-[#E8F3F3] hover:text-[#0F6B6D] text-[#172026] border border-[#E5E3DC] transition-colors cursor-pointer"
                     >
                       {preset.name}
                     </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 3. DENSE WORKSPACE: LIVE MAP (DOMINANT VISUAL ANCHOR) + UNIFIED DESTINATION INTELLIGENCE */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-
-          {/* LEFT: Dominant Live Route Map */}
-          <div className="lg:col-span-8 rounded-3xl overflow-hidden shadow-sm border border-slate-200/80 bg-white">
-            <InteractiveRouteMap
-              patientCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
-              patientLocationName={userLocation?.label}
-              mapCenter={searchRegion ? { lat: searchRegion.lat, lng: searchRegion.lng } : undefined}
-              selectedHospital={selectedHospital}
-              allHospitals={filteredAndSortedHospitals.slice(0, 60)}
-              isManualPicking={isManualPicking}
-              onSelectHospital={handleSelectHospital}
-              onConfirmManualLocation={handleConfirmManualLocation}
-              onCancelManualPicking={() => setIsManualPicking(false)}
-              onRouteCalculated={(stats) => setLiveRoadStats(stats)}
-              onRequestLocation={() => handleDetectLiveLocation()}
-            />
-          </div>
-
-          {/* RIGHT: Unified Destination Intelligence Panel */}
-          <div className="lg:col-span-4 rounded-3xl bg-white/95 backdrop-blur-xl border border-slate-200/90 shadow-sm p-4 sm:p-5 flex flex-col justify-between gap-4">
-
-            {/* Section A: Panel Header & Clinical Specialty Rotary */}
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-800 text-xs font-bold font-mono">
-                    🎯
-                  </span>
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-950 uppercase tracking-wider font-mono">
-                      Destination Intelligence
-                    </h3>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      Specialty triage & active route telemetry
-                    </p>
-                  </div>
+                  ))}
                 </div>
-                <span className="text-[10px] font-mono font-bold text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200/80">
-                  Live Nav
-                </span>
               </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
-                    Clinical Specialty Focus
-                  </span>
-                  {specialtyFilter !== "all" && (
-                    <button
-                      onClick={() => {
-                        setSpecialtyFilter("all");
-                        setCurrentPage(1);
-                      }}
-                      className="text-[10px] font-mono font-bold text-cyan-700 hover:underline cursor-pointer"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-                <OptionWheel
-                  plain
-                  options={SPECIALTY_WHEEL_OPTIONS}
-                  selectedId={specialtyFilter}
-                  onChange={(opt) => {
-                    setSpecialtyFilter(opt.id);
-                    setCurrentPage(1);
-                  }}
-                  className="w-full"
-                />
-              </div>
-            </div>
-
-            {/* Section B: Active Destination Card (Hero Telemetry & Emergency Actions) */}
-            {selectedHospital ? (
-              <div className="rounded-2xl bg-slate-50/80 border border-slate-200/90 p-3.5 sm:p-4 flex flex-col gap-3 shadow-2xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200/80">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse" />
-                    Active Destination
-                  </span>
-                  <span className="text-xs font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
-                    ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min drive
-                  </span>
-                </div>
-
+            )}
+          </section>
+        ) : (
+          /* ========================================================================= */
+          /* CASE 2: LOCATION RESOLVED / PIN PICKING — DOMINANT WORKSPACE             */
+          /* ========================================================================= */
+          <>
+            {/* COMPACT TOOL HEADER */}
+            <header className="flex flex-col gap-2 pt-1 pb-1">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-black text-slate-950 truncate" title={selectedHospital.name}>
-                    {selectedHospital.name}
-                  </h4>
-                  <div className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-lg bg-amber-50 text-amber-900 border border-amber-300 text-[11px] font-bold max-w-full">
-                    <span className="shrink-0">⭐ Famous for:</span>
-                    <span className="truncate">{selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}</span>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF] text-xs font-semibold mb-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#0F6B6D]" />
+                    <span>Care Network</span>
                   </div>
-                  <p className="text-xs text-slate-500 truncate mt-1">
-                    {selectedHospital.address}
+                  <h1 className="text-2xl sm:text-4xl font-semibold tracking-tight text-[#172026]">
+                    Care Network
+                  </h1>
+                  <p className="text-xs sm:text-sm text-[#5A6B75] mt-0.5 max-w-xl">
+                    Verified healthcare facilities and reachable road routing from your departure point.
                   </p>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-600 font-medium">
-                    Distance: <strong className="text-slate-900">~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km</strong>
-                  </span>
-                  <span className="text-emerald-700 font-bold flex items-center gap-1 text-[11px]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Verified ED
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <a
-                    href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-                  >
-                    <PhoneCall className="w-3.5 h-3.5" />
-                    <span>Call ED</span>
-                  </a>
-                  <a
-                    href={currentGoogleMapsUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-                  >
-                    <Navigation className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Directions</span>
-                  </a>
+                {/* Location Status Bar */}
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-[#E5E3DC] shadow-xs">
+                    {isDetectingGps ? (
+                      <div className="flex items-center gap-2 text-[#0F6B6D]">
+                        <span className="w-2 h-2 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
+                        <span className="font-semibold">Locating with GPS...</span>
+                      </div>
+                    ) : userLocation ? (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-[#0F6B6D]" />
+                        <span className="text-[#5A6B75] font-medium">Starting point:</span>
+                        <span className="text-[#172026] font-semibold truncate max-w-[180px] sm:max-w-[240px]">
+                          {userLocation.label}
+                        </span>
+                        <button
+                          onClick={handleResetLocation}
+                          className="ml-1 text-[11px] font-semibold text-[#0F6B6D] hover:underline cursor-pointer"
+                        >
+                          Change
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2 text-[#5A6B75]">
+                        <span className="w-2 h-2 rounded-full bg-[#B79A63]" />
+                        <span className="font-semibold">Placing pin on map...</span>
+                        <button
+                          onClick={handleResetLocation}
+                          className="ml-1 text-[11px] font-semibold text-[#5A6B75] hover:underline cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            ) : !userLocation ? (
-              <div className="rounded-2xl border border-dashed border-cyan-200 bg-cyan-50/40 p-4 text-center flex flex-col items-center justify-center gap-2 text-slate-600">
-                <div className="w-10 h-10 rounded-xl bg-cyan-100 flex items-center justify-center text-cyan-700">
-                  <LocateFixed className="w-5 h-5" />
-                </div>
-                <h4 className="text-xs font-bold text-slate-900 uppercase font-mono">Location Required</h4>
-                <p className="text-[11px] text-slate-500 max-w-[220px]">
-                  Provide your location to calculate live driving distance, routing, and nearest emergency triage.
-                </p>
-                <button
-                  onClick={() => handleDetectLiveLocation()}
-                  disabled={isDetectingGps}
-                  className="mt-1 px-3 py-1.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <LocateFixed className="w-3 h-3" />
-                  <span>Use Live GPS</span>
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-center flex flex-col items-center justify-center gap-1.5 text-slate-500">
-                <MapPin className="w-5 h-5 text-slate-400" />
-                <span className="text-xs font-semibold text-slate-700">No destination selected</span>
-                <p className="text-[11px] text-slate-400 max-w-[220px]">
-                  Tap any hospital marker on the map or select from the list below to view live route telemetry.
-                </p>
-              </div>
-            )}
+            </header>
 
-          </div>
-
-        </div>
-
-        {/* CLINICAL CAPABILITY FILTERS & STATUS BAR */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-slate-800 font-mono">
-              {filteredAndSortedHospitals.length} facilities match your care criteria
-            </span>
-            {filteredAndSortedHospitals.length > 0 && (
-              <span className="text-xs text-slate-500 font-mono">
-                · Showing {startIndex + 1}–{endIndex} of {filteredAndSortedHospitals.length}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 text-xs flex-wrap">
-            {/* Sort Selector */}
-            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1">
-              <ArrowUpDown className="w-3 h-3 text-slate-400" />
-              <select
-                value={sortBy}
-                onChange={(e) => {
-                  setSortBy(e.target.value as any);
-                  setCurrentPage(1);
-                }}
-                aria-label="Sort order"
-                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
-              >
-                <option value="fastest">Sort: Fastest / Closest</option>
-                <option value="government">Sort: Government First</option>
-                <option value="rating">Sort: Highest Rating</option>
-              </select>
-            </div>
-
-            {/* Specialty Selector */}
-            <select
-              value={specialtyFilter}
-              onChange={(e) => {
-                setSpecialtyFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              aria-label="Clinical capability filter"
-              className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Specialties</option>
-              <option value="cardiology">Cardiology / Heart</option>
-              <option value="neurology">Neurology / Stroke</option>
-              <option value="pediatrics">Pediatrics / Child</option>
-              <option value="cancer">Oncology / Cancer</option>
-            </select>
-
-            {/* Ownership Selector */}
-            <select
-              value={ownershipFilter}
-              onChange={(e) => {
-                setOwnershipFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              aria-label="Ownership filter"
-              className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Ownership</option>
-              <option value="government">Government / Subsidized</option>
-              <option value="private">Private Tertiary</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Specialized Facilities Banner (When Medical Issue is Active) */}
-        {specialtyFilter !== "all" && (
-          <div className="p-4 rounded-2xl bg-cyan-50/90 border border-cyan-200/90 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-600 text-white text-base shadow-xs shrink-0">
-                ⭐
-              </span>
+            {/* DISCOVERY MODE TOGGLE */}
+            <div className="p-4 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
               <div>
-                <span className="text-xs font-bold text-cyan-950 uppercase tracking-wide font-mono block">
-                  {specialtyFilter.toUpperCase()} SPECIALIZED CARE IN {searchRegion?.label || "Selected Region"}
-                </span>
-                <span className="text-xs text-cyan-800 font-medium">
-                  {specializedCount > 0
-                    ? `Showing ${specializedCount} center${specializedCount > 1 ? "s" : ""} with verified on-duty specialists first, followed by all other emergency hospitals.`
-                    : `No exclusive center found nearby; showing closest emergency facilities equipped for stabilization.`}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                setSpecialtyFilter("all");
-                setCurrentPage(1);
-              }}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-cyan-800 bg-white hover:bg-cyan-100/60 border border-cyan-300 shadow-2xs transition-colors cursor-pointer shrink-0"
-            >
-              Show All Facilities ({filteredAndSortedHospitals.length})
-            </button>
-          </div>
-        )}
-
-        {/* 10-FACILITY PAGINATED RESULTS LIST */}
-        <div className="flex flex-col gap-3">
-          {loading ? (
-            <div className="py-12 text-center text-xs text-slate-400 font-mono flex items-center justify-center gap-2">
-              <div className="w-4 h-4 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" />
-              <span>Scanning and evaluating clinically verified facilities nearby...</span>
-            </div>
-          ) : !userLocation ? (
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 text-center flex flex-col items-center justify-center gap-3 shadow-2xs">
-              <div className="w-12 h-12 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700 shadow-2xs">
-                <LocateFixed className="w-6 h-6" />
-              </div>
-              <div className="max-w-md">
-                <h3 className="text-sm font-bold text-slate-950">Choose a Location to View Nearby Hospitals</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  We don't assume your location. Enable GPS or choose your city/region from the list above to discover emergency facilities and verified road routes.
+                <h3 className="text-xs sm:text-sm font-semibold text-[#172026]">
+                  Hospital discovery mode
+                </h3>
+                <p className="text-[11px] sm:text-xs text-[#5A6B75]">
+                  Explore all accredited 24/7 facilities or filter by specific medical conditions.
                 </p>
               </div>
-              <div className="flex items-center gap-2 mt-2">
+
+              <div className="flex items-center gap-1.5 p-1 bg-[#F6F5F1] rounded-xl border border-[#E5E3DC] shrink-0">
                 <button
-                  onClick={() => handleDetectLiveLocation()}
-                  disabled={isDetectingGps}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  onClick={() => handleSelectViewMode("all")}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    viewMode === "all"
+                      ? "bg-white text-[#172026] shadow-xs border border-[#E5E3DC]"
+                      : "text-[#5A6B75] hover:text-[#172026]"
+                  }`}
                 >
-                  <LocateFixed className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>{isDetectingGps ? "Locating..." : "Use Live GPS"}</span>
+                  All Hospitals & 24/7 ERs
                 </button>
+
                 <button
-                  onClick={() => {
-                    const preset = ALL_REGION_PRESETS[0];
-                    if (preset) handleSelectPreset(preset);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs border border-slate-200/90 shadow-2xs transition-all cursor-pointer"
+                  onClick={() => handleSelectViewMode("issues")}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    viewMode === "issues"
+                      ? "bg-white text-[#172026] shadow-xs border border-[#E5E3DC]"
+                      : "text-[#5A6B75] hover:text-[#172026]"
+                  }`}
                 >
-                  <span>Select Region</span>
+                  Filter by Condition
                 </button>
               </div>
             </div>
-          ) : pageHospitals.length === 0 ? (
-            <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center flex flex-col items-center justify-center gap-2">
-              <Building2 className="w-8 h-8 text-slate-300" />
-              <p className="text-xs font-bold text-slate-700">No facilities matching current filters</p>
-              <p className="text-[11px] text-slate-500">
-                Try selecting "All Specialties" or changing your location.
-              </p>
-            </div>
-          ) : (
-            pageHospitals.map((hosp, pIdx) => {
-              const globalIndex = startIndex + pIdx;
-              const isSelected = selectedHospital?.id === hosp.id;
-              const distanceNum =
-                isSelected && liveRoadStats ? liveRoadStats.roadDistanceKm : hosp.distanceKm;
-              const durationNum =
-                isSelected && liveRoadStats ? liveRoadStats.etaMinutes : hosp.etaMinutes || Math.max(2, Math.round(distanceNum * 1.5));
-              const isGovernment = (hosp as any).ownership === "government";
-              const isSpecMatch = Boolean(hosp.isEligible && specialtyFilter !== "all");
-              const isFirstGeneralHosp = specialtyFilter !== "all" && !hosp.isEligible && (pIdx === 0 || pageHospitals[pIdx - 1]?.isEligible);
 
-              const generalDivider = isFirstGeneralHosp ? (
-                <div key="general-divider" className="my-2 p-3 sm:p-4 rounded-2xl bg-slate-100/95 border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-slate-800 text-white text-xs font-bold shrink-0">
-                      🏥
+            {/* CONDITION FILTER SECTION (Active when viewMode === 'issues') */}
+            {viewMode === "issues" && (
+              <div className="p-5 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs flex flex-col gap-3 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h2 className="text-xs sm:text-sm font-semibold text-[#172026]">
+                      Filter by medical condition
+                    </h2>
+                    <p className="text-[11px] text-[#5A6B75]">
+                      Prioritizes facilities verified for the selected specialty
+                    </p>
+                  </div>
+                  {specialtyFilter !== "all" && (
+                    <span className="text-[11px] font-semibold text-[#0F6B6D] bg-[#E8F3F3] px-2.5 py-0.5 rounded-full border border-[#C2DFDF]">
+                      Active: {specialtyFilter}
                     </span>
+                  )}
+                </div>
+
+                <div className="relative flex items-center">
+                  <Activity className="w-4 h-4 text-[#0F6B6D] absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={issueSearchText}
+                    onChange={handleIssueInputChange}
+                    placeholder="Search any condition (e.g. Heart, Stroke, Fracture, Ayurveda, Kidney, Maternity, Eye)..."
+                    className="w-full pl-10 pr-16 py-2.5 rounded-xl bg-white border border-[#E5E3DC] focus:border-[#0F6B6D] focus:ring-2 focus:ring-[#E8F3F3] text-xs sm:text-sm text-[#172026] placeholder:text-[#8C9AA2] transition-all outline-none"
+                  />
+                  {issueSearchText && (
+                    <button
+                      type="button"
+                      onClick={handleClearIssue}
+                      className="absolute right-3 px-2 py-0.5 text-[11px] font-semibold text-[#5A6B75] hover:text-[#172026] bg-[#F6F5F1] hover:bg-[#E5E3DC] rounded-md transition-colors cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-1">
+                  {MEDICAL_ISSUE_OPTIONS.map((item) => {
+                    const isActive = specialtyFilter === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleSelectSpecialty(item.id, item.label)}
+                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-0.5 ${
+                          isActive
+                            ? "bg-[#E8F3F3] text-[#0F6B6D] border-[#0F6B6D] shadow-xs font-semibold"
+                            : "bg-white hover:bg-[#F6F5F1] text-[#172026] border-[#E5E3DC]"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-sm shrink-0">{item.icon}</span>
+                          <span className="text-xs truncate">{item.label}</span>
+                        </div>
+                        <span className={`text-[10px] truncate ${isActive ? "text-[#0F6B6D]" : "text-[#5A6B75]"}`}>
+                          {item.famousFor}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* DOMINANT WORKSPACE: LIVE MAP + DESTINATION INTELLIGENCE */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+
+              {/* LEFT: Dominant Live Route Map */}
+              <div className="lg:col-span-8 rounded-2xl overflow-hidden shadow-xs border border-[#E5E3DC] bg-white min-h-[460px]">
+                <InteractiveRouteMap
+                  patientCoords={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null}
+                  patientLocationName={userLocation?.label}
+                  mapCenter={searchRegion ? { lat: searchRegion.lat, lng: searchRegion.lng } : undefined}
+                  selectedHospital={selectedHospital}
+                  allHospitals={filteredAndSortedHospitals.slice(0, 60)}
+                  isManualPicking={isManualPicking}
+                  onSelectHospital={handleSelectHospital}
+                  onConfirmManualLocation={handleConfirmManualLocation}
+                  onCancelManualPicking={() => setIsManualPicking(false)}
+                  onRouteCalculated={(stats) => setLiveRoadStats(stats)}
+                  onRequestLocation={() => handleDetectLiveLocation()}
+                />
+              </div>
+
+              {/* RIGHT: Unified Destination Intelligence Panel */}
+              <div className="lg:col-span-4 rounded-2xl bg-white border border-[#E5E3DC] shadow-xs p-4 sm:p-5 flex flex-col justify-between gap-4">
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-[#E5E3DC]">
                     <div>
-                      <span className="text-xs font-mono font-black text-slate-900 uppercase tracking-wide block">
-                        All Other Emergency Hospitals in {searchRegion?.label || "Selected Region"}
+                      <h3 className="text-xs font-semibold text-[#172026] uppercase tracking-wider">
+                        Current destination
+                      </h3>
+                      <p className="text-[11px] text-[#5A6B75]">
+                        Live routing and verified readiness
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-semibold text-[#0F6B6D] bg-[#E8F3F3] px-2 py-0.5 rounded-full border border-[#C2DFDF]">
+                      Active
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5A6B75]">
+                        Care type
                       </span>
-                      <span className="text-[11px] text-slate-500 font-medium">
-                        General 24/7 facilities equipped for triage, trauma stabilization, and initial emergency care
+                      {specialtyFilter !== "all" && (
+                        <button
+                          onClick={() => {
+                            setSpecialtyFilter("all");
+                            setCurrentPage(1);
+                          }}
+                          className="text-[10px] font-semibold text-[#0F6B6D] hover:underline cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                    <OptionWheel
+                      plain
+                      options={SPECIALTY_WHEEL_OPTIONS}
+                      selectedId={specialtyFilter}
+                      onChange={(opt) => {
+                        setSpecialtyFilter(opt.id);
+                        setCurrentPage(1);
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                {/* Active Destination Card */}
+                {selectedHospital ? (
+                  <div className="rounded-xl bg-[#F6F5F1] border border-[#E5E3DC] p-3.5 flex flex-col gap-2.5">
+                    <div>
+                      <h4 className="text-sm font-semibold text-[#172026] truncate" title={selectedHospital.name}>
+                        {selectedHospital.name}
+                      </h4>
+                      <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-md bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8] text-[10.5px] font-semibold max-w-full">
+                        <span className="shrink-0">★</span>
+                        <span className="truncate">{selectedHospital.famousFor || getHospitalFamousFor(selectedHospital)}</span>
+                      </div>
+                      <p className="text-xs text-[#5A6B75] truncate mt-1">
+                        {selectedHospital.address}
+                      </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#E5E3DC] flex items-center justify-between text-xs">
+                      <span className="text-[#5A6B75]">
+                        Distance: <strong className="text-[#172026]">~{liveRoadStats ? liveRoadStats.roadDistanceKm.toFixed(1) : selectedHospital.distanceKm.toFixed(1)} km</strong>
+                      </span>
+                      <span className="text-[#172026] font-semibold">
+                        ~{liveRoadStats ? liveRoadStats.etaMinutes : (selectedHospital.etaMinutes || 12)} min
                       </span>
                     </div>
-                  </div>
-                  <span className="text-[10px] font-mono font-bold text-slate-600 bg-white px-2.5 py-1 rounded-full border border-slate-200 shrink-0">
-                    Emergency Backup
-                  </span>
-                </div>
-              ) : null;
 
-              // ==========================================
-              // PAGE 1, ITEM 1: HERO RECOMMENDATION CARD
-              // ==========================================
-              if (currentPage === 1 && pIdx === 0) {
-                return (
-                  <React.Fragment key={hosp.id}>
-                    {generalDivider}
-                    <MovingBorder active={isSelected} borderRadius="24px" className="w-full">
-                      <div
-                        onClick={() => handleSelectHospital(hosp)}
-                        className={`p-5 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer flex flex-col gap-4 shadow-md ${isSelected
-                          ? "bg-white border-cyan-400"
-                          : "bg-white hover:bg-slate-50/80 border-slate-300"
-                          }`}
+                    <div className="flex items-center gap-2 pt-1">
+                      <a
+                        href={`tel:${selectedHospital.emergencyPhone || selectedHospital.phone || "108"}`}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#B42318] hover:bg-[#991B1B] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
                       >
-                        {/* Top Row: Name, Fastest Badge, Distance & Travel Time */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex flex-col min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-base sm:text-lg font-black text-slate-950 truncate">
-                                {hosp.name}
-                              </span>
-                              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-300 tracking-wider shadow-2xs">
-                                ⭐ Famous for: {hosp.famousFor || getHospitalFamousFor(hosp)}
-                              </span>
-                              {isSpecMatch && (
-                                <span className="text-[10px] font-mono font-black uppercase px-2.5 py-0.5 rounded-full bg-cyan-600 text-white tracking-wider shadow-2xs">
-                                  Verified {specialtyFilter.toUpperCase()}
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate">{hosp.address}</span>
-                            </span>
-                          </div>
+                        <PhoneCall className="w-3.5 h-3.5" />
+                        <span>Call ED</span>
+                      </a>
+                      <a
+                        href={currentGoogleMapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#172026] hover:bg-[#2C3840] text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+                      >
+                        <Navigation className="w-3.5 h-3.5 text-[#6E9997]" />
+                        <span>Directions</span>
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-[#E5E3DC] p-4 text-center flex flex-col items-center justify-center gap-1 text-[#5A6B75]">
+                    <MapPin className="w-5 h-5 text-[#8C9AA2]" />
+                    <span className="text-xs font-semibold text-[#172026]">No destination selected</span>
+                    <p className="text-[11px] text-[#5A6B75]">
+                      Tap any marker on the map or select from the list below.
+                    </p>
+                  </div>
+                )}
 
-                          <div className="flex flex-col items-end shrink-0">
-                            <span className="font-mono text-sm sm:text-base font-black text-cyan-950 bg-cyan-50 px-3 py-1 rounded-xl border border-cyan-200">
-                              ~{durationNum} min
-                            </span>
-                            <span className="text-[11px] font-mono text-slate-500 mt-0.5">
-                              ~{distanceNum.toFixed(1)} km by road
-                            </span>
-                          </div>
-                        </div>
+              </div>
+            </div>
 
-                        {/* Middle Row: Capabilities & Badges */}
-                        <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono">
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>✓ 24/7 Verified Emergency</span>
-                          </span>
+            {/* FILTER & SORT BAR */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-[#172026]">
+                  {filteredAndSortedHospitals.length} facilities match criteria
+                </span>
+                {filteredAndSortedHospitals.length > 0 && (
+                  <span className="text-xs text-[#5A6B75]">
+                    · Showing {startIndex + 1}–{endIndex} of {filteredAndSortedHospitals.length}
+                  </span>
+                )}
+              </div>
 
-                          {hosp.acceptsPublicInsurance && (
-                            <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
-                              ✓ Ayushman Bharat / Aarogyasri
-                            </span>
-                          )}
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                {/* Sort */}
+                <div className="flex items-center gap-1 bg-white border border-[#E5E3DC] rounded-lg px-2.5 py-1">
+                  <ArrowUpDown className="w-3 h-3 text-[#8C9AA2]" />
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      setSortBy(e.target.value as any);
+                      setCurrentPage(1);
+                    }}
+                    aria-label="Sort order"
+                    className="text-xs font-semibold text-[#172026] bg-transparent focus:outline-none cursor-pointer"
+                  >
+                    <option value="fastest">Sort: Fastest / Closest</option>
+                    <option value="government">Sort: Government First</option>
+                    <option value="rating">Sort: Highest Rating</option>
+                  </select>
+                </div>
 
-                          {hosp.specialty && hosp.specialty.slice(0, 3).map((s, sIdx) => (
-                            <span key={sIdx} className="px-2.5 py-1 rounded-full bg-cyan-50 text-cyan-900 border border-cyan-200 font-medium">
-                              ✓ {s}
-                            </span>
-                          ))}
+                {/* Specialty */}
+                <select
+                  value={specialtyFilter}
+                  onChange={(e) => {
+                    setSpecialtyFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Clinical capability filter"
+                  className="bg-white border border-[#E5E3DC] rounded-lg px-2.5 py-1 text-xs font-semibold text-[#172026] focus:outline-none cursor-pointer"
+                >
+                  <option value="all">All Specialties</option>
+                  <option value="cardiology">Cardiology / Heart</option>
+                  <option value="neurology">Neurology / Stroke</option>
+                  <option value="pediatrics">Pediatrics / Child</option>
+                  <option value="cancer">Oncology / Cancer</option>
+                </select>
 
-                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-medium">
-                            🏛 {isGovernment ? "Government / Subsidized" : "Private Multi-Specialty"}
-                          </span>
-                        </div>
+                {/* Ownership */}
+                <select
+                  value={ownershipFilter}
+                  onChange={(e) => {
+                    setOwnershipFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Ownership filter"
+                  className="bg-white border border-[#E5E3DC] rounded-lg px-2.5 py-1 text-xs font-semibold text-[#172026] focus:outline-none cursor-pointer"
+                >
+                  <option value="all">All Ownership</option>
+                  <option value="government">Government / Subsidized</option>
+                  <option value="private">Private Tertiary</option>
+                </select>
+              </div>
+            </div>
 
-                        {/* Bottom Row: Direct Emergency Actions */}
-                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                          <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                            <Car className="w-3.5 h-3.5 text-cyan-600" />
-                            <span>Live road-network route active on map</span>
-                          </div>
+            {/* HOSPITAL RESULTS LIST */}
+            <div className="flex flex-col gap-3">
+              {loading ? (
+                <div className="py-12 text-center text-xs text-[#5A6B75] flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-[#0F6B6D] border-t-transparent animate-spin" />
+                  <span>Evaluating verified facilities nearby...</span>
+                </div>
+              ) : pageHospitals.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-white border border-[#E5E3DC] text-center flex flex-col items-center justify-center gap-2">
+                  <Building2 className="w-8 h-8 text-[#8C9AA2]" />
+                  <p className="text-xs font-semibold text-[#172026]">No facilities matching current filters</p>
+                  <p className="text-[11px] text-[#5A6B75]">
+                    Try selecting "All Specialties" or broadening your search.
+                  </p>
+                </div>
+              ) : (
+                pageHospitals.map((hosp, pIdx) => {
+                  const globalIndex = startIndex + pIdx;
+                  const isSelected = selectedHospital?.id === hosp.id;
+                  const distanceNum =
+                    isSelected && liveRoadStats ? liveRoadStats.roadDistanceKm : hosp.distanceKm;
+                  const durationNum =
+                    isSelected && liveRoadStats ? liveRoadStats.etaMinutes : hosp.etaMinutes || Math.max(2, Math.round(distanceNum * 1.5));
+                  const isGovernment = (hosp as any).ownership === "government";
+                  const isSpecMatch = Boolean(hosp.isEligible && specialtyFilter !== "all");
 
-                          <div className="flex items-center gap-2">
-                            <a
-                              href={`tel:${hosp.emergencyPhone || hosp.phone}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-                            >
-                              <PhoneCall className="w-3.5 h-3.5" />
-                              <span>Call Emergency ({hosp.emergencyPhone || "108"})</span>
-                            </a>
-
-                            <a
-                              href={currentGoogleMapsUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                              <span>Directions</span>
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    </MovingBorder>
-                  </React.Fragment>
-                );
-              }
-
-              // ==========================================
-              // PAGE 1, ITEMS 2–4: SECONDARY CARDS
-              // ==========================================
-              if (currentPage === 1 && pIdx < 4) {
-                return (
-                  <React.Fragment key={hosp.id}>
-                    {generalDivider}
+                  return (
                     <div
+                      key={hosp.id}
                       onClick={() => handleSelectHospital(hosp)}
-                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2.5 ${isSelected
-                        ? "bg-white border-cyan-400 shadow-md ring-2 ring-cyan-200"
-                        : "bg-white/85 hover:bg-white border-slate-200/90 hover:border-slate-300 shadow-2xs"
-                        }`}
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-3 ${
+                        isSelected
+                          ? "bg-white border-[#0F6B6D] shadow-sm ring-1 ring-[#0F6B6D]/30"
+                          : "bg-white hover:bg-[#FBF7EE]/40 border-[#E5E3DC] shadow-xs"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex flex-col min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm sm:text-base font-bold text-slate-900 truncate">
+                            <span className="text-sm font-semibold text-[#172026] truncate">
                               {hosp.name}
                             </span>
-                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-300">
-                              ⭐ Famous for: {hosp.famousFor || getHospitalFamousFor(hosp)}
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#FBF7EE] text-[#8C6D32] border border-[#E7DBB8]">
+                              ★ {hosp.famousFor || getHospitalFamousFor(hosp)}
                             </span>
                             {isSpecMatch && (
-                              <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-800 border border-cyan-300">
-                                Verified {specialtyFilter.toUpperCase()}
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#E8F3F3] text-[#0F6B6D] border border-[#C2DFDF]">
+                                Verified {specialtyFilter}
                               </span>
                             )}
                             {hosp.acceptsPublicInsurance && (
-                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                ✓ Ayushman / Aarogyasri
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#F6F5F1] text-[#5A6B75] border border-[#E5E3DC]">
+                                Ayushman / Aarogyasri
                               </span>
                             )}
                           </div>
-                          <span className="text-xs text-slate-500 truncate mt-0.5">{hosp.address}</span>
+                          <span className="text-xs text-[#5A6B75] truncate mt-0.5">{hosp.address}</span>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
+                        <div className="flex items-end flex-col shrink-0">
+                          <span className="text-xs font-semibold text-[#172026]">
                             ~{durationNum} min
+                          </span>
+                          <span className="text-[11px] text-[#5A6B75]">
+                            ~{distanceNum.toFixed(1)} km
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 flex-wrap pt-1 text-[10px] font-mono text-slate-500">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-slate-600 font-semibold">
-                            ~{distanceNum.toFixed(1)} km
+                      <div className="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[#E5E3DC] text-xs">
+                        <div className="flex items-center gap-2 text-[11px] text-[#5A6B75]">
+                          <span className="text-[#0F6B6D] font-medium flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#0F6B6D]" />
+                            {hosp.isEmergency24x7 ? "24/7 Verified Emergency" : "Specialty Center"}
                           </span>
                           <span>•</span>
-                          <span className="text-emerald-700 font-semibold">✓ Verified Emergency</span>
-                          {hosp.specialty && hosp.specialty[0] && (
-                            <>
-                              <span>•</span>
-                              <span className="text-slate-600">{hosp.specialty[0]}</span>
-                            </>
-                          )}
+                          <span>{isGovernment ? "Government" : "Private"}</span>
                         </div>
 
-                        <div className="flex items-center gap-2 ml-auto">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSelectHospital(hosp);
-                            }}
-                            className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold text-cyan-700 hover:text-cyan-900 bg-cyan-50 hover:bg-cyan-100 transition-colors cursor-pointer"
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={`tel:${hosp.emergencyPhone || hosp.phone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-[#B42318] hover:bg-[#991B1B] text-white font-semibold text-xs transition-colors cursor-pointer"
                           >
-                            View on Map
-                          </button>
+                            <PhoneCall className="w-3 h-3" />
+                            <span>Call ED</span>
+                          </a>
+
                           <a
                             href={userLocation ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${hosp.latitude},${hosp.longitude}&travelmode=driving` : `https://www.google.com/maps/search/?api=1&query=${hosp.latitude},${hosp.longitude}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-[#172026] hover:bg-[#2C3840] text-white font-semibold text-xs transition-colors cursor-pointer"
                           >
                             <span>Directions</span>
-                            <ExternalLink className="w-3 h-3 text-slate-400" />
+                            <ExternalLink className="w-3 h-3 text-[#6E9997]" />
                           </a>
                         </div>
                       </div>
                     </div>
-                  </React.Fragment>
-                );
-              }
-
-              // ==========================================
-              // ALL OTHER ITEMS (PAGE 1 #5-10 & ALL OF PAGES 2+): COMPACT ROWS
-              // ==========================================
-              return (
-                <React.Fragment key={hosp.id}>
-                  {generalDivider}
-                  <div
-                    onClick={() => handleSelectHospital(hosp)}
-                    className={`px-4 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${isSelected
-                      ? "bg-white border-cyan-400 shadow-xs ring-1 ring-cyan-200"
-                      : "bg-white/60 hover:bg-white border-slate-200/80 hover:border-slate-300"
-                      }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-xs font-mono text-slate-400 font-bold w-5 shrink-0">
-                        {globalIndex + 1}
-                      </span>
-                      <span className="text-xs sm:text-sm font-semibold text-slate-800 truncate">
-                        {hosp.name}
-                      </span>
-                      <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-300 shrink-0">
-                        ⭐ {hosp.famousFor || getHospitalFamousFor(hosp)}
-                      </span>
-                      {hosp.acceptsPublicInsurance && (
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 hidden sm:inline">
-                          ✓ Ayushman
-                        </span>
-                      )}
-                      <span className="text-[10px] font-mono text-slate-500 hidden sm:inline shrink-0">
-                        ({isGovernment ? "Govt" : "Private"})
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-xs font-mono font-bold text-slate-700">
-                        ~{durationNum} min
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
-                        ({distanceNum.toFixed(1)} km)
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectHospital(hosp);
-                        }}
-                        className="px-2.5 py-1 rounded text-[11px] font-mono font-bold text-cyan-700 hover:text-cyan-900 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 transition-colors cursor-pointer"
-                      >
-                        {isSelected ? "Active" : "View"}
-                      </button>
-                    </div>
-                  </div>
-                </React.Fragment>
-              );
-            })
-          )}
-        </div>
-
-        {/* EXPLICIT PAGINATION CONTROLS */}
-        {!loading && filteredAndSortedHospitals.length > PAGE_SIZE && (
-          <div className="pt-4 pb-4 border-t border-slate-200/70 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <span className="text-xs font-mono text-slate-500">
-              Showing {startIndex + 1}–{endIndex} of {filteredAndSortedHospitals.length} facilities
-            </span>
-
-            <div className="flex items-center gap-1.5 font-mono text-xs">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-35 disabled:cursor-not-allowed font-semibold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-                <span>Previous</span>
-              </button>
-
-              {pageNumbers.map((p, idx) =>
-                p === -1 ? (
-                  <span key={`ellipsis-${idx}`} className="px-1 text-slate-400 font-bold">
-                    …
-                  </span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => setCurrentPage(p)}
-                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${currentPage === p
-                      ? "bg-cyan-600 text-white shadow-2xs"
-                      : "bg-white hover:bg-slate-50 border border-slate-200 text-slate-700"
-                      }`}
-                  >
-                    {p}
-                  </button>
-                )
+                  );
+                })
               )}
-
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-35 disabled:cursor-not-allowed font-semibold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <span>Next</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
             </div>
-          </div>
+
+            {/* PAGINATION CONTROLS */}
+            {!loading && filteredAndSortedHospitals.length > PAGE_SIZE && (
+              <div className="pt-4 pb-4 border-t border-[#E5E3DC] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <span className="text-[#5A6B75]">
+                  Showing {startIndex + 1}–{endIndex} of {filteredAndSortedHospitals.length} facilities
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 rounded-lg border border-[#E5E3DC] bg-white hover:bg-[#F6F5F1] disabled:opacity-35 disabled:cursor-not-allowed font-semibold text-[#172026] transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Previous</span>
+                  </button>
+
+                  {pageNumbers.map((p, idx) =>
+                    p === -1 ? (
+                      <span key={`ellipsis-${idx}`} className="px-1 text-[#8C9AA2] font-bold">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          currentPage === p
+                            ? "bg-[#0F6B6D] text-white shadow-xs"
+                            : "bg-white hover:bg-[#F6F5F1] border border-[#E5E3DC] text-[#172026]"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 rounded-lg border border-[#E5E3DC] bg-white hover:bg-[#F6F5F1] disabled:opacity-35 disabled:cursor-not-allowed font-semibold text-[#172026] transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
       </main>

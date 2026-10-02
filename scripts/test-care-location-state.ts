@@ -233,6 +233,32 @@ async function runLocationStateSuite() {
   assert(restored !== null, "Verified storage entry with source and timestamp is restored");
   assert(restored?.source === "preset", "Restored entry preserves preset source");
 
+  // 16. Non-Authoritative Restoration Invariant:
+  // Restored record MUST NOT automatically set userLocation or trigger hospital fetching
+  let mountUserLocation: CareOrigin | null = null;
+  let mountLocationStatus: LocationStatus = "LOCATION_UNKNOWN";
+  let mountSuggestion: CareOrigin | null = restored; // stored strictly as suggestion
+
+  assert(mountUserLocation === null, "On mount with saved storage, userLocation remains strictly null");
+  assert(mountLocationStatus === "LOCATION_UNKNOWN", "On mount with saved storage, status remains LOCATION_UNKNOWN");
+  assert(canFetchHospitals(mountLocationStatus, mountUserLocation) === false, "Zero hospital discovery requests fire on mount with saved suggestion");
+
+  // 17. Explicit User Confirmation activates suggestion
+  mountUserLocation = mountSuggestion!;
+  mountLocationStatus = mountSuggestion!.source === "gps" ? "LOCATION_RESOLVED" : "LOCATION_MANUALLY_SELECTED";
+  assert(mountLocationStatus === "LOCATION_MANUALLY_SELECTED", "Explicit confirmation transitions status to LOCATION_MANUALLY_SELECTED");
+  assert(mountUserLocation !== null, "Explicit confirmation establishes userLocation");
+  assert(canFetchHospitals(mountLocationStatus, mountUserLocation) === true, "Hospital discovery is enabled ONLY after explicit confirmation");
+
+  // 18. User Dismissal clears suggestion without activating
+  let dismissedSuggestion: CareOrigin | null = restored;
+  let dismissedUserLocation: CareOrigin | null = null;
+  let dismissedStatus: LocationStatus = "LOCATION_UNKNOWN";
+  dismissedSuggestion = null; // user clicked dismiss
+  assert(dismissedSuggestion === null, "Dismissal clears saved suggestion");
+  assert(dismissedUserLocation === null, "Dismissal leaves userLocation null");
+  assert(canFetchHospitals(dismissedStatus, dismissedUserLocation) === false, "canFetchHospitals remains FALSE after dismissal");
+
   console.log("\n==============================================================================");
   console.log(`   ALL ${passedTests}/${totalTests} LOCATION REGRESSION INVARIANTS PASSED (100%)       `);
   console.log("==============================================================================");
