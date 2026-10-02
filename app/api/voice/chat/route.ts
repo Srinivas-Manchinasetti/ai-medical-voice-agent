@@ -9,7 +9,7 @@ import { clinicalKnowledgeRetriever } from "@/lib/clinical-knowledge/retriever";
 import { generateDoctorTurnResponse } from "@/lib/ai/clinical-llm";
 import { hospitalRagService } from "@/lib/care-network/hospital-rag";
 import { buildProvenanceEvidenceFromClinicalState } from "@/lib/agents/provenance";
-import { extractSubfieldState, detectQuestionTargetSlot } from "@/lib/triage/clinical-state";
+import { extractSubfieldState } from "@/lib/triage/clinical-state";
 
 import {
   checkRateLimit,
@@ -379,10 +379,11 @@ export async function POST(request: Request) {
 
     const activeDoctorReply = turnResult.action === "CLARIFY" ? turnResult.doctorReply : (llmResult.reply || turnResult.doctorReply);
     
-    // Ensure state's pending question and last question match what the doctor actually articulated
+    // Ensure state's pending question question wording and last question match what the doctor articulated.
+    // NOTE: pendingQuestion.targetSlot is strictly preserved from the deterministic planner/state machine.
+    // LLM generation must NEVER rewrite or corrupt the planned targetSlot.
     if (turnResult.state.pendingQuestion) {
       turnResult.state.pendingQuestion.question = activeDoctorReply;
-      turnResult.state.pendingQuestion.targetSlot = detectQuestionTargetSlot(activeDoctorReply, turnResult.state.pendingQuestion.targetSlot);
       if (turnResult.state.conversationMemory) {
         turnResult.state.conversationMemory.lastDoctorQuestion = activeDoctorReply;
       }

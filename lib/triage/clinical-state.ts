@@ -614,19 +614,238 @@ export const NON_DENIABLE_SLOTS = new Set([
 /**
  * Detects the clinical target topic/slot of a doctor's spoken question to maintain
  * bidirectional question-to-answer integrity even if an LLM paraphrases the planned inquiry.
+ * Distinguishes legitimate subfields:
+ * - severity vs character
+ * - onset_pattern (sudden/gradual) vs onset (duration/timeline)
+ * - episodic frequency vs episodic duration
+ * - odynophagia (pain on swallowing) vs swallowing_difficulty (mechanical dysphagia)
  */
 export function detectQuestionTargetSlot(questionText: string, defaultSlot?: string): string {
   const lower = questionText.toLowerCase();
-  if (/swallow|dysphagia|liquids|solids|saliva/i.test(lower)) return "swallowing_difficulty";
+
+  // 1. Odynophagia (pain on swallowing) vs Mechanical dysphagia (trouble swallowing / fluids & saliva / choking)
+  if (/hurts?\s+to\s+swallow|painful\s+to\s+swallow|pain\s+when\s+swallowing|odynophagia|hurt\s+more\s+when\s+you\s+swallow/i.test(lower)) {
+    return "odynophagia";
+  }
+  if (/swallow(?:ing)?\s+liquids|liquids\s+and\s+saliva|difficulty\s+swallowing|trouble\s+swallowing|able\s+to\s+swallow|choking|dysphagia/i.test(lower)) {
+    return "swallowing_difficulty";
+  }
+  if (/swallow/i.test(lower)) {
+    return "swallowing_difficulty";
+  }
+
+  // 2. Ear pain / otalgia
   if (/ear\s*pain|earache|ears/i.test(lower)) return "ear_pain";
+
+  // 3. Fever / chills
   if (/fever|chills|temperature/i.test(lower)) return "fever";
+
+  // 4. Severity (numerical scale / 0-10 / rate pain) vs Character (quality / sensation)
   if (/scale|0\s*[-–to]\s*10|zero\s*[-–to]\s*ten|how\s+severe|severity|rate\s+your\s+pain/i.test(lower)) return "severity";
+  if (/what\s+(?:does\s+it|it)\s+feel\s+like|sharp|dull|burning|pressure|tightness|squeezing|character|crushing|throbbing/i.test(lower)) return "character";
+
+  // 5. Onset pattern (sudden vs gradual) vs Episodic duration/frequency vs Onset timeline
   if (/sudden|gradual|come\s+on\s+all\s+at\s+once|build\s+up/i.test(lower)) return "onset_pattern";
-  if (/when\s+did|how\s+long\s+have\s+you\s+had|how\s+many\s+days/i.test(lower)) return "onset";
+  if (/how\s+long\s+(?:does\s+each|each\s+one\s+last)|duration\s+of\s+each/i.test(lower)) return "duration";
+  if (/how\s+often|how\s+many\s+times\s+a\s+(?:day|month|week)|frequency/i.test(lower)) return "frequency";
+  if (/when\s+did|how\s+long\s+have\s+you\s+had|how\s+many\s+days|how\s+many\s+hours|when\s+did\s+this\s+start/i.test(lower)) return "onset";
+
+  // 6. Voice character
   if (/voice|hoarse|hoarseness|speak/i.test(lower)) return "voice_character";
+
+  // 7. Course & progression
   if (/worse|better|improving|staying\s+the\s+same|course/i.test(lower)) return "course";
+
+  // 8. Radiation
   if (/radiat|travel|spread|arm|jaw|back/i.test(lower)) return "radiation";
-  if (/what\s+(?:does\s+it|it)\s+feel\s+like|sharp|dull|burning|pressure|tightness|character/i.test(lower)) return "character";
+
+  // 9. Exertional
+  if (/active|activity|exercis|stairs?|rest(?:ing)?|exert/i.test(lower)) return "exertional";
+
+  // 10. Associated symptoms
+  if (/other\s+symptoms|associated|alongside/i.test(lower)) return "associated_symptoms";
+
   return defaultSlot || "general_inquiry";
+}
+
+/**
+ * Evaluates whether a detected question slot matches the planner's expected clinical topic.
+ * Enforces strict distinction between subfields (e.g. severity vs character, onset pattern vs duration).
+ */
+export function isTargetSlotMatch(expectedTopic: string, detectedSlot: string): boolean {
+  if (!expectedTopic || !detectedSlot) return false;
+  const exp = expectedTopic.toLowerCase().trim();
+  const det = detectedSlot.toLowerCase().trim();
+
+  if (exp === det) return true;
+
+  // Onset timeline variants: "onset", "onset_time" (when did it start / duration of complaint)
+  if ((exp === "onset" || exp === "onset_time") && (det === "onset" || det === "onset_time")) {
+    return true;
+  }
+
+  // Neurological laterality / distribution
+  if ((exp === "weakness_distribution" || exp === "laterality") && (det === "weakness_distribution" || det === "laterality")) {
+    return true;
+  }
+
+  // Swallowing variants: odynophagia (painful swallowing) ↔ swallowing_difficulty ↔ dysphagia
+  const swallowGroup = new Set(["swallowing_difficulty", "odynophagia", "dysphagia"]);
+  if (swallowGroup.has(exp) && swallowGroup.has(det)) {
+    return true;
+  }
+
+  return false;
+}
+
+export interface TargetValidationResult {
+  isValid: boolean;
+  detectedTarget: string;
+  reason?: string;
+}
+
+/**
+ * Post-generation validator for doctor replies:
+ * A. Checks if a question exists when clinical inquiry is active.
+ * B. Checks if detected question target strictly matches the responsePlan's nextHighValueInquiry.topic.
+ * C. Enforces that the reply does not violate responsePlan.mustAvoidAsking (both by slot and forbidden phrases).
+ * D. Enforces that the reply does not repeat already-resolved subfields or denied symptoms.
+ * E. Enforces that the reply does not bundle multiple clinical questions.
+ */
+export function validateDoctorReplyTarget(
+  replyText: string,
+  plan?: {
+    primaryGoal?: string;
+    mustAvoidAsking?: string[];
+    nextHighValueInquiry?: { topic: string; clinicalRationale: string; suggestedPhrasing: string };
+  },
+  slots?: Record<string, any>,
+  memory?: any,
+  confirmedFacts?: string[],
+  deniedSymptoms?: string[]
+): TargetValidationResult {
+  const clean = replyText.trim();
+  if (!clean) {
+    return { isValid: false, detectedTarget: "empty", reason: "LLM_EMPTY_REPLY" };
+  }
+
+  // A. Is there a question?
+  if (!clean.includes("?")) {
+    if (plan?.primaryGoal === "EMERGENCY_DISPOSITION" || plan?.primaryGoal === "VALIDATE_EMOTION_BEFORE_INQUIRY") {
+      return { isValid: true, detectedTarget: "statement" };
+    }
+    return { isValid: false, detectedTarget: "none", reason: "LLM_NO_QUESTION_FOUND" };
+  }
+
+  // E. Does it contain multiple competing clinical questions?
+  const questionMarks = (clean.match(/\?/g) || []).length;
+  if (questionMarks > 1) {
+    return { isValid: false, detectedTarget: "multiple", reason: "LLM_MULTIPLE_QUESTIONS" };
+  }
+
+  // Detect the target slot of the generated question
+  const detectedTarget = detectQuestionTargetSlot(clean);
+
+  // C. Does the generated question violate responsePlan.mustAvoidAsking?
+  const mustAvoid = plan?.mustAvoidAsking || [];
+  const lower = clean.toLowerCase();
+
+  for (const item of mustAvoid) {
+    const itemLower = item.toLowerCase().trim();
+    if (!itemLower) continue;
+
+    // Check direct slot match
+    if (itemLower === detectedTarget) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: `LLM_MUST_AVOID_SLOT_VIOLATION: target slot '${detectedTarget}' is in mustAvoidAsking`,
+      };
+    }
+
+    // Check phrase match (for phrases with 4+ characters)
+    if (itemLower.length >= 4 && lower.includes(itemLower)) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: `LLM_MUST_AVOID_PHRASE_VIOLATION: question contains forbidden phrase '${item}'`,
+      };
+    }
+  }
+
+  // D. Does it repeat a resolved or denied dimension?
+  const denied = deniedSymptoms || memory?.deniedSymptoms || [];
+  for (const d of denied) {
+    const dLower = d.toLowerCase().trim();
+    if (dLower === detectedTarget) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: `LLM_REPEATED_DENIED_DIMENSION: symptom '${d}' was already denied by patient`,
+      };
+    }
+    if (dLower.length >= 4 && lower.includes(dLower) && lower.includes("?")) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: `LLM_REPEATED_DENIED_DIMENSION: question re-asks about denied symptom '${d}'`,
+      };
+    }
+  }
+
+  // Check subfields resolved:
+  if (slots) {
+    const subfields = extractSubfieldState(slots, confirmedFacts || slots.known_facts || [], memory);
+
+    // If duration is resolved, cannot ask onset timeline again
+    if (subfields.onset.duration && (detectedTarget === "onset" || detectedTarget === "onset_time")) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: "LLM_REPEATED_RESOLVED_DIMENSION: onset duration is already resolved",
+      };
+    }
+
+    // If onset pattern (sudden vs gradual) is resolved, cannot ask onset pattern again
+    if (subfields.onset.onsetPattern !== "unknown" && detectedTarget === "onset_pattern") {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: "LLM_REPEATED_RESOLVED_DIMENSION: onset pattern is already resolved",
+      };
+    }
+
+    // If severity is resolved, cannot ask severity again
+    if (subfields.characterSeverity.severity && detectedTarget === "severity") {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: "LLM_REPEATED_RESOLVED_DIMENSION: pain severity is already resolved",
+      };
+    }
+
+    // If character is resolved, cannot ask character again
+    if (subfields.characterSeverity.character && detectedTarget === "character") {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: "LLM_REPEATED_RESOLVED_DIMENSION: symptom character is already resolved",
+      };
+    }
+  }
+
+  // B. Does the detected question target match responsePlan.nextHighValueInquiry.topic?
+  if (plan?.nextHighValueInquiry?.topic) {
+    const expectedTopic = plan.nextHighValueInquiry.topic;
+    if (!isTargetSlotMatch(expectedTopic, detectedTarget)) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: `LLM_QUESTION_TARGET_MISMATCH: expected '${expectedTopic}', detected '${detectedTarget}'`,
+      };
+    }
+  }
+
+  return { isValid: true, detectedTarget };
 }
 

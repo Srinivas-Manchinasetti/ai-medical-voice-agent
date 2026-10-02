@@ -3,6 +3,7 @@ import { PreArbiterResult } from "../triage/pre-arbiter";
 import { ClinicalInterviewState } from "../triage/conversation-manager";
 import { DoctorProfile } from "@/config/doctors";
 import { DEFAULT_LOCALE_CONFIG, LocaleConfig } from "../config/locale";
+import { validateDoctorReplyTarget } from "../triage/clinical-state";
 
 export interface GenerateTurnOptions {
   patientUtterance: string;
@@ -22,6 +23,7 @@ export interface GeneratedTurnResult {
   provider: "nvidia" | "fallback";
   model?: string;
   latencyMs: number;
+  rejectionReason?: string;
 }
 
 export const REASONING_LEAK_PATTERNS = [
@@ -191,7 +193,8 @@ export async function generateDoctorTurnResponse(
 
   // Ingest conversation memory and response plan
   const memory = interviewState?.conversationMemory;
-  const plan = interviewState?.responsePlan;
+  const rawPlan = interviewState?.responsePlan;
+  const pendingQ = interviewState?.pendingQuestion;
 
   const confirmedFacts = memory?.confirmedFacts && memory.confirmedFacts.length > 0
     ? memory.confirmedFacts
@@ -199,9 +202,24 @@ export async function generateDoctorTurnResponse(
   const deniedSymptoms = memory?.deniedSymptoms || [];
   const uncertainties = memory?.uncertainties || [];
   const questionsAlreadyAsked = memory?.questionsAlreadyAsked || [];
-  const mustAvoid = plan?.mustAvoidAsking && plan.mustAvoidAsking.length > 0
-    ? plan.mustAvoidAsking
+  const mustAvoid = rawPlan?.mustAvoidAsking && rawPlan.mustAvoidAsking.length > 0
+    ? rawPlan.mustAvoidAsking
     : questionsAlreadyAsked;
+
+  // Authoritative turn response plan (ingested from planner or pendingQuestion)
+  const effectiveInquiry = rawPlan?.nextHighValueInquiry || (pendingQ?.targetSlot ? {
+    topic: pendingQ.targetSlot,
+    clinicalRationale: pendingQ.purpose || `Inquire about ${pendingQ.targetSlot}`,
+    suggestedPhrasing: fallbackReply || pendingQ.question,
+  } : undefined);
+
+  const plan = {
+    primaryGoal: rawPlan?.primaryGoal || "ADVANCE_CLINICAL_INTAKE",
+    conversationalFocus: rawPlan?.conversationalFocus || pendingQ?.purpose || `Inquire about ${pendingQ?.targetSlot || "clinical symptoms"}`,
+    mustAvoidAsking: rawPlan?.mustAvoidAsking && rawPlan.mustAvoidAsking.length > 0 ? rawPlan.mustAvoidAsking : mustAvoid,
+    nextHighValueInquiry: effectiveInquiry,
+    suggestedSpokenReply: rawPlan?.suggestedSpokenReply || fallbackReply || pendingQ?.question || "Could you tell me more about what you're experiencing?",
+  };
 
   // Track access constraints and evidence status
   const constraints = interviewState?.structuredHistory?.accessConstraints;
@@ -252,12 +270,13 @@ ${evidence ? `- Evidence Status: ${evidence.enoughForDisposition ? "Sufficient f
 ${careNetworkSummary ? `\nVERIFIED CARE NETWORK CANDIDATES (RAG):\n${careNetworkSummary}` : ""}
 ${
   plan
-    ? `\nACTIVE TURN RESPONSE PLAN:
+    ? `\nACTIVE TURN RESPONSE PLAN (AUTHORITATIVE):
 - Primary Goal: ${plan.primaryGoal}
 - Priority Focus: ${plan.conversationalFocus}
-${plan.nextHighValueInquiry ? `- Next High-Value Clinical Inquiry: ${plan.nextHighValueInquiry.suggestedPhrasing} (${plan.nextHighValueInquiry.clinicalRationale})` : ""}
-${mustAvoid.length > 0 ? `- DO NOT ASK ABOUT: ${mustAvoid.join(", ")}` : ""}
-- Suggested Clinical Phrasing: "${plan.suggestedSpokenReply}"`
+${plan.nextHighValueInquiry ? `- MANDATORY TARGET SLOT (ONLY clinical inquiry permitted): "${plan.nextHighValueInquiry.topic}"\n  Clinical Rationale: ${plan.nextHighValueInquiry.clinicalRationale}\n  Suggested Phrasing: "${plan.nextHighValueInquiry.suggestedPhrasing}"` : ""}
+${mustAvoid.length > 0 ? `- FORBIDDEN TOPICS (DO NOT ASK ABOUT): ${mustAvoid.join(", ")}` : ""}
+- Suggested Clinical Phrasing: "${plan.suggestedSpokenReply}"
+- NON-NEGOTIABLE RULE: The Active Turn Response Plan is authoritative. Do NOT select or switch to any other clinical topic. Your task is exclusively to express this exact target slot naturally.`
     : ""
 }
 
@@ -269,7 +288,7 @@ CONVERSATIONAL RULES (MANDATORY):
 2. ASK STRICTLY ONE QUESTION PER TURN:
    - Ask ONLY ONE focused question.
    - NEVER bundle multiple questions into one response (e.g. NEVER ask "Do you have trouble swallowing, a fever, or any ear pain?").
-   - If multiple dimensions are pending, pick the single highest priority clinical question.
+   - DO NOT CHOOSE THE NEXT CLINICAL TOPIC: The deterministic planner has already chosen it. You MUST NOT select another pending dimension or revisit already-resolved dimensions. Your only task is to express that target naturally.
 3. CLINICIAN PERSONA & BEDSIDE MANNER:
    - Lead Dr. Sarah Chen (Chief of Internal Medicine): Calm, concise, empathetic primary-care style ("The voice change is useful to know. Is it more like hoarseness, weakness, or difficulty producing your voice?").
    - Dr. Marcus Vance (Cardiologist): Direct, urgent, hemodynamically focused ("Let's rule out anything urgent first. Any chest pressure, shortness of breath, or fainting?").
@@ -301,11 +320,12 @@ ${
 - You CANNOT downgrade the emergency, dismiss symptoms, or suggest routine waiting.
 - You MUST instruct the patient/caregiver to seek immediate emergency medical care: call ${primaryEmergencyNumber} or ${ambulanceNumber} (Emergency Ambulance), or proceed immediately to the nearest Emergency Department.
 - Keep your emergency guidance crisp (1 to 2 urgent, direct sentences).`
-    : `CLINICAL INTAKE POLICY:
-- We are gathering diagnostic evidence to evaluate the patient's condition.
-- Missing key dimensions: ${missingDimensions.length > 0 ? missingDimensions.join(", ") : "onset, character, radiation"}.
-- Ask at most ONE clear, focused follow-up question to help narrow down the diagnosis.
-- Do NOT repeat questions that have already been asked or answered in the conversation history.`
+    : `CLINICAL INTAKE POLICY (AUTHORITATIVE TARGET DISCIPLINE):
+- The deterministic clinical planner has decided the single authoritative inquiry topic: "${plan?.nextHighValueInquiry?.topic || "general_clarification"}".
+- You MUST phrase your single question to address ONLY this authoritative target dimension.
+- Do NOT pick a different dimension from unaddressed symptoms or missing dimensions.
+- Do NOT repeat questions that have already been asked or answered in the conversation history or listed in "FORBIDDEN TOPICS".
+- If you cannot phrase a natural question for this exact target, use the suggested phrasing verbatim: "${plan?.suggestedSpokenReply || effectiveFallback}".`
 }
 
 MANDATORY OUTPUT FORMAT (JSON ONLY):
@@ -349,6 +369,29 @@ CRITICAL INVARIANTS:
     // 5. Strict Output Parsing & Multi-Layer Output Guard
     const { cleanReply } = parseAndSanitizeDoctorReply(result.content, effectiveFallback, demographics);
     let generatedReply = cleanReply;
+
+    // 5.5 Strict Post-Generation Clinical Target & Invariant Validator
+    if (!isEmergency) {
+      const targetValidation = validateDoctorReplyTarget(
+        generatedReply,
+        plan,
+        interviewState?.slots,
+        memory,
+        confirmedFacts,
+        deniedSymptoms
+      );
+
+      if (!targetValidation.isValid) {
+        console.warn(`[MedVoice AI Response Validator] LLM output rejected (${targetValidation.reason}). Falling back to deterministic clinical planner reply.`);
+        return {
+          reply: effectiveFallback,
+          provider: "fallback",
+          model: result.model,
+          latencyMs: Date.now() - t0,
+          rejectionReason: targetValidation.reason,
+        };
+      }
+    }
 
     // 6. Response Validator
     // If emergency was detected by Pre-Arbiter, verify that emergency guidance is present

@@ -36,6 +36,12 @@ export interface NvidiaCompletionResult {
 }
 
 export class NvidiaClient {
+  private mockCompleter: ((messages: NvidiaChatMessage[], options: NvidiaCompletionOptions) => Promise<NvidiaCompletionResult | null>) | null = null;
+
+  public setMockCompleter(completer: ((messages: NvidiaChatMessage[], options: NvidiaCompletionOptions) => Promise<NvidiaCompletionResult | null>) | null): void {
+    this.mockCompleter = completer;
+  }
+
   public getApiKey(): string {
     return process.env.NVIDIA_API_KEY || "";
   }
@@ -49,6 +55,7 @@ export class NvidiaClient {
   }
 
   public isConfigured(): boolean {
+    if (this.mockCompleter) return true;
     const key = this.getApiKey();
     return Boolean(key && key.trim().length > 0);
   }
@@ -57,6 +64,11 @@ export class NvidiaClient {
     messages: NvidiaChatMessage[],
     options: NvidiaCompletionOptions = {}
   ): Promise<NvidiaCompletionResult> {
+    if (this.mockCompleter) {
+      const mockResult = await this.mockCompleter(messages, options);
+      if (mockResult) return mockResult;
+    }
+
     if (!this.isConfigured()) {
       throw new Error("NVIDIA_API_KEY is not configured in environment variables.");
     }
