@@ -36,6 +36,7 @@ export interface ClinicalInterviewState {
   caseVersion: number;
   slots: {
     onset?: string;
+    onset_pattern?: string;
     duration?: string;
     acute_worsening?: boolean;
     character?: string;
@@ -706,6 +707,21 @@ export class ConversationManager {
         } else {
           (state.slots as any)[slot] = val;
           state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
+          if (slot === "onset") {
+            if (/sudden/i.test(String(val))) {
+              state.slots.acute_worsening = true;
+              (state.slots as any).onset_pattern = "sudden";
+              if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
+                state.slots.known_facts.push("ONSET_TYPE: sudden");
+              }
+            } else if (/gradual/i.test(String(val))) {
+              state.slots.acute_worsening = false;
+              (state.slots as any).onset_pattern = "gradual";
+              if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
+                state.slots.known_facts.push("ONSET_TYPE: gradual");
+              }
+            }
+          }
         }
 
         state.resolvedQuestions.push({
@@ -1047,6 +1063,21 @@ export class ConversationManager {
       } else {
         (state.slots as any)[slot] = val;
         state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
+        if (slot === "onset") {
+          if (/sudden/i.test(String(val))) {
+            state.slots.acute_worsening = true;
+            (state.slots as any).onset_pattern = "sudden";
+            if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
+              state.slots.known_facts.push("ONSET_TYPE: sudden");
+            }
+          } else if (/gradual/i.test(String(val))) {
+            state.slots.acute_worsening = false;
+            (state.slots as any).onset_pattern = "gradual";
+            if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
+              state.slots.known_facts.push("ONSET_TYPE: gradual");
+            }
+          }
+        }
       }
 
       // Resolve pending question
@@ -1451,6 +1482,22 @@ export class ConversationManager {
     if (/\b(gradual(?:ly)?\s+increased|got\s+worse|built\s+up|getting\s+worse|increasing)\b/i.test(state.cumulativeTranscript)) {
       if (!state.slots.known_facts.some(f => /course/i.test(f))) {
         state.slots.known_facts.push("COURSE: gradually worsening");
+      }
+    }
+
+    if (!state.slots.onset_pattern) {
+      if (/\b(sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere|all\s+at\s+once)\b/i.test(state.cumulativeTranscript)) {
+        state.slots.onset_pattern = "sudden";
+        state.slots.acute_worsening = true;
+        if (!state.slots.known_facts.some(f => /ONSET_(?:TYPE|PATTERN)/i.test(f))) {
+          state.slots.known_facts.push("ONSET_TYPE: sudden");
+        }
+      } else if (/\b(gradual(?:ly)?|built\s+up|came\s+on\s+gradually|slowly|over\s+time)\b/i.test(state.cumulativeTranscript)) {
+        state.slots.onset_pattern = "gradual";
+        state.slots.acute_worsening = false;
+        if (!state.slots.known_facts.some(f => /ONSET_(?:TYPE|PATTERN)/i.test(f))) {
+          state.slots.known_facts.push("ONSET_TYPE: gradual");
+        }
       }
     }
 

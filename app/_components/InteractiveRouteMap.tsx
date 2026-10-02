@@ -119,7 +119,6 @@ export function InteractiveRouteMap({
   const prevHospitalIdRef = useRef<string>("");
 
   const [mapStyle, setMapStyle] = useState<"osm" | "satellite">("osm");
-  const [poiResolving, setPoiResolving] = useState<boolean>(false);
 
   const [routeInfo, setRouteInfo] = useState<{
     distanceKm: number;
@@ -586,16 +585,12 @@ export function InteractiveRouteMap({
       const initialTileLayer = L.tileLayer(initialLayerConfig.url, initialLayerConfig.options).addTo(map);
       baseLayerRef.current = initialTileLayer;
 
-      // Smart on-map click: Resolves facility, building, or pin anywhere on map canvas
-      map.on("click", async (e: any) => {
+      // Map click: ONLY select hospital if user clicks on or near an existing hospital marker pin
+      map.on("click", (e: any) => {
         if (isManualPicking) return;
         const clickPoint = e.layerPoint;
-        const clickLat = e.latlng.lat;
-        const clickLng = e.latlng.lng;
-
-        // 1. Check if clicked near an existing rendered marker (within 35px)
         let closestHosp: HospitalItem | null = null;
-        let minDistancePx = 35;
+        let minDistancePx = 35; // 35px click tolerance around hospital pin
 
         hospitalMarkersMapRef.current.forEach(({ marker, hosp }) => {
           const markerPoint = map.latLngToLayerPoint(marker.getLatLng());
@@ -608,114 +603,8 @@ export function InteractiveRouteMap({
 
         if (closestHosp) {
           onSelectHospitalRef.current(closestHosp);
-          return;
         }
-
-        // 2. Check if clicked near any hospital in allHospitals or INDIAN_HOSPITALS_DATASET (within ~450m)
-        let datasetMatch: HospitalItem | null = null;
-        let nearestDistKm = 0.45; // 450 meters tolerance
-
-        const currentAllHospitals = allHospitalsRef.current;
-        for (const h of currentAllHospitals) {
-          const d = calculateDistanceKm(clickLat, clickLng, h.latitude, h.longitude);
-          if (d < nearestDistKm) {
-            nearestDistKm = d;
-            datasetMatch = h;
-          }
-        }
-
-        if (!datasetMatch) {
-          for (const h of INDIAN_HOSPITALS_DATASET) {
-            const d = calculateDistanceKm(clickLat, clickLng, h.latitude, h.longitude);
-            if (d < nearestDistKm) {
-              nearestDistKm = d;
-              const curPatient = patientCoordsRef.current;
-              const userDist = curPatient
-                ? calculateDistanceKm(curPatient.lat, curPatient.lng, h.latitude, h.longitude)
-                : 1.2;
-              datasetMatch = {
-                id: h.id,
-                name: h.name,
-                specialty: h.specialty,
-                famousFor: h.famousFor || getHospitalFamousFor(h),
-                city: h.city,
-                address: h.address,
-                phone: h.phone,
-                emergencyPhone: h.emergencyPhone,
-                distanceKm: userDist,
-                latitude: h.latitude,
-                longitude: h.longitude,
-                isEmergency24x7: h.isEmergency24x7,
-                rating: h.rating,
-                ownership: h.ownership,
-                acceptsPublicInsurance: h.acceptsPublicInsurance,
-                etaMinutes: calculateCalibratedDriveTime(userDist),
-              };
-            }
-          }
-        }
-
-        if (datasetMatch) {
-          onSelectHospitalRef.current(datasetMatch);
-          return;
-        }
-
-        // 3. Dynamic reverse-geocode POI lookup (if user clicks any building, hospital label, or facility on map canvas)
-        setPoiResolving(true);
-        try {
-          const resp = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${clickLat}&lon=${clickLng}&zoom=18&addressdetails=1`,
-            { headers: { "Accept-Language": "en" } }
-          );
-          if (resp.ok) {
-            const data = await resp.json();
-            const placeName =
-              data.namedetails?.name ||
-              data.name ||
-              data.address?.hospital ||
-              data.address?.clinic ||
-              data.address?.doctors ||
-              data.address?.emergency ||
-              data.address?.amenity ||
-              data.address?.building ||
-              (data.display_name ? data.display_name.split(",")[0] : "Selected Medical Center");
-
-            const cityName =
-              data.address?.city ||
-              data.address?.town ||
-              data.address?.suburb ||
-              data.address?.state_district ||
-              "Local Area";
-
-            const curPatient = patientCoordsRef.current;
-            const userDist = curPatient
-              ? calculateDistanceKm(curPatient.lat, curPatient.lng, clickLat, clickLng)
-              : 1.2;
-
-            const dynamicHosp: HospitalItem = {
-              id: `poi-${data.osm_id || Math.round(clickLat * 10000)}`,
-              name: placeName,
-              specialty: ["Emergency Care", "Trauma & Triage", "General Medicine"],
-              famousFor: "Direct Map Pin Selection",
-              city: cityName,
-              address: data.display_name || `${clickLat.toFixed(4)}, ${clickLng.toFixed(4)}`,
-              phone: "108",
-              emergencyPhone: "108",
-              distanceKm: parseFloat(userDist.toFixed(1)),
-              latitude: clickLat,
-              longitude: clickLng,
-              isEmergency24x7: true,
-              rating: 4.5,
-              etaMinutes: calculateCalibratedDriveTime(userDist),
-            };
-
-            onSelectHospitalRef.current(dynamicHosp);
-          }
-        } catch (err) {
-          console.warn("[InteractiveRouteMap] POI reverse lookup error:", err);
-        } finally {
-          setPoiResolving(false);
-        }
+        // Random clicks on roads or terrain are ignored (no random rerouting)
       });
 
       mapInstanceRef.current = map;
@@ -960,14 +849,6 @@ export function InteractiveRouteMap({
               </a>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ============================================================ POI RESOLVER CHIP */}
-      {poiResolving && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-slate-950/90 text-white border border-slate-700/60 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-lg backdrop-blur-md animate-in fade-in duration-150">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-          <span>Resolving medical facility at map pin...</span>
         </div>
       )}
 
