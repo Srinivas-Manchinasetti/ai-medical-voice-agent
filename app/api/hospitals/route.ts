@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { INDIAN_HOSPITALS_DATASET, ALL_REGION_PRESETS, calculateDistanceKm, Hospital, getHospitalFamousFor } from "@/lib/hospitals-india-data";
 import { discoverHospitalsNearCoordinates } from "@/lib/care-network/osm-discovery";
+import { deduplicateAndMergeHospitals } from "@/lib/care-network/evaluator";
 
 export function calculateRealisticDriveTime(distanceKm: number): number {
   if (distanceKm <= 4) {
@@ -18,136 +19,6 @@ export function calculateRealisticDriveTime(distanceKm: number): number {
   }
 }
 
-export interface CategoryRule {
-  class: "emergency" | "elective";
-  label: string;
-  mustHaveKeywords: string[];
-  boostKeywords: string[];
-  actionType: "call_ed" | "call_hospital";
-}
-
-export const CATEGORY_RULES: Record<string, CategoryRule> = {
-  cardiology: {
-    class: "emergency",
-    label: "Cardiology",
-    mustHaveKeywords: ["cardio", "heart", "cath lab", "chest pain", "angioplasty"],
-    boostKeywords: ["cath lab", "icu", "coronary care", "24/7 er"],
-    actionType: "call_ed",
-  },
-  neurology: {
-    class: "emergency",
-    label: "Neurology & Stroke",
-    mustHaveKeywords: ["neuro", "stroke", "brain", "paralysis", "nimhans", "spine", "neurosurgery"],
-    boostKeywords: ["ct scan", "mri", "neuro icu", "thrombolysis", "be-fast"],
-    actionType: "call_ed",
-  },
-  pediatrics: {
-    class: "emergency",
-    label: "Pediatrics & Child Care",
-    mustHaveKeywords: ["pediatric", "child", "children", "nicu", "picu", "infant", "newborn", "rainbow", "ankura"],
-    boostKeywords: ["nicu", "picu", "pediatric emergency"],
-    actionType: "call_ed",
-  },
-  pulmonology: {
-    class: "emergency",
-    label: "Pulmonology & Respiratory",
-    mustHaveKeywords: ["pulmo", "respiratory", "lung", "asthma", "copd", "pneumonia"],
-    boostKeywords: ["ventilator", "respiratory icu", "24/7 er"],
-    actionType: "call_ed",
-  },
-  dermatology: {
-    class: "elective",
-    label: "Skin & Dermatology",
-    mustHaveKeywords: ["derma", "skin", "burns", "plastic surgery", "allergy", "cosmetic"],
-    boostKeywords: ["opd", "dermatology clinic", "skin specialist"],
-    actionType: "call_hospital",
-  },
-  burns: {
-    class: "emergency",
-    label: "Burns & Trauma",
-    mustHaveKeywords: ["burn", "burns", "plastic surgery", "trauma"],
-    boostKeywords: ["burn unit", "icu", "trauma er"],
-    actionType: "call_ed",
-  },
-  eye: {
-    class: "elective",
-    label: "Eye & Ophthalmology",
-    mustHaveKeywords: ["eye", "ophthal", "netra", "vision", "cataract", "retina", "lvpei", "glaucoma"],
-    boostKeywords: ["lasik", "retina clinic", "eye hospital"],
-    actionType: "call_hospital",
-  },
-  dental: {
-    class: "elective",
-    label: "Dental & Maxillofacial",
-    mustHaveKeywords: ["dental", "tooth", "teeth", "maxillofacial", "oral", "dentist"],
-    boostKeywords: ["dental clinic", "oral surgery"],
-    actionType: "call_hospital",
-  },
-  ayurveda: {
-    class: "elective",
-    label: "Ayurveda & Traditional",
-    mustHaveKeywords: ["ayurved", "panchakarma", "herbal", "ayush", "naturopathy", "homeo"],
-    boostKeywords: ["panchakarma unit", "ayurvedic hospital"],
-    actionType: "call_hospital",
-  },
-  diabetes: {
-    class: "elective",
-    label: "Diabetes & Endocrinology",
-    mustHaveKeywords: ["diabet", "endocrin", "insulin", "thyroid", "sugar"],
-    boostKeywords: ["diabetic foot care", "endocrinology opd"],
-    actionType: "call_hospital",
-  },
-  cancer: {
-    class: "elective",
-    label: "Oncology & Cancer Care",
-    mustHaveKeywords: ["cancer", "oncol", "tumor", "chemo", "radiation", "surgical oncology"],
-    boostKeywords: ["surgical oncology", "pet-ct", "radiation bunker", "tumor board"],
-    actionType: "call_hospital",
-  },
-  orthopedics: {
-    class: "emergency",
-    label: "Orthopedics & Joint Trauma",
-    mustHaveKeywords: ["ortho", "bone", "fracture", "joint", "trauma", "spine"],
-    boostKeywords: ["joint replacement", "trauma er", "icu"],
-    actionType: "call_ed",
-  },
-  maternity: {
-    class: "emergency",
-    label: "Maternity & Obstetrics",
-    mustHaveKeywords: ["matern", "gynec", "obstet", "delivery", "pregnancy", "labor", "nicu"],
-    boostKeywords: ["nicu", "labor delivery suite", "high-risk obstetrics"],
-    actionType: "call_ed",
-  },
-  kidney: {
-    class: "emergency",
-    label: "Kidney & Dialysis",
-    mustHaveKeywords: ["kidney", "renal", "dialysis", "nephro", "urol"],
-    boostKeywords: ["hemodialysis", "nephrology icu"],
-    actionType: "call_ed",
-  },
-  gastroenterology: {
-    class: "elective",
-    label: "Gastroenterology & Liver",
-    mustHaveKeywords: ["gastro", "liver", "digestive", "endoscopy", "stomach", "hepat"],
-    boostKeywords: ["endoscopy suite", "liver transplant"],
-    actionType: "call_hospital",
-  },
-  ent: {
-    class: "elective",
-    label: "ENT & Head-Neck",
-    mustHaveKeywords: ["ent", "ear", "nose", "throat", "audiol", "sinus"],
-    boostKeywords: ["audiology", "micro-ear surgery"],
-    actionType: "call_hospital",
-  },
-  emergency: {
-    class: "emergency",
-    label: "Emergency & Trauma",
-    mustHaveKeywords: ["emergency", "trauma", "critical", "resuscitation", "casualty", "icu"],
-    boostKeywords: ["level-1 trauma", "24/7 er", "resuscitation bay"],
-    actionType: "call_ed",
-  },
-};
-
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -160,10 +31,8 @@ export async function GET(request: Request) {
     const patientLatParam = searchParams.get("patientLat") ? parseFloat(searchParams.get("patientLat")!) : null;
     const patientLngParam = searchParams.get("patientLng") ? parseFloat(searchParams.get("patientLng")!) : null;
 
-    const specialtyFilter = searchParams.get("specialty")?.toLowerCase().trim() || "";
     const searchFilter = searchParams.get("query")?.toLowerCase().trim() || "";
     const cityFilter = searchParams.get("city")?.toLowerCase().trim() || "";
-    const urgencyLevel = searchParams.get("urgency")?.toLowerCase().trim() || "all";
 
     const latProvided = rawLat !== null && rawLat.trim() !== "";
     const lngProvided = rawLng !== null && rawLng.trim() !== "";
@@ -204,18 +73,23 @@ export async function GET(request: Request) {
       );
     }
 
-    let refLat: number;
-    let refLng: number;
-    let locationContext: { type: "gps" | "city"; label: string };
+    // Determine reference coordinates (search center)
+    let refLat = userLat ?? 0;
+    let refLng = userLng ?? 0;
+    let locationContext: { type: string; label: string } = {
+      type: latProvided ? "coordinates" : "default",
+      label: latProvided ? `GPS (${refLat.toFixed(4)}°, ${refLng.toFixed(4)}°)` : "No location",
+    };
 
-    if (latProvided && lngProvided && userLat !== null && userLng !== null) {
-      refLat = userLat;
-      refLng = userLng;
-      locationContext = { type: "gps", label: "Live Location" };
-    } else {
+    // City/Query text search → resolve to coordinates
+    if (hasCitySearch) {
       const q = (cityFilter || searchFilter).toLowerCase().trim();
-      const matchedCity =
-        ALL_REGION_PRESETS.find((p) => p.name.toLowerCase() === q || p.label.toLowerCase().includes(q)) ||
+
+      const matchedPreset = ALL_REGION_PRESETS.find(
+        (p) => p.name.toLowerCase() === q || p.label.toLowerCase().includes(q)
+      );
+
+      const matchedCity = matchedPreset ||
         INDIAN_HOSPITALS_DATASET.find(
           (h) => h.city.toLowerCase() === q || h.address.toLowerCase().includes(q)
         );
@@ -276,11 +150,8 @@ export async function GET(request: Request) {
       return d <= 65;
     });
 
-    const existingNames = new Set(localCandidates.map((h) => h.name.toLowerCase().trim()));
-    const freshRegistry = nearbyRegistry.filter((h) => !existingNames.has(h.name.toLowerCase().trim()));
-
-    // Combine local discovered + nearby registry
-    let hospitals = [...localCandidates, ...freshRegistry];
+    // Combine local discovered + nearby registry (raw, pre-dedup)
+    let hospitals = [...localCandidates, ...nearbyRegistry];
 
     // Fallback: If no facilities found within 65km (e.g. rural area or rate limit), use closest regional hubs
     if (hospitals.length === 0) {
@@ -292,160 +163,16 @@ export async function GET(request: Request) {
       hospitals = sortedByProximity.slice(0, 10);
     }
 
-    // STEP 1: CATEGORY SPEC EVALUATION & MUST-HAVE MATCHING
-    const rule = specialtyFilter && specialtyFilter !== "all" ? CATEGORY_RULES[specialtyFilter] : null;
-    const isCategoryFilterActive = Boolean(rule);
+    // ─── DEDUPLICATION: Multi-signal merge (canonical name + 350m geo proximity) ───
+    hospitals = deduplicateAndMergeHospitals(hospitals);
 
-    interface EvaluatedHospital extends Hospital {
-      dist: number;
-      etaMinutes: number;
-      isSpecialtyMatch: boolean;
-      specialtyScore: number;
-      matchTier: "verified" | "inferred" | "fallback";
-      matchedCategory: string;
-      isFallback: boolean;
-      actionType: "call_ed" | "call_hospital";
-      matchReasons: string[];
-    }
-
-    const evaluatedHospitals: EvaluatedHospital[] = hospitals.map((h) => {
+    // ─── ENRICH: Add distance, ETA, and famousFor to every hospital ───
+    // NOTE: NO specialty filtering here. The full enriched dataset is returned.
+    //       Client-side useMemo handles specialty evaluation & ranking instantly.
+    const enrichedHospitals = hospitals.map((h) => {
       const dist = calculateDistanceKm(originLat, originLng, h.latitude, h.longitude);
       const etaMinutes = calculateRealisticDriveTime(dist);
-      const matchReasons: string[] = [];
-
-      const hospName = h.name.toLowerCase();
-      const hospSpecs = (h.specialty || []).map((s) => s.toLowerCase());
-      const famousFor = ((h as any).famousFor || getHospitalFamousFor(h)).toLowerCase();
-      const capabilities = ((h as any).capabilities || []).map((c: string) => c.toLowerCase());
-      const allText = `${hospName} ${hospSpecs.join(" ")} ${famousFor} ${capabilities.join(" ")}`;
-
-      let isSpecialtyMatch = false;
-      let specialtyScore = 0;
-
-      if (rule) {
-        // Must-have keyword verification
-        const hasMustHave = rule.mustHaveKeywords.some((kw) => allText.includes(kw));
-
-        if (hasMustHave) {
-          isSpecialtyMatch = true;
-          specialtyScore = 40;
-
-          // Check boost keywords (e.g. ICU, Cath Lab, NICU, Ventilator, etc.)
-          for (const bkw of rule.boostKeywords) {
-            if (allText.includes(bkw)) {
-              specialtyScore += 5;
-            }
-          }
-
-          matchReasons.push(`Matched: ${rule.label}`);
-        }
-      } else {
-        // When filter is "all", all 24/7 ERs and accredited hospitals match general care
-        isSpecialtyMatch = true;
-        specialtyScore = h.isEmergency24x7 ? 30 : 20;
-        matchReasons.push(h.isEmergency24x7 ? "24/7 Emergency Care" : "Specialty Care");
-      }
-
-      // Check tier
-      let matchTier: "verified" | "inferred" | "fallback" = "inferred";
-      if (!isSpecialtyMatch && isCategoryFilterActive) {
-        matchTier = "fallback";
-      } else if (h.sourceType === "official_registry" || (h.accreditation && h.accreditation.length > 0)) {
-        matchTier = "verified";
-      }
-
-      const isFallback = isCategoryFilterActive && !isSpecialtyMatch;
-      const actionType = rule ? rule.actionType : (h.isEmergency24x7 ? "call_ed" : "call_hospital");
-
-      if (h.isEmergency24x7) {
-        matchReasons.push("24/7 Emergency Department");
-      }
-      if (h.accreditation && h.accreditation.length > 0) {
-        matchReasons.push(`${h.accreditation.join(" & ")} Accredited`);
-      }
-      matchReasons.push(`${dist.toFixed(1)} km away · ~${etaMinutes}m drive`);
-      if (h.acceptsPublicInsurance) {
-        matchReasons.push("Ayushman / PM-JAY Empanelled");
-      }
-
-      return {
-        ...h,
-        dist,
-        etaMinutes,
-        isSpecialtyMatch,
-        specialtyScore,
-        matchTier,
-        matchedCategory: isFallback ? "Nearest 24/7 ER (Emergency Fallback)" : (rule ? rule.label : "General Care"),
-        isFallback,
-        actionType,
-        matchReasons,
-      };
-    });
-
-    // STEP 2: CATEGORY FALLBACK DETECTION & RANKING
-    let matchedFacilities = evaluatedHospitals.filter((h) => h.isSpecialtyMatch);
-    const nonMatchedFacilities = evaluatedHospitals.filter((h) => !h.isSpecialtyMatch);
-
-    let categoryFallback = false;
-    let fallbackBanner: string | null = null;
-
-    if (isCategoryFilterActive && matchedFacilities.length === 0) {
-      categoryFallback = true;
-      fallbackBanner = `No verified ${rule!.label} facility confirmed nearby. Showing nearest accredited 24/7 ERs for emergency care.`;
-      
-      // Fallback ranking: prioritize 24/7 ERs by distance
-      matchedFacilities = nonMatchedFacilities.map((h) => ({
-        ...h,
-        isFallback: true,
-        matchTier: "fallback" as const,
-        matchedCategory: "Nearest 24/7 ER",
-        actionType: "call_ed" as const,
-        matchReasons: [
-          `No confirmed ${rule!.label} facility nearby`,
-          "Nearest 24/7 emergency facility for stabilization",
-        ],
-      }));
-    }
-
-    // Rank matching facilities
-    if (rule?.class === "elective") {
-      // Elective care: sort by specialtyScore (desc), rating (desc), then distance (asc)
-      matchedFacilities.sort((a, b) => {
-        if (b.specialtyScore !== a.specialtyScore) return b.specialtyScore - a.specialtyScore;
-        const rA = a.rating || 4.0;
-        const rB = b.rating || 4.0;
-        if (rB !== rA) return rB - rA;
-        return a.dist - b.dist;
-      });
-    } else {
-      // Emergency care: prioritize 24/7 ER first, then proximity
-      matchedFacilities.sort((a, b) => {
-        const erA = a.isEmergency24x7 ? 1 : 0;
-        const erB = b.isEmergency24x7 ? 1 : 0;
-        if (erA !== erB) return erB - erA;
-        return a.dist - b.dist;
-      });
-    }
-
-    // Secondary non-matching facilities sorted by distance
-    nonMatchedFacilities.sort((a, b) => a.dist - b.dist);
-
-    const orderedPool = categoryFallback
-      ? matchedFacilities
-      : [...matchedFacilities, ...nonMatchedFacilities];
-
-    const sortedHospitals = orderedPool.map((h, idx) => {
-      const rank = idx + 1;
       const famousFor = (h as any).famousFor || getHospitalFamousFor(h);
-
-      let matchLabel = "FACILITY DIRECTORY";
-      if (h.isFallback) {
-        matchLabel = "24/7 ER FALLBACK";
-      } else if (rank === 1) {
-        matchLabel = "BEST MATCH";
-      } else if (h.isSpecialtyMatch) {
-        matchLabel = "SPECIALTY MATCH";
-      }
 
       return {
         id: h.id,
@@ -466,35 +193,46 @@ export async function GET(request: Request) {
         rating: h.rating,
         accreditation: h.accreditation,
         cancerSpecialistsAvailable: h.cancerSpecialistsAvailable,
-        distanceKm: h.dist,
-        etaMinutes: h.etaMinutes,
+        sourceType: h.sourceType,
+        distanceKm: parseFloat(dist.toFixed(1)),
+        etaMinutes,
         hasDistanceContext: true,
         distanceSource: locationContext.type,
-        isEligible: !h.isFallback,
-        rank,
-        matchTier: h.matchTier,
-        matchedCategory: h.matchedCategory,
-        isFallback: h.isFallback,
-        actionType: h.actionType,
-        matchLabel,
-        matchReasons: h.matchReasons,
+        // Placeholder fields — client fills these via evaluateAndRankForSpecialty()
+        isEligible: true,
+        rank: 0,
+        matchTier: "inferred" as const,
+        matchedCategory: "General Care",
+        isFallback: false,
+        actionType: (h.isEmergency24x7 ? "call_ed" : "call_hospital") as "call_ed" | "call_hospital",
+        matchLabel: "FACILITY DIRECTORY",
+        matchReasons: [] as string[],
         googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${encodeURIComponent(
           `${h.name}, ${h.address}`
         )}`,
       };
     });
 
+    // Sort by distance as the default ordering
+    enrichedHospitals.sort((a, b) => a.distanceKm - b.distanceKm);
+
+    // Assign sequential ranks (default distance-based)
+    enrichedHospitals.forEach((h, idx) => {
+      h.rank = idx + 1;
+    });
+
     return NextResponse.json({
       status: "success",
-      count: sortedHospitals.length,
-      categoryFallback,
-      fallbackBanner,
-      categoryClass: rule ? rule.class : "emergency",
-      categoryLabel: rule ? rule.label : "All Hospitals & 24/7 ERs",
+      count: enrichedHospitals.length,
+      // No specialty evaluation server-side; client does this locally
+      categoryFallback: false,
+      fallbackBanner: null,
+      categoryClass: "emergency",
+      categoryLabel: "All Hospitals & 24/7 ERs",
       locationContext,
       userLocationDetected: latProvided && lngProvided,
       userCoordinates: { lat: refLat, lng: refLng },
-      hospitals: sortedHospitals,
+      hospitals: enrichedHospitals,
     });
   } catch (error: any) {
     console.error("[HospitalsRouteError]", error);

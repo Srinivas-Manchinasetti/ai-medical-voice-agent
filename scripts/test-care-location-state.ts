@@ -79,7 +79,7 @@ async function runLocationStateSuite() {
     const data = await res.json();
     assert(data.status === "success", "Response returns status: success");
     assert(data.count > 0, `Hospitals found near Bangalore: ${data.count}`);
-    assert(data.locationContext.type === "gps", "User location context marked as gps");
+    assert(data.locationContext.type === "coordinates", "User location context marked as coordinates");
   }
 
   // 6. Explicit city query succeeds without coordinates

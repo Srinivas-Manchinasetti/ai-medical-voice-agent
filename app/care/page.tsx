@@ -37,6 +37,7 @@ import {
   MedicalIssueOption,
   getHospitalFamousFor,
 } from "@/lib/hospitals-india-data";
+import { evaluateAndRankForSpecialty } from "@/lib/care-network/evaluator";
 
 // Leaflet map dynamically imported with SSR disabled
 const InteractiveRouteMap = dynamic(
@@ -73,12 +74,8 @@ const STORAGE_KEY = "medvoice_care_origin";
 const PAGE_SIZE = 10;
 
 export default function CarePage() {
-  const [hospitals, setHospitals] = useState<HospitalItem[]>([]);
+  const [rawHospitals, setRawHospitals] = useState<HospitalItem[]>([]);
   const [userSelectedId, setUserSelectedId] = useState<string | null>(null);
-  const [categoryFallback, setCategoryFallback] = useState<boolean>(false);
-  const [fallbackBanner, setFallbackBanner] = useState<string | null>(null);
-  const [categoryLabel, setCategoryLabel] = useState<string>("All Hospitals & 24/7 ERs");
-  const [categoryClass, setCategoryClass] = useState<"emergency" | "elective">("emergency");
   const [showAllInRanked, setShowAllInRanked] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -249,7 +246,7 @@ export default function CarePage() {
     const nextStatus: LocationStatus =
       savedSuggestion.source === "gps" ? "LOCATION_RESOLVED" : "LOCATION_MANUALLY_SELECTED";
     setLocationStatus(nextStatus);
-    loadFacilities(savedSuggestion, savedSuggestion, specialtyFilter);
+    loadFacilities(savedSuggestion, savedSuggestion);
   };
 
   // User dismissal of saved suggestion
@@ -267,10 +264,8 @@ export default function CarePage() {
     setUserLocation(null);
     setSearchRegion(null);
     setLocationStatus("LOCATION_UNKNOWN");
-    setHospitals([]);
+    setRawHospitals([]);
     setUserSelectedId(null);
-    setCategoryFallback(false);
-    setFallbackBanner(null);
     setLiveRoadStats(null);
     setIsChoosingCity(false);
   };
@@ -279,8 +274,7 @@ export default function CarePage() {
   // STRICTLY GATED: Cannot run unless departureOrigin and targetRegion have valid numeric coordinates
   const loadFacilities = async (
     targetRegion: CareOrigin,
-    departureOrigin: CareOrigin,
-    targetSpecialty?: string
+    departureOrigin: CareOrigin
   ) => {
     if (
       !targetRegion ||
@@ -297,20 +291,16 @@ export default function CarePage() {
     setLoading(true);
     setCurrentPage(1);
     try {
-      const activeSpec = targetSpecialty !== undefined ? targetSpecialty : specialtyFilter;
-      const specialtyParam = activeSpec && activeSpec !== "all" ? `&specialty=${encodeURIComponent(activeSpec)}` : "";
+      // Fetch ALL hospitals for this location — NO specialty param.
+      // Specialty evaluation happens locally via useMemo (instant, zero latency).
       const res = await fetch(
-        `/api/hospitals?lat=${targetRegion.lat}&lng=${targetRegion.lng}&patientLat=${departureOrigin.lat}&patientLng=${departureOrigin.lng}${specialtyParam}`
+        `/api/hospitals?lat=${targetRegion.lat}&lng=${targetRegion.lng}&patientLat=${departureOrigin.lat}&patientLng=${departureOrigin.lng}`
       );
       if (res.ok) {
         const data = await res.json();
-        setCategoryFallback(Boolean(data.categoryFallback));
-        setFallbackBanner(data.fallbackBanner || null);
-        setCategoryLabel(data.categoryLabel || "All Hospitals & 24/7 ERs");
-        setCategoryClass(data.categoryClass || "emergency");
         if (data.hospitals && data.hospitals.length > 0) {
           const list: HospitalItem[] = data.hospitals;
-          setHospitals(list);
+          setRawHospitals(list);
           setUserSelectedId(null);
           const first = list[0] || null;
           if (first) {
@@ -320,7 +310,7 @@ export default function CarePage() {
             });
           }
         } else {
-          setHospitals([]);
+          setRawHospitals([]);
           setUserSelectedId(null);
           setLiveRoadStats(null);
         }
@@ -348,20 +338,8 @@ export default function CarePage() {
     }
   };
 
-  // Load facilities when specialty filter changes ONLY if location is already resolved/manually selected
-  useEffect(() => {
-    if (
-      (locationStatus === "LOCATION_RESOLVED" || locationStatus === "LOCATION_MANUALLY_SELECTED") &&
-      userLocation &&
-      searchRegion &&
-      Number.isFinite(userLocation.lat) &&
-      Number.isFinite(userLocation.lng) &&
-      Number.isFinite(searchRegion.lat) &&
-      Number.isFinite(searchRegion.lng)
-    ) {
-      loadFacilities(searchRegion, userLocation, specialtyFilter);
-    }
-  }, [specialtyFilter]);
+  // NOTE: No useEffect([specialtyFilter]) — specialty changes are handled
+  //       entirely by the useMemo below (instant, zero network requests).
 
   // Handle GPS detection: strictly user-initiated
   const handleDetectLiveLocation = () => {
@@ -412,7 +390,7 @@ export default function CarePage() {
       setLocationStatus("LOCATION_RESOLVED");
       setIsDetectingGps(false);
       setSearchQuery("");
-      loadFacilities(newGpsOrigin, newGpsOrigin, specialtyFilter);
+      loadFacilities(newGpsOrigin, newGpsOrigin);
     };
 
     const onLocationError = (err: GeolocationPositionError) => {
@@ -445,7 +423,7 @@ export default function CarePage() {
     setUserLocation(chosenOrigin);
     setSearchRegion(chosenOrigin);
     setLocationStatus("LOCATION_MANUALLY_SELECTED");
-    loadFacilities(chosenOrigin, chosenOrigin, specialtyFilter);
+    loadFacilities(chosenOrigin, chosenOrigin);
   };
 
   // Handle Search Input Autocomplete
@@ -503,7 +481,7 @@ export default function CarePage() {
     setUserLocation(chosenOrigin);
     setSearchRegion(chosenOrigin);
     setLocationStatus("LOCATION_MANUALLY_SELECTED");
-    loadFacilities(chosenOrigin, chosenOrigin, specialtyFilter);
+    loadFacilities(chosenOrigin, chosenOrigin);
   };
 
   const handleConfirmManualLocation = async (lat: number, lng: number) => {
@@ -542,18 +520,37 @@ export default function CarePage() {
     setUserLocation(newOrigin);
     setSearchRegion(newOrigin);
     setLocationStatus("LOCATION_MANUALLY_SELECTED");
-    loadFacilities(newOrigin, newOrigin, specialtyFilter);
+    loadFacilities(newOrigin, newOrigin);
   };
 
   const handleSetRegionAsDeparture = () => {
     if (searchRegion) {
-      loadFacilities(searchRegion, searchRegion, specialtyFilter);
+      loadFacilities(searchRegion, searchRegion);
     }
   };
 
-  // Filter & Sort Hospitals: Prioritize specialized facilities first when a medical issue is selected
+  // ─── LOCAL SPECIALTY EVALUATION (instant, zero network requests) ───────────
+  // evaluateAndRankForSpecialty runs the same CATEGORY_RULES matching that was
+  // previously done server-side, but now executes in useMemo on rawHospitals.
+  // Changing specialtyFilter → instant re-rank, no "0 MATCHING FACILITIES" flicker.
+  const evaluationResult = useMemo(() => {
+    if (rawHospitals.length === 0) {
+      return {
+        ranked: [] as HospitalItem[],
+        categoryFallback: false,
+        fallbackBanner: null as string | null,
+        categoryLabel: "All Hospitals & 24/7 ERs",
+        categoryClass: "emergency",
+      };
+    }
+    return evaluateAndRankForSpecialty(rawHospitals, specialtyFilter);
+  }, [rawHospitals, specialtyFilter]);
+
+  const { categoryFallback, fallbackBanner, categoryLabel, categoryClass } = evaluationResult;
+
+  // Filter & Sort: Apply ownership filter and sort on top of evaluated results
   const filteredAndSortedHospitals = useMemo(() => {
-    let list = [...hospitals];
+    let list = [...evaluationResult.ranked];
 
     // Ownership filter
     if (ownershipFilter === "government") {
@@ -599,7 +596,7 @@ export default function CarePage() {
       ...h,
       rank: idx + 1,
     }));
-  }, [hospitals, ownershipFilter, sortBy, specialtyFilter]);
+  }, [evaluationResult.ranked, ownershipFilter, sortBy, specialtyFilter]);
 
   // Primary recommended facility (#1)
   const recommendedHospital = useMemo(() => {

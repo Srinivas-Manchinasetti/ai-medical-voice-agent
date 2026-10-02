@@ -225,14 +225,15 @@ export function InteractiveRouteMap({
       return L.divIcon({
         className: "custom-hospital-marker",
         html: `
-          <div style="position:relative; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-            <div style="width:24px; height:24px; border-radius:50%; background:${bgCol}; border:2px solid ${borderCol}; box-shadow:0 2px 6px rgba(0,0,0,0.15); display:flex; align-items:center; justify-content:center; color:${textCol}; font-weight:700; font-size:11px; font-family:system-ui,-apple-system,sans-serif;">
+          <div style="position:relative; width:${isFirst ? "34px" : "28px"}; height:${isFirst ? "34px" : "28px"}; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+            ${isFirst ? `<div style="position:absolute; top:-14px; background:#0F6B6D; color:#FFFFFF; font-size:8px; font-weight:800; padding:1px 5px; border-radius:4px; white-space:nowrap; letter-spacing:0.3px; box-shadow:0 1px 4px rgba(15,107,109,0.35);">RECOMMENDED</div>` : ""}
+            <div style="width:${isFirst ? "26px" : "24px"}; height:${isFirst ? "26px" : "24px"}; border-radius:50%; background:${bgCol}; border:${isFirst ? "2.5px" : "2px"} solid ${borderCol}; box-shadow:0 2px 6px rgba(0,0,0,0.18); display:flex; align-items:center; justify-content:center; color:${textCol}; font-weight:800; font-size:11px; font-family:system-ui,-apple-system,sans-serif;">
               ${effectiveRank}
             </div>
           </div>
         `,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
+        iconSize: [isFirst ? 34 : 28, isFirst ? 34 : 28],
+        iconAnchor: [isFirst ? 17 : 14, isFirst ? 17 : 14],
       });
     }
 
@@ -280,6 +281,13 @@ export function InteractiveRouteMap({
           <span>~${etaNum} min</span>
         </div>
         <div style="color:#5A6B75; font-size:10.5px; line-height:1.35; margin-bottom:10px;">${hosp.address}</div>
+        <button
+          onclick="window.medvoiceSelectHospitalById && window.medvoiceSelectHospitalById('${hosp.id}')"
+          style="width:100%; text-align:center; background:#0F6B6D; color:#ffffff; font-weight:700; font-size:11.5px; padding:8px 10px; border-radius:8px; border:none; cursor:pointer; margin-bottom:6px; display:flex; align-items:center; justify-content:center; gap:5px;"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+          Select as Destination
+        </button>
         <div style="display:flex; gap:6px;">
           <a
             href="tel:${emergencyNum}"
