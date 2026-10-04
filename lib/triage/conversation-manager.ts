@@ -3,11 +3,12 @@ import { evaluatePreArbiter, PreArbiterResult } from "./pre-arbiter";
 import { CardiologyAgent } from "../agents/specialists/cardiology-agent";
 import { NeurologyAgent } from "../agents/specialists/neurology-agent";
 import { PediatricsAgent } from "../agents/specialists/pediatrics-agent";
+import { OtolaryngologyAgent } from "../agents/specialists/ent-agent";
 import { ConversationInterpreter } from "./conversation-interpreter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
-import { extractSubfieldState, extractNumericSeverity, NON_DENIABLE_SLOTS } from "./clinical-state";
+import { extractSubfieldState, extractNumericSeverity, NON_DENIABLE_SLOTS, parseOnsetDimensions } from "./clinical-state";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -23,6 +24,7 @@ export interface ConversationMemory {
   durationPattern?: string;
   riskFactors?: string;
   uncertainties: string[];
+  slotAskCount?: Record<string, number>;
 }
 
 export interface DomainSufficiencyStatus {
@@ -129,6 +131,7 @@ export class ConversationManager {
   private cardiology = new CardiologyAgent();
   private neurology = new NeurologyAgent();
   private pediatrics = new PediatricsAgent();
+  private ent = new OtolaryngologyAgent();
   private interpreter = new ConversationInterpreter();
 
   /**
@@ -273,33 +276,31 @@ export class ConversationManager {
 
       // B. ONSET, DURATION & ONSET PATTERN
       if (slot === "onset" || slot === "onset_pattern" || slot === "onset_time") {
-        const hasSudden = /\b(?:sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere|all\s+at\s+once)\b/i.test(textLower);
-        const hasGradual = /\b(?:gradual(?:ly)?|slowly|built\s+up|over\s+time|getting\s+worse|came\s+on\s+gradually)\b/i.test(textLower);
-        const timeMatch = textLower.match(/\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|an?\s+hour|twenty\s+minutes|thirty\s+minutes|this\s+morning|yesterday|a\s+week)\b/i);
+        const parsedOnset = parseOnsetDimensions(textLower);
 
         if (slot === "onset_pattern") {
-          if (hasSudden || hasGradual) {
+          if (parsedOnset.onsetPattern) {
             return {
               intent: "answer_question",
               resolvedSlot: "onset_pattern",
-              resolvedValue: hasSudden ? "sudden" : "gradual"
+              resolvedValue: parsedOnset.onsetPattern
             };
           }
         }
 
         if (slot === "onset_time") {
-          if (timeMatch) {
+          if (parsedOnset.onsetTime) {
             return {
               intent: "answer_question",
               resolvedSlot: "onset_time",
-              resolvedValue: timeMatch[0]
+              resolvedValue: parsedOnset.onsetTime
             };
           }
         }
 
-        if (timeMatch || hasSudden || hasGradual) {
-          let onsetVal = timeMatch ? timeMatch[0] : (hasSudden ? "sudden" : "gradual");
-          const acuteWorsening = /\b(?:worse|worsened|got\s+worse|severe\s+today|worse\s+suddenly)\b/i.test(textLower);
+        if (parsedOnset.onsetTime || parsedOnset.onsetPattern) {
+          const onsetVal = parsedOnset.onsetTime || parsedOnset.onsetPattern!;
+          const acuteWorsening = parsedOnset.acuteWorsening;
 
           return {
             intent: "answer_question",
@@ -362,6 +363,138 @@ export class ConversationManager {
         }
         if (/\b(?:rest|resting|sitting|couch|bed|sleep|out\s+of\s+nowhere|doing\s+nothing)\b/i.test(textLower)) {
           return { intent: "answer_question", resolvedSlot: "exertional", resolvedValue: "negative (occurs at rest)" };
+        }
+      }
+
+      // C.5 HEADACHE ONSET CHARACTER (thunderclap vs gradual, photophobia, phonophobia)
+      if (slot === "headache_onset_character") {
+        // Do not let an unrelated phrase such as "a sudden flash" overwrite an
+        // explicit gradual onset. parseOnsetDimensions is clause-aware.
+        const parsedOnset = parseOnsetDimensions(textLower);
+        const isSudden = parsedOnset.onsetPattern === "sudden";
+        const isGradual = parsedOnset.onsetPattern === "gradual";
+        const hasPhotophobia = /\b(?:photophob|sensitive\s+to\s+(?:bright\s+)?lights?|(?:bright\s+)?lights?\s+(?:bother|make|made|worsen)|lights?\s+(?:bother|makes?|made|worsen)|light\s+sensitivity)\b/i.test(textLower);
+        const hasPhonophobia = /\b(?:phonophob|sensitive\s+to\s+(?:loud\s+)?(?:sound|sounds|noise)|(?:loud\s+)?(?:sounds?|noise)\s+(?:bother|make|made|worsen)|sound\s+sensitivity)\b/i.test(textLower) || /\bsensitive\s+to\s+(?:bright\s+)?lights?\s+(?:or|and)\s+(?:loud\s+)?(?:sounds?|noise)\b/i.test(textLower);
+
+        if (isSudden || isGradual || hasPhotophobia || hasPhonophobia) {
+          const parts: string[] = [];
+          if (isSudden) parts.push("sudden onset (thunderclap character)");
+          if (isGradual) parts.push("gradual onset");
+          if (hasPhotophobia) parts.push("photophobia");
+          if (hasPhonophobia) parts.push("phonophobia");
+
+          // Also populate known_facts and conversationMemory
+          if (isSudden || isGradual) {
+            const onsetFact = isSudden ? "Onset: sudden (thunderclap)" : "Onset: gradual";
+            if (!state.slots.known_facts.includes(onsetFact)) {
+              state.slots.known_facts.push(onsetFact);
+            }
+            state.slots.onset_pattern = parsedOnset.onsetPattern;
+            state.slots.acute_worsening = parsedOnset.acuteWorsening;
+            if (!state.slots.known_facts.some(f => /^ONSET_TYPE:/i.test(f))) {
+              state.slots.known_facts.push(`ONSET_TYPE: ${parsedOnset.onsetPattern}`);
+            }
+          }
+          if (hasPhotophobia) {
+            const fact = "Associated: photophobia (light sensitivity)";
+            if (!state.slots.known_facts.includes(fact)) {
+              state.slots.known_facts.push(fact);
+            }
+            if (!state.slots.associated_symptoms.includes("photophobia")) {
+              state.slots.associated_symptoms.push("photophobia");
+            }
+          }
+          if (hasPhonophobia) {
+            const fact = "Associated: phonophobia (sound sensitivity)";
+            if (!state.slots.known_facts.includes(fact)) {
+              state.slots.known_facts.push(fact);
+            }
+            if (!state.slots.associated_symptoms.includes("phonophobia")) {
+              state.slots.associated_symptoms.push("phonophobia");
+            }
+          }
+
+          // Mark slot as resolved and advance
+          return {
+            intent: "answer_question",
+            resolvedSlot: "headache_onset_character",
+            resolvedValue: parts.join(", "),
+          };
+        }
+      }
+
+      // C.6 LEG / NERVE — RADIATION OR BACK (sciatic screening)
+      if (slot === "radiation_or_back") {
+        const hasBackOrigin = /\b(?:back|lower\s+back|hip|spine|butt(?:ock)?|sciatica|shoot(?:s|ing)?\s+down)\b/i.test(textLower);
+        const hasNumbness = /\b(?:numb|tingl|pins\s+and\s+needles|prickling|dead\s+feeling)\b/i.test(textLower);
+        const hasWeakness = /\b(?:weak|cannot\s+lift|can't\s+lift|drop\s+foot|drag|buckle|give\s+(?:out|way))\b/i.test(textLower);
+        const hasSudden = /\b(?:sudden(?:ly)?|abrupt(?:ly)?|all\s+(?:of\s+)?a\s+sudden|out\s+of\s+nowhere)\b/i.test(textLower);
+        const hasGradual = /\b(?:gradual(?:ly)?|built?\s+up|slowly|over\s+time)\b/i.test(textLower);
+        const hasDenial = /\b(?:no|not\s+from|doesn't|does\s+not|not\s+really|just\s+(?:in\s+)?(?:my\s+)?leg)\b/i.test(textLower) && !hasBackOrigin && !hasNumbness && !hasWeakness;
+
+        if (hasBackOrigin || hasNumbness || hasWeakness || hasSudden || hasGradual || hasDenial) {
+          const parts: string[] = [];
+          if (hasBackOrigin) parts.push("radiates from back/hip");
+          if (hasNumbness) parts.push("numbness/tingling present");
+          if (hasWeakness) parts.push("weakness reported");
+          if (hasSudden) parts.push("sudden onset");
+          if (hasGradual) parts.push("gradual onset");
+          if (hasDenial) parts.push("no radiation from back");
+
+          if (hasBackOrigin) {
+            const fact = "Pain radiates from back/hip (sciatic pattern)";
+            if (!state.slots.known_facts.includes(fact)) state.slots.known_facts.push(fact);
+          }
+          if (hasNumbness || hasWeakness) {
+            const fact = `Neurological: ${hasNumbness ? "numbness/tingling" : ""}${hasNumbness && hasWeakness ? " + " : ""}${hasWeakness ? "weakness" : ""}`;
+            if (!state.slots.known_facts.includes(fact)) state.slots.known_facts.push(fact);
+          }
+          if (hasSudden || hasGradual) {
+            state.slots.onset = hasSudden ? "sudden" : "gradual";
+          }
+
+          return {
+            intent: "answer_question",
+            resolvedSlot: "radiation_or_back",
+            resolvedValue: parts.join(", "),
+          };
+        }
+      }
+
+      // C.7 ABDOMINAL — ONSET AND LOCATION
+      if (slot === "onset_and_location") {
+        const locations: string[] = [];
+        if (/\b(?:upper|epigastr|above\s+(?:my\s+)?belly\s*button)\b/i.test(textLower)) locations.push("upper abdomen / epigastric");
+        if (/\b(?:lower|suprapubic|below\s+(?:my\s+)?belly\s*button|pelvi)\b/i.test(textLower)) locations.push("lower abdomen");
+        if (/\b(?:right\s+side|right\s+lower|rlq|appendix)\b/i.test(textLower)) locations.push("right lower quadrant");
+        if (/\b(?:left\s+side|left\s+lower|llq)\b/i.test(textLower)) locations.push("left lower quadrant");
+        if (/\b(?:right\s+upper|ruq|liver|gallbladder)\b/i.test(textLower)) locations.push("right upper quadrant");
+        if (/\b(?:left\s+upper|luq|spleen)\b/i.test(textLower)) locations.push("left upper quadrant");
+        if (/\b(?:all\s+over|everywhere|whole\s+(?:stomach|belly|abdomen)|diffuse|general(?:ized)?)\b/i.test(textLower)) locations.push("diffuse / generalized");
+        if (/\b(?:around\s+(?:my\s+)?(?:belly\s*button|navel|umbilicus)|periumbilical)\b/i.test(textLower)) locations.push("periumbilical");
+
+        const parsedOnset = parseOnsetDimensions(textLower);
+        const hasOnset = !!(parsedOnset.onsetTime || parsedOnset.onsetPattern);
+
+        if (locations.length > 0 || hasOnset) {
+          const parts: string[] = [];
+          if (locations.length > 0) parts.push(`Location: ${locations.join(", ")}`);
+          if (parsedOnset.onsetTime) parts.push(`Onset: ${parsedOnset.onsetTime}`);
+          if (parsedOnset.onsetPattern) parts.push(`Pattern: ${parsedOnset.onsetPattern}`);
+
+          if (locations.length > 0) {
+            const locFact = `Abdominal location: ${locations.join(", ")}`;
+            if (!state.slots.known_facts.includes(locFact)) state.slots.known_facts.push(locFact);
+          }
+          if (parsedOnset.onsetTime || parsedOnset.onsetPattern) {
+            state.slots.onset = parsedOnset.onsetTime || parsedOnset.onsetPattern || "";
+          }
+
+          return {
+            intent: "answer_question",
+            resolvedSlot: "onset_and_location",
+            resolvedValue: parts.join("; "),
+          };
         }
       }
 
@@ -540,14 +673,16 @@ export class ConversationManager {
 
     // Catastrophic life threats that immediately preempt normal history taking:
     const hasEmergencyPreemptionFlag = preArbiterResult.pre_safety_flags.some(f =>
+      f === "PRE_FLAG_ACUTE_CHEST_PAIN" ||
       f === "PRE_FLAG_ACUTE_NEUROLOGIC_DEFICIT" ||
       f === "PRE_FLAG_IMMEDIATE_AIRWAY_FAILURE" ||
+      f === "PRE_FLAG_DEEP_NECK_INFECTION_OR_PTA" ||
       f === "PRE_FLAG_ACS_RADIATION_OR_DIAPHORESIS" ||
       f === "PRE_FLAG_PEDIATRIC_CRISIS" ||
       f === "PRE_FLAG_ACOUSTIC_SEVERE_RESPIRATORY_DISTRESS"
     ) || /\b(unconscious|unresponsive|not\s+breathing|cardiac\s+arrest|collapsed)\b/i.test(state.cumulativeTranscript);
 
-    if (hasEmergencyPreemptionFlag) {
+    if (hasEmergencyPreemptionFlag || state.informationState === "emergency_preempted") {
       // Opportunistic extraction before emergency preemption
       this.extractOpportunisticFacts(state);
 
@@ -688,9 +823,6 @@ export class ConversationManager {
             if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_pattern")) {
               state.conversationMemory.questionsAlreadyAsked.push("onset_pattern");
             }
-            if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
-              state.conversationMemory.questionsAlreadyAsked.push("onset");
-            }
           }
         } else if (slot === "onset_time") {
           state.slots.onset = String(val);
@@ -700,25 +832,17 @@ export class ConversationManager {
             if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_time")) {
               state.conversationMemory.questionsAlreadyAsked.push("onset_time");
             }
-            if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
-              state.conversationMemory.questionsAlreadyAsked.push("onset");
-            }
           }
         } else {
           (state.slots as any)[slot] = val;
           state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
           if (slot === "onset") {
-            if (/sudden/i.test(String(val))) {
-              state.slots.acute_worsening = true;
-              (state.slots as any).onset_pattern = "sudden";
+            const parsed = parseOnsetDimensions(String(val));
+            if (parsed.onsetPattern) {
+              state.slots.acute_worsening = parsed.acuteWorsening;
+              (state.slots as any).onset_pattern = parsed.onsetPattern;
               if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
-                state.slots.known_facts.push("ONSET_TYPE: sudden");
-              }
-            } else if (/gradual/i.test(String(val))) {
-              state.slots.acute_worsening = false;
-              (state.slots as any).onset_pattern = "gradual";
-              if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
-                state.slots.known_facts.push("ONSET_TYPE: gradual");
+                state.slots.known_facts.push(`ONSET_TYPE: ${parsed.onsetPattern}`);
               }
             }
           }
@@ -1044,9 +1168,6 @@ export class ConversationManager {
           if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_pattern")) {
             state.conversationMemory.questionsAlreadyAsked.push("onset_pattern");
           }
-          if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
-            state.conversationMemory.questionsAlreadyAsked.push("onset");
-          }
         }
       } else if (slot === "onset_time") {
         state.slots.onset = String(val);
@@ -1056,25 +1177,17 @@ export class ConversationManager {
           if (!state.conversationMemory.questionsAlreadyAsked.includes("onset_time")) {
             state.conversationMemory.questionsAlreadyAsked.push("onset_time");
           }
-          if (!state.conversationMemory.questionsAlreadyAsked.includes("onset")) {
-            state.conversationMemory.questionsAlreadyAsked.push("onset");
-          }
         }
       } else {
         (state.slots as any)[slot] = val;
         state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
         if (slot === "onset") {
-          if (/sudden/i.test(String(val))) {
-            state.slots.acute_worsening = true;
-            (state.slots as any).onset_pattern = "sudden";
+          const parsed = parseOnsetDimensions(String(val));
+          if (parsed.onsetPattern) {
+            state.slots.acute_worsening = parsed.acuteWorsening;
+            (state.slots as any).onset_pattern = parsed.onsetPattern;
             if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
-              state.slots.known_facts.push("ONSET_TYPE: sudden");
-            }
-          } else if (/gradual/i.test(String(val))) {
-            state.slots.acute_worsening = false;
-            (state.slots as any).onset_pattern = "gradual";
-            if (!state.slots.known_facts.some(f => f.startsWith("ONSET_TYPE:"))) {
-              state.slots.known_facts.push("ONSET_TYPE: gradual");
+              state.slots.known_facts.push(`ONSET_TYPE: ${parsed.onsetPattern}`);
             }
           }
         }
@@ -1139,20 +1252,40 @@ export class ConversationManager {
     const cardioRequests = this.cardiology.assessEvidenceNeeds(patientCase);
     const neuroRequests = this.neurology.assessEvidenceNeeds(patientCase);
     const pedsRequests = this.pediatrics.assessEvidenceNeeds(patientCase);
+    const entRequests = this.ent.assessEvidenceNeeds(patientCase);
 
     // Merge new active requests avoiding duplicates
-    const allSpecialistRequests = [...cardioRequests, ...neuroRequests, ...pedsRequests];
+    const allSpecialistRequests = [...cardioRequests, ...neuroRequests, ...pedsRequests, ...entRequests];
     allSpecialistRequests.forEach(newReq => {
       const alreadyResolved = state.resolvedQuestions.some(q => q.resolvedSlot === newReq.targetSlot);
       const alreadyPending = state.agentRequests.some(r => r.targetSlot === newReq.targetSlot && r.status === "pending");
       const slotAlreadyHasValue = Boolean((state.slots as any)[newReq.targetSlot]);
+      const isDenied = Boolean(
+        state.conversationMemory?.deniedSymptoms?.some(s =>
+          s.toLowerCase() === newReq.targetSlot.toLowerCase() ||
+          (newReq.targetSlot === "fever" && s.toLowerCase().includes("fever")) ||
+          (newReq.targetSlot === "swallowing_difficulty" && s.toLowerCase().includes("swallow"))
+        )
+      );
+      const isDeniedInFacts = state.slots.known_facts.some(f =>
+        f.toLowerCase().includes(`denied: ${newReq.targetSlot.toLowerCase()}`) ||
+        (newReq.targetSlot === "fever" && f.toLowerCase().includes("denied: fever"))
+      );
 
-      if (!alreadyResolved && !alreadyPending && !slotAlreadyHasValue) {
+      if (!alreadyResolved && !alreadyPending && !slotAlreadyHasValue && !isDenied && !isDeniedInFacts) {
         state.agentRequests.push(newReq);
       }
     });
 
     // Update domain sufficiency states
+    if (!state.domainSufficiency) {
+      state.domainSufficiency = {
+        general: { status: "gathering", missing: ["onset", "character"] },
+        cardiology: { status: "inactive", missing: [] },
+        neurology: { status: "inactive", missing: [] },
+        pediatrics: { status: "inactive", missing: [] },
+      };
+    }
     const hasChest = /\b(chest|heart|sternum|angina|pressure|tightness)\b/i.test(state.cumulativeTranscript);
     const hasNeuro = /\b(headache|dizz|droop|weak|numb|speech)\b/i.test(state.cumulativeTranscript);
     const hasPeds = typeof demographics.age === "number" && demographics.age < 16;
@@ -1192,9 +1325,58 @@ export class ConversationManager {
       state.domainSufficiency.neurology = { status: "inactive", missing: [] };
     }
 
+    // General / Ambulatory sufficiency evaluation (specifically for fatigue / constitutional complaints):
+    const hasFatigue = /\b(tired|fatigue|exhaust|malaise|weakness|low energy)\b/i.test(state.cumulativeTranscript) ||
+      state.slots.known_facts.some(f => /tired|fatigue/i.test(f));
+    const subfields = extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory);
+
+    if (hasFatigue && !hasChest && !hasNeuro) {
+      const generalMissing: string[] = [];
+      if (!state.slots.onset && !subfields.onset.duration) generalMissing.push("onset");
+      if (!state.slots.severity && !state.slots.known_facts.some(f => /severity|\d+\/10|hard to get out of bed/i.test(f))) generalMissing.push("severity");
+      const hasAssociatedScreened = state.slots.associated_symptoms.length > 0 ||
+        state.slots.known_facts.some(f => /denied:.*fever|fever|cough|dizziness|lightheaded|no fever/i.test(f));
+      if (!hasAssociatedScreened) generalMissing.push("associated_symptoms");
+
+      const hasIntakeOrRedFlagsScreened = state.slots.known_facts.some(f => /water|eat|intake|fluid/i.test(f)) ||
+        state.slots.known_facts.some(f => /no chest pain|chest pain denied/i.test(f)) ||
+        state.slots.known_facts.length >= 6;
+
+      const generalSuff = (state.slots.onset !== undefined || subfields.onset.duration !== undefined) &&
+        (state.slots.severity !== undefined || state.slots.known_facts.some(f => /severity|\d+\/10|hard to get out of bed/i.test(f))) &&
+        hasAssociatedScreened &&
+        hasIntakeOrRedFlagsScreened;
+
+      state.domainSufficiency.general = {
+        status: generalSuff ? "sufficient" : "gathering",
+        missing: generalMissing
+      };
+    } else {
+      state.domainSufficiency.general = { status: "inactive", missing: [] };
+    }
+
     // --- STEP 4: NEXT-ACTION POLICY SELECTION ---
+    // If the consultation was ALREADY decided in a previous turn and patient asks a follow-up question:
+    if (state.phase === "decided") {
+      const decision = clinicalDecisionEngine.decideNextAction(
+        clinicalDecisionEngine.classifyTurn(cleanMsg, state),
+        state,
+        preArbiterResult,
+        localeConfig
+      );
+      return {
+        action: "ASK_PATIENT",
+        doctorReply: decision.spokenDoctorReply,
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead",
+        state,
+        preArbiterResult
+      };
+    }
+
     // A. Check if active domains are sufficient for decision
     const activeDomains = [
+      state.domainSufficiency.general,
       state.domainSufficiency.cardiology,
       state.domainSufficiency.neurology
     ].filter(d => d.status !== "inactive");
@@ -1204,7 +1386,8 @@ export class ConversationManager {
     // Comprehensive presentation bypass (e.g. benchmark vignettes)
     const isComprehensivePresentation =
       (hasChest && state.slots.onset && state.slots.character && (state.slots.radiation || state.slots.associated_symptoms.length > 0)) ||
-      (hasNeuro && state.slots.neurological_signs.length >= 2 && state.slots.onset);
+      (hasNeuro && state.slots.neurological_signs.length >= 2 && state.slots.onset) ||
+      (hasFatigue && (state.slots.onset || subfields.onset.isResolved) && (state.slots.severity || state.slots.known_facts.some(f => /severity|\d+\/10/i.test(f))) && state.slots.known_facts.length >= 4);
 
     if (allActiveSufficient || isComprehensivePresentation) {
       state.phase = "decided";
@@ -1242,15 +1425,19 @@ export class ConversationManager {
       } else if (nextReq.targetSlot === "associated_symptoms") {
         sarahQuestion = "Are you experiencing any shortness of breath, cold sweating, nausea, or lightheadedness right now?";
       } else if (nextReq.targetSlot === "onset") {
-        sarahQuestion = "When did this discomfort begin, and did it start suddenly or build up gradually?";
+        sarahQuestion = "Roughly when did you first notice these symptoms?";
       } else if (nextReq.targetSlot === "character") {
         sarahQuestion = "Could you describe what it feels like — is it a tight pressure, squeezing, burning, or a sharp pain?";
+      } else if (nextReq.targetSlot === "swallowing_difficulty" && nextReq.fromAgent === "otolaryngology") {
+        sarahQuestion = "When you swallow, are you able to swallow liquids and your own saliva normally, or is it too painful to swallow?";
+      } else if (nextReq.targetSlot === "trismus_or_jaw_opening" && nextReq.fromAgent === "otolaryngology") {
+        sarahQuestion = "Can you open your mouth completely, or does your jaw feel stiff or limited when you try to open wide?";
       }
 
       state.pendingQuestion = {
         id: nextReq.id,
         targetSlot: nextReq.targetSlot,
-        askedBy: nextReq.fromAgent === "cardiology" ? "marcus" : nextReq.fromAgent === "neurology" ? "arthur" : "sarah",
+        askedBy: nextReq.fromAgent === "cardiology" ? "marcus" : nextReq.fromAgent === "neurology" ? "arthur" : nextReq.fromAgent === "otolaryngology" ? "rajiv" : "sarah",
         doctorName: nextReq.doctorName,
         patientFacingSpeaker: "sarah",
         question: sarahQuestion,
@@ -1304,10 +1491,10 @@ export class ConversationManager {
       initialTargetSlot = "onset_and_location";
       initialPurpose = "Establish quadrant and onset of abdominal discomfort";
       initialDoctorReply = "I understand you're feeling abdominal discomfort. Could you tell me where in your abdomen it's located—such as the upper or lower part—and when it began?";
-    } else if (isHeadache) {
-      initialTargetSlot = "headache_onset_character";
-      initialPurpose = "Screen for headache character and onset acuity";
-      initialDoctorReply = "I hear you regarding your headache. Did it come on all of a sudden like a clap of thunder, or build up gradually, and are you sensitive to bright lights or sound?";
+    } else if (isHeadache && extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory).onset.onsetPattern === "unknown") {
+      initialTargetSlot = "onset_pattern";
+      initialPurpose = "Establish whether headache onset was sudden or gradual";
+      initialDoctorReply = "I hear you regarding your headache. Did it come on all at once, or did it build up gradually?";
     } else if (state.responsePlan?.nextHighValueInquiry) {
       initialTargetSlot = state.responsePlan.nextHighValueInquiry.topic;
       initialPurpose = state.responsePlan.nextHighValueInquiry.clinicalRationale;
@@ -1315,18 +1502,33 @@ export class ConversationManager {
     } else if (!isChestPresentation) {
       const subfields = extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory);
       if (subfields.onset.isResolved) {
+        const isFatigueCase = /\b(tired|fatigue|exhaust|malaise|weakness)\b/i.test(state.cumulativeTranscript);
         if (!subfields.characterSeverity.character) {
           initialTargetSlot = "character";
           initialPurpose = "Establish symptom sensation and quality";
-          initialDoctorReply = "Could you describe what that discomfort feels like — is it sharp, burning, dull, or a tight pressure?";
+          initialDoctorReply = isFatigueCase
+            ? "Could you describe what this fatigue feels like — does it make it hard to get out of bed, or is it a general exhaustion?"
+            : "Could you describe what that discomfort feels like — is it sharp, burning, dull, or a tight pressure?";
         } else if (!subfields.characterSeverity.severity) {
           initialTargetSlot = "severity";
           initialPurpose = "Establish severity of discomfort";
           initialDoctorReply = "On a scale from zero to ten, how severe would you rate this discomfort right now?";
-        } else {
+        } else if (!state.conversationMemory?.questionsAlreadyAsked.includes("associated_symptoms")) {
           initialTargetSlot = "associated_symptoms";
           initialPurpose = "Screen for associated symptoms";
           initialDoctorReply = "Are you experiencing any other symptoms alongside this, such as fever, difficulty breathing, or dizziness?";
+        } else {
+          // Key intake complete! Transition to board deliberation rather than looping
+          state.phase = "decided";
+          state.informationState = "sufficient_for_decision";
+          return {
+            action: "CONVENE_BOARD",
+            doctorReply: "Thank you for sharing those details with me. That gives our team what we need to evaluate your situation—give me just a moment while I consult with our clinical specialists.",
+            doctorName: "Dr. Sarah Chen, MD",
+            specialty: "Chief of Internal Medicine",
+            state,
+            preArbiterResult
+          };
         }
       } else if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown") {
         initialTargetSlot = "onset_pattern";
@@ -1486,19 +1688,28 @@ export class ConversationManager {
     }
 
     if (!state.slots.onset_pattern) {
-      if (/\b(sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere|all\s+at\s+once)\b/i.test(state.cumulativeTranscript)) {
-        state.slots.onset_pattern = "sudden";
-        state.slots.acute_worsening = true;
+      const parsed = parseOnsetDimensions(state.cumulativeTranscript);
+      if (parsed.onsetPattern) {
+        state.slots.onset_pattern = parsed.onsetPattern;
+        state.slots.acute_worsening = parsed.acuteWorsening;
         if (!state.slots.known_facts.some(f => /ONSET_(?:TYPE|PATTERN)/i.test(f))) {
-          state.slots.known_facts.push("ONSET_TYPE: sudden");
-        }
-      } else if (/\b(gradual(?:ly)?|built\s+up|came\s+on\s+gradually|slowly|over\s+time)\b/i.test(state.cumulativeTranscript)) {
-        state.slots.onset_pattern = "gradual";
-        state.slots.acute_worsening = false;
-        if (!state.slots.known_facts.some(f => /ONSET_(?:TYPE|PATTERN)/i.test(f))) {
-          state.slots.known_facts.push("ONSET_TYPE: gradual");
+          state.slots.known_facts.push(`ONSET_TYPE: ${parsed.onsetPattern}`);
         }
       }
+    }
+
+    // Headache-associated light and sound sensitivity is evidence, not merely a
+    // keyword. Require a symptom relationship so a "sudden flash" is not
+    // incorrectly recorded as photophobia.
+    const hasPhotophobia = /\b(?:photophob|sensitive\s+to\s+(?:bright\s+)?lights?|(?:bright\s+)?lights?\s+(?:bother|make|made|worsen)|lights?\s+(?:bother|makes?|made|worsen)|light\s+sensitivity)\b/i.test(state.cumulativeTranscript);
+    const hasPhonophobia = /\b(?:phonophob|sensitive\s+to\s+(?:loud\s+)?(?:sound|sounds|noise)|(?:loud\s+)?(?:sounds?|noise)\s+(?:bother|make|made|worsen)|sound\s+sensitivity)\b/i.test(state.cumulativeTranscript) || /\bsensitive\s+to\s+(?:bright\s+)?lights?\s+(?:or|and)\s+(?:loud\s+)?(?:sounds?|noise)\b/i.test(state.cumulativeTranscript);
+    if (hasPhotophobia) {
+      if (!state.slots.associated_symptoms.includes("photophobia")) state.slots.associated_symptoms.push("photophobia");
+      if (!state.slots.known_facts.some(f => /photophobia/i.test(f))) state.slots.known_facts.push("Associated: photophobia (light sensitivity)");
+    }
+    if (hasPhonophobia) {
+      if (!state.slots.associated_symptoms.includes("phonophobia")) state.slots.associated_symptoms.push("phonophobia");
+      if (!state.slots.known_facts.some(f => /phonophobia/i.test(f))) state.slots.known_facts.push("Associated: phonophobia (sound sensitivity)");
     }
 
     // Opportunistic Severity Extraction (0-10, /10, "8 by 10", "pain is 6", etc.)

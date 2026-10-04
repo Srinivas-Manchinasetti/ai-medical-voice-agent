@@ -36,10 +36,11 @@ export const ClinicalFeaturesSchema = z.object({
   inabilityToSpeakFullSentences: z.boolean().default(false),
   wheezing: z.boolean().default(false),
 
-  // Allergic / Anaphylaxis
+  // Allergic / Anaphylaxis & Airway
   throatTightness: z.boolean().default(false),
   tongueSwelling: z.boolean().default(false),
   allergenExposure: z.boolean().default(false),
+  deepNeckInfectionRisk: z.boolean().default(false),
 
   // Gastrointestinal / Acute Abdomen
   severeAbdominalPain: z.boolean().default(false),
@@ -444,7 +445,7 @@ function consolidateStructuredEvidence(
 export function extractClinicalFeatures(text: string, patientAge?: number): ClinicalFeatures {
   const lower = ' ' + text.toLowerCase() + ' ';
 
-  // Checks pattern with robust 60-character negation lookbehind window
+  // Checks pattern with robust 60-character negation lookbehind window respecting punctuation boundaries
   const matchesPattern = (regex: RegExp): boolean => {
     const flags = regex.flags.includes('g') ? regex.flags : regex.flags + 'g';
     const gRegex = new RegExp(regex.source, flags);
@@ -453,7 +454,16 @@ export function extractClinicalFeatures(text: string, patientAge?: number): Clin
 
     while ((match = gRegex.exec(lower)) !== null) {
       const preceding = lower.substring(Math.max(0, match.index - 70), match.index);
-      const isNegated = /\b(no|not|never|never had|denies|denied|without|negative for|neither|none of|asked if|checking if|wondering if)\b/i.test(preceding);
+      const lastBoundary = Math.max(
+        preceding.lastIndexOf('.'),
+        preceding.lastIndexOf(';'),
+        preceding.lastIndexOf('!'),
+        preceding.lastIndexOf('?'),
+        preceding.lastIndexOf('\n'),
+        preceding.lastIndexOf(' but ')
+      );
+      const effectivePreceding = lastBoundary !== -1 ? preceding.slice(lastBoundary) : preceding;
+      const isNegated = /\b(no|not|never|never had|denies|denied|without|negative for|neither|none of|asked if|checking if|wondering if)\b/i.test(effectivePreceding);
       if (!isNegated) {
         foundUnnegated = true;
         break;
@@ -473,7 +483,7 @@ export function extractClinicalFeatures(text: string, patientAge?: number): Clin
   const features: ClinicalFeatures = {
     // Cardiovascular
     chestPain: hasChestPainOrPressure,
-    pressureLikePain: matchesPattern(/crush|elephant|heavy weight|squeezing|tight band|intense pressure|(severe|heavy|crushing)\s+(tight\s+)?(chest\s+)?pressure|(severe|intense)\s+(chest\s+)?tight/i),
+    pressureLikePain: matchesPattern(/crush|elephant|heavy weight|squeezing|tight band|intense pressure|tight pressure|pressure in (?:the )?(?:center|middle)|(severe|heavy|crushing)\s+(tight\s+)?(chest\s+)?pressure|(severe|intense)\s+(chest\s+)?tight/i),
     radiationToArm: matchesPattern(/(radiat|spread|travel).*?(arm|arms|shoulder)|(left|both).*?arm.*?(pain|numb|heav|ach)|(pain|heav).*?(down|in).*?(left|both).*?arm/i),
     radiationToJaw: matchesPattern(/(radiat|spread|travel).*?(jaw|neck|teeth)|(jaw|neck).*?(pain|ache|tight)/i),
     diaphoresis: matchesPattern(/sweat|diaphoresis|clammy|cold sweat/i),
@@ -496,10 +506,14 @@ export function extractClinicalFeatures(text: string, patientAge?: number): Clin
     inabilityToSpeakFullSentences: matchesPattern(/cannot speak full sentences|words between breaths|struggling to speak/i),
     wheezing: matchesPattern(/wheez|asthma attack|bronchospasm|tight lungs/i),
 
-    // Allergic / Anaphylaxis
+    // Allergic / Anaphylaxis & Airway
     throatTightness: matchesPattern(/throat.*?(clos|tight|chok)|cannot swallow/i),
     tongueSwelling: matchesPattern(/swollen tongue|tongue.*?swell|lips.*?swell|facial swelling/i),
     allergenExposure: matchesPattern(/peanut|bee sting|wasp|shellfish|penicillin|allergic reaction/i),
+    deepNeckInfectionRisk: (
+      (matchesPattern(/muffled voice|hot potato voice|something in (?:my )?mouth|potato in (?:my )?mouth/i) || matchesPattern(/\bmuffled\b/i)) &&
+      (matchesPattern(/swallowing saliva|painful to swallow saliva|saliva is really painful|spitting saliva|drooling|cannot swallow saliva/i) || matchesPattern(/\bsaliva\b/i))
+    ),
 
     // Gastrointestinal
     severeAbdominalPain: matchesPattern(/severe stomach pain|excruciating abdominal|belly pain|stomach cramps/i),
@@ -705,6 +719,22 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
     icd10.add('J45.901'); // Asthma exacerbation
     symptoms.add('Acute respiratory distress');
     if (features.cyanosis) symptoms.add('Cyanosis / peripheral hypoxia');
+  }
+
+  // =========================================================================
+  // RULE 4b: ESI TIER 2 - PERITONSILLAR ABSCESS / DEEP NECK INFECTION AIRWAY THREAT
+  // =========================================================================
+  else if (features.deepNeckInfectionRisk || structuredHist?.provenanceEvidence?.some((p: any) => p.trigger_flags?.includes('PRE_FLAG_DEEP_NECK_INFECTION_OR_PTA'))) {
+    esiScore = 2;
+    triageLevel = 'emergency';
+    esiTitle = 'ESI LEVEL 2: EMERGENT — Suspected Peritonsillar Abscess / Deep Neck Space Infection Protocol';
+    redFlags.push('PERITONSILLAR_ABSCESS_OR_DEEP_NECK_INFECTION_RISK');
+    rules.push('ESI-2.6: Muffled voice, severe saliva odynophagia, and fever with impending airway compromise risk');
+    protocol = 'Urgent in-person ENT / Emergency Department evaluation today. Continuous airway monitoring, neck examination, parenteral analgesia and empiric IV antibiotics, evaluate for urgent needle drainage or surgical incision. Do not delay 24-48 hours.';
+    action = 'Proceed immediately to the nearest Emergency Department or Urgent Care facility with on-call ENT specialists.';
+    icd10.add('J36'); // Peritonsillar abscess
+    icd10.add('J02.9'); // Acute pharyngitis
+    symptoms.add('Muffled voice with severe saliva odynophagia and fever');
   }
 
   // =========================================================================

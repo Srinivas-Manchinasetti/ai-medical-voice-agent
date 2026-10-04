@@ -118,7 +118,7 @@ export type PatientCase = z.infer<typeof PatientCaseSchema>;
  * SPECIALIST INVOCATION REQUEST SCHEMA
  */
 export const SpecialistRequestSchema = z.object({
-  specialty: z.enum(["cardiology", "neurology", "pediatrics"]),
+  specialty: z.enum(["cardiology", "neurology", "pediatrics", "otolaryngology"]),
   reason: z.string(),
   priority: z.enum(["immediate", "routine"]).default("routine"),
   trigger_flags: z.array(z.string()).default([]),
@@ -331,7 +331,7 @@ export interface BoardExecutionTrace {
  */
 export interface AgentRequest {
   id: string;
-  fromAgent: "cardiology" | "neurology" | "pediatrics" | "internal_medicine";
+  fromAgent: "cardiology" | "neurology" | "pediatrics" | "internal_medicine" | "otolaryngology";
   doctorName: string;
   type: "patient_question" | "tool_execution" | "specialist_review";
   targetSlot: string;
@@ -349,7 +349,7 @@ export interface AgentRequest {
 export interface PendingQuestion {
   id: string;
   targetSlot: string;
-  askedBy: "sarah" | "marcus" | "arthur" | "elena";
+  askedBy: "sarah" | "marcus" | "arthur" | "elena" | "rajiv";
   doctorName: string;
   patientFacingSpeaker: "sarah";
   question: string;

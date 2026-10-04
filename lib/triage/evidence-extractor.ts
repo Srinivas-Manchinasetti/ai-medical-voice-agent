@@ -15,6 +15,7 @@ import {
   ClinicalInterviewStateV2,
   RedFlagDomainAssessment,
   extractNumericSeverity,
+  parseOnsetDimensions,
 } from "./clinical-state";
 
 export interface ExtractedEvidenceResult {
@@ -336,6 +337,45 @@ export class EvidenceExtractor {
       if (isDenied) deniedTopics.push("facial_droop");
     }
 
+    // 5a. HEADACHE PHOTOPHOBIA / PHONOPHOBIA
+    const mentionsPhotophobia = /\b(?:sensitive\s+to\s+(?:bright\s+)?lights?|(?:bright\s+)?lights?\s+(?:bother|make|worsen)|photophob|light\s+sensitivity)\b/i.test(lower);
+    const mentionsPhonophobia = /\b(?:sensitive\s+to\s+(?:loud\s+)?(?:sounds?|noise)|(?:loud\s+)?(?:sounds?|noise)\s+(?:bother|make|worsen)|phonophob|sound\s+sensitivity)\b/i.test(lower) || /\bsensitive\s+to\s+(?:bright\s+)?lights?\s+(?:or|and)\s+(?:loud\s+)?(?:sounds?|noise)\b/i.test(lower);
+
+    if (mentionsPhotophobia) {
+      const fact: ClinicalFact = {
+        id: `fact-photophobia-${turnId}`,
+        name: "photophobia",
+        label: "Photophobia (light sensitivity)",
+        category: "associated_symptom",
+        status: "present",
+        value: true,
+        normalizedText: "Present (light sensitivity)",
+        confidence: 0.94,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+    }
+    if (mentionsPhonophobia) {
+      const fact: ClinicalFact = {
+        id: `fact-phonophobia-${turnId}`,
+        name: "phonophobia",
+        label: "Phonophobia (sound sensitivity)",
+        category: "associated_symptom",
+        status: "present",
+        value: true,
+        normalizedText: "Present (sound sensitivity)",
+        confidence: 0.94,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+    }
+
     // 6. TIMELINE, ONSET & COURSE (STRICT NORMALIZATION - NO UTTERANCE LEAKS)
     // Extract Onset
     const timeMatch = lower.match(/\b(?:since|from|about|approx\.?|roughly)?\s*(\d+\s*(?:minutes?|hours?|days?|weeks?)|morning\s+\d+\s+days?\s+ago|\d+\s+days?\s+ago|yesterday|this\s+morning|an?\s+hour|two\s+days|three\s+days)\b/i);
@@ -378,8 +418,11 @@ export class EvidenceExtractor {
     }
 
     // Extract Course (Sudden vs Gradual / Worsening)
-    const hasGradual = /\b(gradual(?:ly)?|slowly|built\s+up|over\s+time|increased\s+by\s+the\s+next\s+day)\b/i.test(lower);
-    const hasSudden = /\b(sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere|all\s+at\s+once)\b/i.test(lower);
+    // Use clause-local onset evidence. A phrase such as "a sudden flash of
+    // light" is a trigger, not a sudden onset of the patient's symptom.
+    const parsedOnset = parseOnsetDimensions(lower);
+    const hasGradual = parsedOnset.onsetPattern === "gradual";
+    const hasSudden = parsedOnset.onsetPattern === "sudden";
     const hasWorsening = /\b(gradually\s+increased|got\s+worse|worsened|worse\s+today|increasing)\b/i.test(lower);
 
     if (hasGradual || hasSudden || hasWorsening) {

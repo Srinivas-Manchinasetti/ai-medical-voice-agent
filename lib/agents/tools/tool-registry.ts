@@ -5,13 +5,15 @@ import {
   computeBefast,
   computeNihssApprox,
   calculatePews,
-  checkDrugInteractions
+  checkDrugInteractions,
+  assessDeepNeckAirwayRisk
 } from "./clinical-tools";
 
 export const SPECIALIST_TOOL_ALLOWLISTS: Record<string, string[]> = {
   cardiology: ["analyze_ecg", "calculate_timi", "check_drug_interactions"],
   neurology: ["compute_befast", "compute_nihss", "check_drug_interactions"],
-  pediatrics: ["calculate_pews", "check_drug_interactions"]
+  pediatrics: ["calculate_pews", "check_drug_interactions"],
+  otolaryngology: ["assess_deep_neck_airway", "check_drug_interactions"]
 };
 
 export class ClinicalToolRegistry {
@@ -65,6 +67,11 @@ export class ClinicalToolRegistry {
           proposedMedications: params.proposedMedications,
           clinicalCondition: params.clinicalCondition,
           transcript: params.transcript
+        });
+      case "assess_deep_neck_airway":
+        return assessDeepNeckAirwayRisk({
+          transcript: params.transcript || "",
+          vitals: params.vitals
         });
       default:
         return {

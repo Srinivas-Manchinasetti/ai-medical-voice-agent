@@ -1,6 +1,6 @@
 /**
  * CLINICAL INTERVIEW STATE & EVIDENCE MODEL
- * 
+ *
  * Invariants:
  * 1. Normalized Clinical Facts: Facts have explicit status ("present" | "absent" | "unknown"),
  *    confidence, source, and turn ID. Utterances are NEVER stored directly as clinical facts.
@@ -430,6 +430,130 @@ export interface SubfieldClinicalState {
   };
 }
 
+export interface ParsedOnset {
+  onsetTime?: string;
+  onsetPattern?: "sudden" | "gradual";
+  acuteWorsening?: boolean;
+}
+
+/**
+ * Robust Onset Parser with Negation Handling & Indic Multilingual Support
+ * 
+ * Invariants:
+ * 1. Negated suddenness ("wasn't sudden", "didn't come on suddenly") MUST NOT resolve to sudden.
+ * 2. Onset timeline ("yesterday", "3 days") answers "when" and must NEVER be conflated with sudden vs gradual.
+ * 3. Supports English, Hinglish ("achanak", "dheere dheere"), and Telugu transliteration ("ventane", "mellaga").
+ */
+export function parseOnsetDimensions(text: string): ParsedOnset {
+  const textLower = text.toLowerCase();
+
+  // 1. Timeline / Duration extraction
+  let onsetTime: string | undefined = undefined;
+  const timeMatch = textLower.match(
+    /\b(?:since|from|about|approx\.?|roughly)?\s*(\d+\s*(?:minutes?|hours?|days?|weeks?|months?|mins?|hrs?)|morning\s+\d+\s+days?\s+ago|\d+\s+days?\s+ago|yesterday|this\s+morning|last\s+night|an?\s+hour|twenty\s+minutes|thirty\s+minutes|a\s+week|(?:one|two|three|four|five|six|seven)\s+days?|kal\s+se|aaj\s+subah\s+se|do\s+din\s+se|parso\s+se|ninna\s+nunchi|ee\s+roju\s+podduna\s+nunchi|rendu\s+rojuluga)\b/i
+  );
+  if (timeMatch) {
+    onsetTime = timeMatch[0].replace(/^(?:since|from|about|roughly)\s*/i, "").trim();
+  }
+
+  // 2. Clause decomposition for context-aware onset vs trigger vs acute worsening
+  // Split on sentence boundaries and contrasting conjunctions
+  const rawClauses = textLower.split(/(?:[.!?;]|\b(?:but|however|yet|although|though|whereas|instead)\b)/i)
+    .map(c => c.trim())
+    .filter(Boolean);
+
+  let hasExplicitGradualOnset = false;
+  let hasExplicitSuddenOnset = false;
+  let hasAcuteWorsening = false;
+  let hasNegatedSuddenness = false;
+
+  for (const clause of rawClauses) {
+    // Check if suddenness is negated in this clause
+    const clauseSuddenNegated =
+      /\b(?:not|wasn't|was\s+not|didn't|did\s+not|never|neither|no)\s+(?:come\s+on\s+|start\s+|feel\s+|happen\s+|begin\s+)?(?:sudden(?:ly)?|abrupt(?:ly)?|out\s+of\s+nowhere)\b/i.test(clause) ||
+      /\b(?:sudden(?:ly)?|abrupt(?:ly)?)\s*(?:nahi|kadhu|ledu)\b/i.test(clause);
+    if (clauseSuddenNegated) {
+      hasNegatedSuddenness = true;
+    }
+
+    // Check if "sudden" in this clause describes a TRIGGER, VISUAL FLASH, EXTERNAL EVENT, or HYPOTHETICAL
+    // e.g. "sudden flash", "sudden light", "sudden noise", "sudden sound", "sudden movement", "maybe a sudden flash could cause"
+    const isSuddenTriggerOrContext =
+      /\b(?:sudden(?:ly)?|abrupt(?:ly)?)\s+(?:flash|light|noise|sound|jerk|movement|move|bang|pop|glare|stimul\w*)\b/i.test(clause) ||
+      /\b(?:flash|light|noise|sound|jerk|movement)\s+(?:was\s+)?sudden\b/i.test(clause) ||
+      /\b(?:maybe|could\s+be|might\s+be|caused?\s+by|trigger(?:ed)?\s+by)\s+(?:a\s+)?sudden\b/i.test(clause) ||
+      /\bsudden\s+(?:\w+\s+)?(?:could|might|can)\s+cause\b/i.test(clause);
+
+    // Check if "sudden" in this clause describes ACUTE WORSENING of an existing symptom
+    // e.g. "then suddenly became severe", "suddenly got worse", "next day suddenly became too bad"
+    const isSuddenWorsening =
+      /\b(?:then|next\s+day|later|subsequently|after\s+that|suddenly)\s+(?:became|got|turned|grew|spiked)\s+(?:severe|worse|bad|intense|unbearable|too\s+bad)\b/i.test(clause) ||
+      /\bsuddenly\s+(?:worsened|increased|became\s+(?:severe|worse|too\s+bad))\b/i.test(clause);
+
+    // Check if this clause explicitly describes GRADUAL onset of symptom
+    // e.g. "built up gradually", "started gradually", "came on slowly", "gradual onset", "slowly over time"
+    const isGradualOnset =
+      /\b(?:built?\s+up\s+gradual(?:ly)?|gradual(?:ly)?\s+built?\s+up|came\s+on\s+gradual(?:ly)?|started\s+gradual(?:ly)?|began\s+gradual(?:ly)?|crept\s+up\s+slowly)\b/i.test(clause) ||
+      (/\b(?:gradual(?:ly)?|slowly|over\s+time|dheere\s+dheere|mellaga)\b/i.test(clause) && /\b(?:built?\s+up|start\w*|beg\w*|came\s+on|increas\w*|worsen\w*|develop\w*)\b/i.test(clause));
+
+    if (isGradualOnset) {
+      hasExplicitGradualOnset = true;
+    }
+
+    if (isSuddenWorsening) {
+      hasAcuteWorsening = true;
+    }
+
+    // Check for TRUE sudden onset of symptom in this clause
+    // (not negated, not a trigger/external stimulus like a flash, not just a worsening of an already gradual symptom)
+    if (!clauseSuddenNegated && !isSuddenTriggerOrContext) {
+      const hasSuddenOnsetTerm =
+        /\b(?:started\s+sudden(?:ly)?|began\s+sudden(?:ly)?|came\s+on\s+sudden(?:ly)?|hit\s+me\s+sudden(?:ly)?|struck\s+sudden(?:ly)?)\b/i.test(clause) ||
+        /\b(?:sudden(?:ly)?\s+started|sudden(?:ly)?\s+began|sudden(?:ly)?\s+came\s+on)\b/i.test(clause) ||
+        /\b(?:thunderclap|clap\s+of\s+thunder|all\s+at\s+once|all\s+of\s+a\s+sudden|out\s+of\s+nowhere)\b/i.test(clause) ||
+        /\b(?:ekdum\s+se|achanak(?:\s+se)?|turant|jhatke\s+se|ventane|akasmaathuga)\b/i.test(clause);
+
+      // Standalone "sudden" or "suddenly" without trigger context
+      const genericSudden = /\b(?:sudden(?:ly)?|abrupt(?:ly)?)\b/i.test(clause);
+
+      if (hasSuddenOnsetTerm) {
+        if (!isSuddenWorsening) {
+          hasExplicitSuddenOnset = true;
+        }
+      } else if (genericSudden && !isSuddenWorsening) {
+        // If the clause does not describe an onset of symptom (e.g. "sudden flash"), do not count it
+        if (!isSuddenTriggerOrContext) {
+          hasExplicitSuddenOnset = true;
+        }
+      }
+    }
+  }
+
+  // Determine final onsetPattern and acuteWorsening:
+  let onsetPattern: "sudden" | "gradual" | undefined = undefined;
+  let acuteWorsening: boolean | undefined = undefined;
+
+  // Gradual onset takes precedence if explicitly stated (or if sudden was negated)
+  if (hasExplicitGradualOnset || hasNegatedSuddenness) {
+    onsetPattern = "gradual";
+    // If it started gradually but then experienced acute worsening, preserve both!
+    acuteWorsening = hasAcuteWorsening;
+  } else if (hasExplicitSuddenOnset) {
+    onsetPattern = "sudden";
+    acuteWorsening = true;
+  } else if (hasAcuteWorsening) {
+    // If only acute worsening was mentioned without initial gradual, it still indicates sudden worsening
+    onsetPattern = "sudden";
+    acuteWorsening = true;
+  }
+
+  return {
+    onsetTime,
+    onsetPattern,
+    acuteWorsening,
+  };
+}
+
 export function extractSubfieldState(
   slots: Record<string, any> = {},
   knownFacts: string[] = [],
@@ -462,9 +586,11 @@ export function extractSubfieldState(
       pattern = "sudden";
     } else if (knownFacts.some(f => /gradual/i.test(f))) {
       pattern = "gradual";
-    } else if (slots.onset && /sudden/i.test(String(slots.onset))) {
+    } else if (slots.onset && /\b(?:not|wasn't|didn't|never|no)\s+(?:come\s+on\s+)?sudden/i.test(String(slots.onset))) {
+      pattern = "gradual";
+    } else if (slots.onset && /\bsudden(?:ly)?\b/i.test(String(slots.onset))) {
       pattern = "sudden";
-    } else if (slots.onset && /gradual/i.test(String(slots.onset))) {
+    } else if (slots.onset && /\bgradual(?:ly)?\b/i.test(String(slots.onset))) {
       pattern = "gradual";
     }
   }
@@ -662,10 +788,44 @@ export function detectQuestionTargetSlot(questionText: string, defaultSlot?: str
   // 9. Exertional
   if (/active|activity|exercis|stairs?|rest(?:ing)?|exert/i.test(lower)) return "exertional";
 
-  // 10. Associated symptoms
+  // 10. Light/sound sensitivity (photophobia/phonophobia) → associated_symptoms
+  if (/bright\s+light|light\s+(?:bother|sensitivity)|sensitive\s+to\s+(?:bright\s+)?light|photophob|loud\s+(?:sound|noise)|sound\s+(?:bother|sensitivity)|sensitive\s+to\s+(?:sound|noise)|phonophob/i.test(lower)) return "associated_symptoms";
+
+  // 11. Generic associated symptoms
   if (/other\s+symptoms|associated|alongside/i.test(lower)) return "associated_symptoms";
 
   return defaultSlot || "general_inquiry";
+}
+
+/**
+ * Returns every distinct clinical dimension asked in a single clinician question.
+ * This intentionally treats alternatives within one dimension (for example, sudden
+ * versus gradual onset) as one target, while catching bundled dimensions such as
+ * onset plus light sensitivity.
+ */
+export function detectQuestionTargetSlots(questionText: string): string[] {
+  const lower = questionText.toLowerCase();
+  const targets = new Set<string>();
+
+  const asksOnsetPattern = /sudden|gradual|come\s+on\s+all\s+at\s+once|build\s+up/.test(lower);
+  if (asksOnsetPattern) targets.add("onset_pattern");
+  if (/when\s+did|how\s+long\s+have\s+you\s+had|how\s+many\s+(?:days|hours)|when\s+did\s+this\s+start/.test(lower)) targets.add("onset_time");
+  if (/scale|0\s*[-–to]\s*10|zero\s*[-–to]\s*ten|how\s+severe|severity|rate\s+your\s+pain/.test(lower)) targets.add("severity");
+  if (/what\s+(?:does\s+it|it)\s+feel\s+like|sharp|dull|burning|pressure|tightness|squeezing|character|crushing|throbbing/.test(lower)) targets.add("character");
+  if (/bright\s+light|light\s+(?:bother|sensitivity)|sensitive\s+to\s+(?:bright\s+)?light|photophob|loud\s+(?:sound|noise)|sound\s+(?:bother|sensitivity)|sensitive\s+to\s+(?:sound|noise)|phonophob/.test(lower)) targets.add("associated_symptoms");
+  if (/other\s+symptoms|associated|alongside/.test(lower)) targets.add("associated_symptoms");
+  if (/fever|chills|temperature/.test(lower)) targets.add("fever");
+  if (/swallow(?:ing)?\s+liquids|liquids\s+and\s+saliva|difficulty\s+swallowing|trouble\s+swallowing|able\s+to\s+swallow|choking|dysphagia/.test(lower)) targets.add("swallowing_difficulty");
+  if (/ear\s*pain|earache|ears/.test(lower)) targets.add("ear_pain");
+  // "Did it gradually get worse?" is an onset-pattern alternative, not a
+  // separate course question. Course is distinct only when no onset pattern is
+  // being requested in the same sentence.
+  if (!asksOnsetPattern && /worse|better|improving|staying\s+the\s+same|course/.test(lower)) targets.add("course");
+  if (/(?:radiat|travel|spread).*\b(?:arm|jaw|neck|back)\b|\b(?:arm|jaw|back)\b/.test(lower)) targets.add("radiation");
+  if (/active|activity|exercis|stairs?|rest(?:ing)?|exert/.test(lower)) targets.add("exertional");
+  if (/weakness|facial\s+droop|speech|numbness/.test(lower)) targets.add("neurological_signs");
+
+  return [...targets];
 }
 
 /**
@@ -684,6 +844,11 @@ export function isTargetSlotMatch(expectedTopic: string, detectedSlot: string): 
     return true;
   }
 
+  // Onset pattern variants: "onset_pattern", "headache_onset_character"
+  if ((exp === "onset_pattern" || exp === "headache_onset_character") && (det === "onset_pattern" || det === "headache_onset_character")) {
+    return true;
+  }
+
   // Neurological laterality / distribution
   if ((exp === "weakness_distribution" || exp === "laterality") && (det === "weakness_distribution" || det === "laterality")) {
     return true;
@@ -692,6 +857,12 @@ export function isTargetSlotMatch(expectedTopic: string, detectedSlot: string): 
   // Swallowing variants: odynophagia (painful swallowing) ↔ swallowing_difficulty ↔ dysphagia
   const swallowGroup = new Set(["swallowing_difficulty", "odynophagia", "dysphagia"]);
   if (swallowGroup.has(exp) && swallowGroup.has(det)) {
+    return true;
+  }
+
+  // Associated symptoms variants: photophobia, phonophobia, light/sound sensitivity
+  const assocGroup = new Set(["associated_symptoms", "photophobia", "phonophobia", "photophobia_phonophobia"]);
+  if (assocGroup.has(exp) && assocGroup.has(det)) {
     return true;
   }
 
@@ -737,10 +908,19 @@ export function validateDoctorReplyTarget(
     return { isValid: false, detectedTarget: "none", reason: "LLM_NO_QUESTION_FOUND" };
   }
 
-  // E. Does it contain multiple competing clinical questions?
+  // E. Does it contain multiple competing clinical questions or targets?
   const questionMarks = (clean.match(/\?/g) || []).length;
   if (questionMarks > 1) {
     return { isValid: false, detectedTarget: "multiple", reason: "LLM_MULTIPLE_QUESTIONS" };
+  }
+
+  const distinctTargets = detectQuestionTargetSlots(clean);
+  if (distinctTargets.length > 1) {
+    return {
+      isValid: false,
+      detectedTarget: "multiple",
+      reason: `LLM_MULTIPLE_CLINICAL_TARGETS: ${distinctTargets.join(", ")}`,
+    };
   }
 
   // Detect the target slot of the generated question
@@ -834,16 +1014,89 @@ export function validateDoctorReplyTarget(
     }
   }
 
+  // F. CLINICAL RELEVANCE GUARD: Reject questions introducing unsupported symptoms or domains
+  const expectedTopic = plan?.nextHighValueInquiry?.topic?.toLowerCase() || "";
+  const expectedPhrasing = plan?.nextHighValueInquiry?.suggestedPhrasing?.toLowerCase() || "";
+  const factsText = (confirmedFacts || slots?.known_facts || []).join(" ").toLowerCase();
+  const chiefComplaint = String(slots?.chief_complaint || "").toLowerCase();
+  const location = String(slots?.location || "").toLowerCase();
+
+  // 1. Unsupported Chest Discomfort / Cardiac Radiation
+  const asksChestOrCardiac = /\b(chest|precordial|substernal|angina|heart\s+attack)\b/i.test(lower) ||
+    (/\b(radiat|travel|spread)\b/i.test(lower) && /\b(arm|jaw|neck|back)\b/i.test(lower));
+  const hasChestSupport = location === "chest" ||
+    /\b(chest|heart|angina|substernal)\b/i.test(factsText) ||
+    /\b(chest|heart|angina)\b/i.test(chiefComplaint) ||
+    expectedTopic === "radiation" ||
+    expectedTopic === "exertional" ||
+    expectedTopic === "chest" ||
+    /\b(chest|heart|substernal)\b/i.test(expectedPhrasing);
+
+  if (asksChestOrCardiac && !hasChestSupport) {
+    return {
+      isValid: false,
+      detectedTarget: "radiation",
+      reason: "LLM_UNSUPPORTED_SYMPTOM: chest discomfort or radiation is unsupported by clinical state or presenting complaint",
+    };
+  }
+
+  // 2. Unsupported Neurological / Stroke Deficits
+  const asksStrokeOrNeuro = /\b(facial\s+droop|slurred\s+speech|stroke|one\s+side\s+of\s+your\s+body|arm\s+(?:or\s+leg\s+)?weakness|weakness\s+in\s+your\s+arm)\b/i.test(lower);
+  const hasNeuroSupport = (slots?.neurological_signs && slots.neurological_signs.length > 0) ||
+    location === "head" ||
+    location === "brain" ||
+    /\b(stroke|headache|weakness|numbness|droop|speech|dizz)\b/i.test(factsText) ||
+    /\b(stroke|headache|weakness|numbness|droop|speech|dizz)\b/i.test(chiefComplaint) ||
+    expectedTopic === "weakness_distribution" ||
+    expectedTopic === "neurological_signs" ||
+    expectedTopic === "laterality" ||
+    /\b(weakness|numbness|droop|speech)\b/i.test(expectedPhrasing);
+
+  if (asksStrokeOrNeuro && !hasNeuroSupport) {
+    return {
+      isValid: false,
+      detectedTarget: "neurological_signs",
+      reason: "LLM_UNSUPPORTED_SYMPTOM: stroke / neurological deficit inquiry is unsupported by clinical state",
+    };
+  }
+
+  // 3. Unsupported Abdominal / GI Symptoms
+  const asksAbdominal = /\b(abdomen|abdominal|belly|stomach\s+pain|quadrant|bowel\s+movement)\b/i.test(lower);
+  const hasAbdominalSupport = location === "abdomen" ||
+    location === "stomach" ||
+    /\b(abdom|belly|stomach|gut|nausea|vomit)\b/i.test(factsText) ||
+    /\b(abdom|belly|stomach|gut|nausea|vomit)\b/i.test(chiefComplaint) ||
+    expectedTopic.includes("abdom") ||
+    /\b(abdom|belly|stomach)\b/i.test(expectedPhrasing);
+
+  if (asksAbdominal && !hasAbdominalSupport) {
+    return {
+      isValid: false,
+      detectedTarget: "abdominal_inquiry",
+      reason: "LLM_UNSUPPORTED_SYMPTOM: abdominal/GI symptoms are unsupported by clinical state",
+    };
+  }
+
   // B. Does the detected question target match responsePlan.nextHighValueInquiry.topic?
   if (plan?.nextHighValueInquiry?.topic) {
-    const expectedTopic = plan.nextHighValueInquiry.topic;
-    if (!isTargetSlotMatch(expectedTopic, detectedTarget)) {
+    const expTopic = plan.nextHighValueInquiry.topic;
+    if (!isTargetSlotMatch(expTopic, detectedTarget)) {
       return {
         isValid: false,
         detectedTarget,
-        reason: `LLM_QUESTION_TARGET_MISMATCH: expected '${expectedTopic}', detected '${detectedTarget}'`,
+        reason: `LLM_QUESTION_TARGET_MISMATCH: expected '${expTopic}', detected '${detectedTarget}'`,
       };
     }
+  }
+
+  // G. FALSE EMERGENCY ESCALATION GUARD:
+  // In a non-emergency intake, reject LLM replies that fabricate an emergency directive or demand immediate ambulance dispatch
+  if (/\b(this is a medical emergency|life-threatening emergency|call 112 or 108 immediately|emergency transport)\b/i.test(lower)) {
+    return {
+      isValid: false,
+      detectedTarget,
+      reason: "LLM_FALSE_EMERGENCY_ESCALATION: generated emergency directive in non-emergency case",
+    };
   }
 
   return { isValid: true, detectedTarget };

@@ -1,9 +1,11 @@
+import { groqClient, GroqChatMessage } from "./groq-client";
 import { nvidiaClient, NvidiaChatMessage } from "./nvidia-client";
 import { PreArbiterResult } from "../triage/pre-arbiter";
 import { ClinicalInterviewState } from "../triage/conversation-manager";
 import { DoctorProfile } from "@/config/doctors";
 import { DEFAULT_LOCALE_CONFIG, LocaleConfig } from "../config/locale";
-import { validateDoctorReplyTarget } from "../triage/clinical-state";
+import { detectQuestionTargetSlot, validateDoctorReplyTarget } from "../triage/clinical-state";
+export { validateDoctorReplyTarget };
 
 export interface GenerateTurnOptions {
   patientUtterance: string;
@@ -20,10 +22,11 @@ export interface GenerateTurnOptions {
 
 export interface GeneratedTurnResult {
   reply: string;
-  provider: "nvidia" | "fallback";
+  provider: "groq" | "nvidia" | "fallback";
   model?: string;
   latencyMs: number;
   rejectionReason?: string;
+  fallbackReason?: string;
 }
 
 export const REASONING_LEAK_PATTERNS = [
@@ -233,119 +236,97 @@ export async function generateDoctorTurnResponse(
   const evidence = interviewState?.structuredHistory?.evidenceStatus;
   const primaryEmergencyNumber = localeConfig.emergencyNumber || "112";
   const ambulanceNumber = localeConfig.alternateEmergencyNumbers?.[0] || "108";
-  const effectiveFallback = fallbackReply || plan?.suggestedSpokenReply || "I understand. Could you tell me more about how your symptoms began?";
+  const rawFallback = fallbackReply || plan?.suggestedSpokenReply || "Could you tell me more about what you're experiencing?";
 
-  // 1. Check if NVIDIA NIM is configured
-  if (!nvidiaClient.isConfigured()) {
-    console.warn("[MedVoice AI] NVIDIA_API_KEY not found in environment. Using fallback engine.");
+  // Validate that fallback reply doesn't violate mustAvoidAsking or re-ask denied symptoms.
+  // IMPORTANT: The planner's own target slot is excluded from avoidance — the avoidance list
+  // prevents LLM drift, not the planner's deliberate re-ask of an unresolved slot.
+  const safeGenericReply = "I understand. Thank you for sharing that. Could you tell me what else you've been noticing or how things have changed?";
+  let effectiveFallback = rawFallback;
+  if (!isEmergency && (mustAvoid.length > 0 || deniedSymptoms.length > 0)) {
+    const activeTargetSlot = effectiveInquiry?.topic || pendingQ?.targetSlot;
+    // A response plan can be stale when a specialist request supersedes it in
+    // the same turn. The deterministic fallback itself is authoritative for
+    // this check, so never reject it merely because its own target appears in
+    // the carry-forward avoidance list.
+    const fallbackTargetSlot = detectQuestionTargetSlot(rawFallback, activeTargetSlot);
+    const permittedFallbackTargets = new Set([activeTargetSlot, fallbackTargetSlot].filter(Boolean).map(target => target!.toLowerCase()));
+    const fallbackMustAvoid = mustAvoid.filter(item => !permittedFallbackTargets.has(item.toLowerCase()));
+    const fallbackValidation = validateDoctorReplyTarget(
+      rawFallback,
+      { mustAvoidAsking: fallbackMustAvoid },
+      interviewState?.slots,
+      memory,
+      confirmedFacts,
+      deniedSymptoms
+    );
+    if (!fallbackValidation.isValid) {
+      console.warn(`[MedVoice AI Fallback Guard] Deterministic fallback also violates rules (${fallbackValidation.reason}). Using safe generic reply.`);
+      effectiveFallback = safeGenericReply;
+    }
+  }
+
+  // 1. Check generative provider availability (Groq primary, NVIDIA secondary fallback if configured)
+  const isGroq = groqClient.isConfigured();
+  const isNvidia = !isGroq && nvidiaClient.isConfigured();
+
+  if (!isGroq && !isNvidia) {
+    console.warn("[MedVoice AI] No generative LLM provider configured (GROQ_API_KEY missing). Using deterministic fallback engine.");
     return {
       reply: effectiveFallback,
       provider: "fallback",
       latencyMs: 0,
+      fallbackReason: "no_provider_configured",
     };
   }
 
-  // 2. Build Structured Clinical System Prompt
+  // 2. Build Structured Clinical System Prompt (Compact for Token Efficiency)
   const ageDisplay = demographics.age !== undefined && demographics.age !== null
     ? `Age ${demographics.age} (${demographics.age_group})`
-    : `Unknown (not reported by patient)`;
+    : `Unknown`;
 
-  const systemPrompt = `You are ${doctor.name}, ${doctor.specialty} and clinical lead of MedVoice AI.
-You are communicating via voice with a patient or their caregiver located in ${localeConfig.country}.
-
-PATIENT CLINICAL BLACKBOARD & CONVERSATION MEMORY:
+  const systemPrompt = `You are ${doctor.name}, ${doctor.specialty} at MedVoice AI (${localeConfig.country}).
+CLINICAL CONTEXT:
 - Demographics: ${ageDisplay}
-- Established / Confirmed Facts: ${confirmedFacts.length > 0 ? confirmedFacts.join("; ") : "Initial presentation"}
-${deniedSymptoms.length > 0 ? `- Denied Symptoms (DO NOT RE-ASK): ${deniedSymptoms.join(", ")}` : ""}
-${uncertainties.length > 0 ? `- Clinical Uncertainties Being Clarified: ${uncertainties.join("; ")}` : ""}
-${memory?.frequencyPattern ? `- Symptom Pattern / Frequency: ${memory.frequencyPattern}` : ""}
-${memory?.durationPattern ? `- Episode Duration: ${memory.durationPattern}` : ""}
-${memory?.riskFactors ? `- Reported Risk Factors: ${memory.riskFactors}` : ""}
-${questionsAlreadyAsked.length > 0 ? `- Questions / Topics Already Covered (DO NOT RE-ASK): ${questionsAlreadyAsked.join(", ")}` : ""}
-${memory?.patientObjections && memory.patientObjections.length > 0 ? `- Patient Objections Noted: ${memory.patientObjections.join("; ")}` : ""}
-- Clinical Safety Status: ${isEmergency ? "CRITICAL EMERGENCY - IMMEDIATE ACTION REQUIRED" : "CLINICAL INTAKE"}
-${isEmergency ? `- Safety Arbiter Flags: ${flags.join(", ")}` : ""}
-${constraintList.length > 0 ? `- Patient Access Constraints: ${constraintList.join("; ")}` : ""}
-${evidence ? `- Evidence Status: ${evidence.enoughForDisposition ? "Sufficient for calibrated disposition" : "Gathering evidence"} (Tier: ${evidence.dispositionTier}, Confidence: ${evidence.clinicalConfidence})` : ""}
-${careNetworkSummary ? `\nVERIFIED CARE NETWORK CANDIDATES (RAG):\n${careNetworkSummary}` : ""}
+- Confirmed Facts: ${confirmedFacts.slice(-4).join("; ") || "Initial presentation"}
+${deniedSymptoms.length > 0 ? `- Denied (DO NOT ASK): ${deniedSymptoms.join(", ")}` : ""}
+${questionsAlreadyAsked.length > 0 ? `- Already Covered: ${questionsAlreadyAsked.slice(-5).join(", ")}` : ""}
+- Safety Status: ${isEmergency ? `CRITICAL EMERGENCY (${flags.join(", ")})` : "CLINICAL INTAKE"}
+${constraintList.length > 0 ? `- Patient Constraints: ${constraintList.join("; ")}` : ""}
+${careNetworkSummary ? `- Facility Context: ${careNetworkSummary.slice(0, 150)}` : ""}
 ${
-  plan
-    ? `\nACTIVE TURN RESPONSE PLAN (AUTHORITATIVE):
-- Primary Goal: ${plan.primaryGoal}
-- Priority Focus: ${plan.conversationalFocus}
-${plan.nextHighValueInquiry ? `- MANDATORY TARGET SLOT (ONLY clinical inquiry permitted): "${plan.nextHighValueInquiry.topic}"\n  Clinical Rationale: ${plan.nextHighValueInquiry.clinicalRationale}\n  Suggested Phrasing: "${plan.nextHighValueInquiry.suggestedPhrasing}"` : ""}
-${mustAvoid.length > 0 ? `- FORBIDDEN TOPICS (DO NOT ASK ABOUT): ${mustAvoid.join(", ")}` : ""}
-- Suggested Clinical Phrasing: "${plan.suggestedSpokenReply}"
-- NON-NEGOTIABLE RULE: The Active Turn Response Plan is authoritative. Do NOT select or switch to any other clinical topic. Your task is exclusively to express this exact target slot naturally.`
+  plan?.nextHighValueInquiry
+    ? `TARGET INQUIRY (MANDATORY): "${plan.nextHighValueInquiry.topic}" (${plan.nextHighValueInquiry.clinicalRationale})\nSuggested phrasing: "${plan.nextHighValueInquiry.suggestedPhrasing}"`
     : ""
 }
+${mustAvoid.length > 0 ? `FORBIDDEN TOPICS (DO NOT ASK): ${mustAvoid.join(", ")}` : ""}
 
-CONVERSATIONAL RULES (MANDATORY):
-1. NO ROBOTIC FILLER OR "I HEAR..." TEMPLATES:
-   - NEVER begin your turn with "I hear that...", "I hear your throat...", "I hear your voice has changed...", or "I understand you are experiencing...".
-   - Either acknowledge minimally in 2-4 words ("The voice change is useful to know.", "Noted.", "Thank you.") or jump straight into the next clinical question.
-   - Do NOT parrot the patient's entire statement back to them.
-2. ASK STRICTLY ONE QUESTION PER TURN:
-   - Ask ONLY ONE focused question.
-   - NEVER bundle multiple questions into one response (e.g. NEVER ask "Do you have trouble swallowing, a fever, or any ear pain?").
-   - DO NOT CHOOSE THE NEXT CLINICAL TOPIC: The deterministic planner has already chosen it. You MUST NOT select another pending dimension or revisit already-resolved dimensions. Your only task is to express that target naturally.
-3. CLINICIAN PERSONA & BEDSIDE MANNER:
-   - Lead Dr. Sarah Chen (Chief of Internal Medicine): Calm, concise, empathetic primary-care style ("The voice change is useful to know. Is it more like hoarseness, weakness, or difficulty producing your voice?").
-   - Dr. Marcus Vance (Cardiologist): Direct, urgent, hemodynamically focused ("Let's rule out anything urgent first. Any chest pressure, shortness of breath, or fainting?").
-   - Dr. Elena Rostova (Pediatrician): Warm, conversational, reassuring ("That's helpful. When you say your voice has changed, do you mean it's hoarse, or is it difficult to speak at all?").
-   - Dr. Arthur Pendelton (Neurologist): Methodical, precise neuro-investigative style.
-4. RESPOND TO NEW CLINICAL FINDINGS (PIVOT):
-   - When the patient introduces a new finding (such as "my voice changed" or "my voice was ruined"), PIVOT to explore that finding (e.g. hoarseness vs weakness) instead of ignoring it or proceeding to unrelated checklist questions.
-5. DO NOT RE-ASK ALREADY ESTABLISHED OR DENIED QUESTIONS:
-   - Check "Denied Symptoms" and "Questions / Topics Already Covered". NEVER re-ask questions about symptoms the patient has already denied or answered.
-   - If the patient communicates episodic frequency or symptom pattern (e.g. "None... but it just happens once in a month"):
-     * Acknowledge the intermittent episodic pattern (happening about once a month) and that there are no known prior heart issues.
-     * Do NOT treat it like a one-time continuous event or immediately jump to a checklist question.
-   - If the patient is correcting, challenging, or questioning the conversation itself (e.g. "We already talked about it?" or "a minute like i said before?"):
-     * Address that objection FIRST with humility and warmth: "You're right — I don't want to make you repeat yourself" or "Thank you for bearing with me — about a minute each time, noted."
-     * Never re-ask about duration or onset if they just corrected you about it.
-   - If the patient expresses fear, anxiety, or emotional distress ("I'm really scared"):
-     * Validate their feelings warmly and calmly first: "I hear you, and it's completely understandable to feel scared right now. Let's take this one step at a time together."
-     * Do NOT pepper them with checklist onset, character, or severity scoring questions.
-6. AGE INTEGRITY:
-   - The patient's age is UNKNOWN unless explicitly stated by the patient. NEVER state, assume, or refer to an age (such as "patient 45") in your response.
-7. PRESERVE UNCERTAINTY & AVOID PREMATURE LABELS:
-   - Distinguish orthostatic / postural dizziness from acute focal deficits. Do NOT jump to "Could be TIA" or single premature labels.
-8. VOICE OPTIMIZATION: Keep your spoken response strictly concise (1 to 2 short sentences, roughly 15 to 25 words total), spoken-language friendly, and warm. Avoid multi-sentence paragraphs so speech synthesis playback is prompt. Do NOT use bullet points, numbered lists, markdown formatting, or academic citations.
-
+RULES:
+1. Ground strictly in the patient's symptoms. Verbalize ONLY the designated target slot: "${plan?.nextHighValueInquiry?.topic || "inquiry"}". NEVER introduce unmentioned symptoms (e.g. do not ask chest pain for fatigue).
+2. Ask exactly 1 focused question in 15-25 words. Warm and natural bedside manner. No "I hear that..." filler. Never bundle multiple questions.
+3. If the patient already denied or answered a symptom, NEVER re-ask it. If the patient objects or corrects, acknowledge warmly first.
 ${
   isEmergency
-    ? `EMERGENCY RESPONSE POLICY (NON-NEGOTIABLE):
-- A deterministic safety rule has verified a life-threatening medical crisis (${flags.join(", ")}).
-- You CANNOT downgrade the emergency, dismiss symptoms, or suggest routine waiting.
-- You MUST instruct the patient/caregiver to seek immediate emergency medical care: call ${primaryEmergencyNumber} or ${ambulanceNumber} (Emergency Ambulance), or proceed immediately to the nearest Emergency Department.
-- Keep your emergency guidance crisp (1 to 2 urgent, direct sentences).`
-    : `CLINICAL INTAKE POLICY (AUTHORITATIVE TARGET DISCIPLINE):
-- The deterministic clinical planner has decided the single authoritative inquiry topic: "${plan?.nextHighValueInquiry?.topic || "general_clarification"}".
-- You MUST phrase your single question to address ONLY this authoritative target dimension.
-- Do NOT pick a different dimension from unaddressed symptoms or missing dimensions.
-- Do NOT repeat questions that have already been asked or answered in the conversation history or listed in "FORBIDDEN TOPICS".
-- If you cannot phrase a natural question for this exact target, use the suggested phrasing verbatim: "${plan?.suggestedSpokenReply || effectiveFallback}".`
+    ? `4. EMERGENCY CONVERSATION DIRECTIVE:
+A critical emergency is active.
+- Weave in instructions to call ${primaryEmergencyNumber} or ${ambulanceNumber} (Ambulance) or proceed to the nearest emergency department immediately.
+- AVOID REPETITION: You MUST NOT repeat the identical sentence as previous turns. Address the patient's immediate statement directly (e.g. exertional onset, squeezing pressure, jaw/arm ache, aspirin status, or driving preference) and provide practical pre-arrival guidance (remain completely seated and still, unlock the front door, keep caregiver close).`
+    : `4. Phrase the designated target slot naturally. Do NOT switch to a different clinical topic.`
 }
 
-MANDATORY OUTPUT FORMAT (JSON ONLY):
-You must respond with a raw, valid JSON object matching this exact schema:
-{
-  "patientResponse": "<1 to 2 spoken sentences addressed directly to the patient>"
-}
-CRITICAL INVARIANTS:
-1. ONLY the string inside "patientResponse" will be read by text-to-speech to the patient.
-2. NEVER include internal reasoning, scratchpads, planning, word counts, or checklists in "patientResponse".
-3. Output valid raw JSON only, starting with { and ending with }.`;
+OUTPUT FORMAT (JSON ONLY):
+{"patientResponse": "<1-2 short spoken sentences>"}`;
 
-  // 3. Assemble Message History for Multi-Turn Context
+  // 3. Assemble Message History for Multi-Turn Context (Trimmed to last 5 turns)
   const messages: NvidiaChatMessage[] = [{ role: "system", content: systemPrompt }];
 
-  // Include recent conversation turns (up to 8 turns for high relevance and low latency)
-  const recentHistory = conversationHistory.slice(-8);
+  const recentHistory = conversationHistory.slice(-5);
   for (const turn of recentHistory) {
     const role = turn.role === "doctor" || turn.role === "assistant" ? "assistant" : "user";
-    const content = (turn.text || turn.content || "").trim();
+    let content = (turn.text || turn.content || "").trim();
+    if (content.length > 250) {
+      content = content.slice(0, 250) + "...";
+    }
     if (content) {
       messages.push({ role, content });
     }
@@ -357,17 +338,52 @@ CRITICAL INVARIANTS:
     messages.push({ role: "user", content: patientUtterance.trim() });
   }
 
-  // 4. Invoke NVIDIA NIM LLM with Fallback Guard
+  // 4. Invoke Primary LLM Provider (Groq Cloud) with Fallback Guard
   const t0 = Date.now();
+  const activeProvider: "groq" | "nvidia" = isGroq ? "groq" : "nvidia";
   try {
-    const result = await nvidiaClient.createChatCompletion(messages, {
-      max_tokens: 256,
-      temperature: 0.2,
-      timeoutMs: 25000,
-    });
+    let result: { content: string; model: string; latencyMs: number };
+
+    if (isGroq) {
+      try {
+        result = await groqClient.createChatCompletion(messages, {
+          model: groqClient.getDefaultModel(),
+          max_tokens: 256,
+          temperature: 0.2,
+          timeoutMs: 15000,
+        });
+      } catch (primaryErr: any) {
+        const backupModel = process.env.GROQ_BACKUP_MODEL || "llama-3.3-70b-versatile";
+        console.warn(`[MedVoice AI Fallback Chain] Primary model ${groqClient.getDefaultModel()} failed (${primaryErr.message}). Retrying with secondary model ${backupModel}...`);
+        result = await groqClient.createChatCompletion(messages, {
+          model: backupModel,
+          max_tokens: 256,
+          temperature: 0.2,
+          timeoutMs: 15000,
+        });
+      }
+    } else {
+      result = await nvidiaClient.createChatCompletion(messages, {
+        max_tokens: 256,
+        temperature: 0.2,
+        timeoutMs: 25000,
+      });
+    }
 
     // 5. Strict Output Parsing & Multi-Layer Output Guard
-    const { cleanReply } = parseAndSanitizeDoctorReply(result.content, effectiveFallback, demographics);
+    const { cleanReply, rejectedReason } = parseAndSanitizeDoctorReply(result.content, effectiveFallback, demographics);
+    if (rejectedReason) {
+      console.warn(`[MedVoice AI Output Guard] Rejected: ${rejectedReason}`);
+      return {
+        reply: effectiveFallback,
+        provider: "fallback",
+        model: result.model,
+        latencyMs: Date.now() - t0,
+        rejectionReason: rejectedReason,
+        fallbackReason: `sanitize_rejected: ${rejectedReason}`,
+      };
+    }
+
     let generatedReply = cleanReply;
 
     // 5.5 Strict Post-Generation Clinical Target & Invariant Validator
@@ -382,13 +398,14 @@ CRITICAL INVARIANTS:
       );
 
       if (!targetValidation.isValid) {
-        console.warn(`[MedVoice AI Response Validator] LLM output rejected (${targetValidation.reason}). Falling back to deterministic clinical planner reply.`);
+        console.warn(`[MedVoice AI Response Validator] ${activeProvider.toUpperCase()} output rejected (${targetValidation.reason}). Falling back to deterministic clinical planner reply.`);
         return {
           reply: effectiveFallback,
           provider: "fallback",
           model: result.model,
           latencyMs: Date.now() - t0,
           rejectionReason: targetValidation.reason,
+          fallbackReason: `validator_rejected: ${targetValidation.reason}`,
         };
       }
     }
@@ -411,7 +428,14 @@ CRITICAL INVARIANTS:
       const acknowledgesRepetition = /\b(repeat|retread|noted|already|apologize|understand|bearing with me|minute)\b/i.test(generatedReply);
       if (!acknowledgesRepetition) {
         console.warn("[MedVoice AI Response Validator] LLM ignored repetition objection. Enforcing calibrated clinical response.");
-        generatedReply = effectiveFallback;
+        return {
+          reply: effectiveFallback,
+          provider: "fallback",
+          model: result.model,
+          latencyMs: Date.now() - t0,
+          rejectionReason: "repetition_objection_ignored",
+          fallbackReason: "validator_rejected: repetition_objection_ignored",
+        };
       }
     }
 
@@ -422,7 +446,14 @@ CRITICAL INVARIANTS:
       const validatesEmotion = /\b(scared|understand|hear you|breathe|frightening|worry|here with you|together|take this one step)\b/i.test(generatedReply);
       if (!validatesEmotion) {
         console.warn("[MedVoice AI Response Validator] LLM failed to validate emotional distress. Enforcing empathic response.");
-        generatedReply = effectiveFallback;
+        return {
+          reply: effectiveFallback,
+          provider: "fallback",
+          model: result.model,
+          latencyMs: Date.now() - t0,
+          rejectionReason: "emotion_distress_ignored",
+          fallbackReason: "validator_rejected: emotion_distress_ignored",
+        };
       }
     }
 
@@ -433,27 +464,51 @@ CRITICAL INVARIANTS:
       const addressesMemory = /\b(remember|consultation|referring|assume|recall|described|discussed)\b/i.test(generatedReply);
       if (!addressesMemory) {
         console.warn("[MedVoice AI Response Validator] LLM ignored memory inquiry. Enforcing calibrated clinical response.");
-        generatedReply = effectiveFallback;
+        return {
+          reply: effectiveFallback,
+          provider: "fallback",
+          model: result.model,
+          latencyMs: Date.now() - t0,
+          rejectionReason: "memory_inquiry_ignored",
+          fallbackReason: "validator_rejected: memory_inquiry_ignored",
+        };
       }
     }
 
     // Clean any residual markdown formatting that shouldn't be read by TTS
     generatedReply = generatedReply.replace(/[*_#`\[\]]/g, "").trim();
 
+    // 7. Anti-Repetition Guard: Never return verbatim duplicate of previous doctor line
+    const lastDoctorTurn = conversationHistory.filter(t => t.role === "doctor" || t.role === "assistant").slice(-1)[0];
+    const lastDoctorText = (lastDoctorTurn?.text || lastDoctorTurn?.content || "").trim();
+    if (lastDoctorText && generatedReply.trim().toLowerCase() === lastDoctorText.toLowerCase()) {
+      console.warn("[MedVoice AI Response Validator] LLM generated verbatim duplicate of previous turn. Providing calibrated clinical variation.");
+      if (effectiveFallback && effectiveFallback.toLowerCase() !== lastDoctorText.toLowerCase()) {
+        generatedReply = effectiveFallback;
+      } else if (isEmergency) {
+        generatedReply = "While the ambulance is on the way, please continue sitting completely still, take slow steady breaths, and keep someone by your side.";
+      } else {
+        generatedReply = "Thank you for bearing with me. Could you describe how these symptoms are affecting your day-to-day energy right now?";
+      }
+    }
+
     return {
       reply: generatedReply,
-      provider: "nvidia",
+      provider: activeProvider,
       model: result.model,
       latencyMs: result.latencyMs,
     };
   } catch (err: any) {
     const latencyMs = Date.now() - t0;
-    console.warn(`[MedVoice AI Fallback Triggered] (${latencyMs}ms) Reason: ${err.message}`);
+    const isRateLimit = err.status === 429 || err.message?.includes("429") || err.category === "RATE_LIMIT_EXCEEDED" || err.message?.includes("Rate limit");
+    const fallbackReason = isRateLimit ? "rate_limit_429" : `error: ${err.message || "unknown"}`;
+    console.warn(`[MedVoice AI Fallback Triggered] (${activeProvider.toUpperCase()} error after ${latencyMs}ms) Reason: ${fallbackReason}`);
 
     return {
       reply: effectiveFallback,
       provider: "fallback",
       latencyMs,
+      fallbackReason,
     };
   }
 }

@@ -1,8 +1,10 @@
 import { AgentOpinion, PatientCase, SpecialistRequest, PeerChallenge, ToolResult, BoardMessage } from "./schemas";
 import { Blackboard } from "./blackboard";
+import { BaseClinicalAgent } from "./base-agent";
 import { CardiologyAgent } from "./specialists/cardiology-agent";
 import { NeurologyAgent } from "./specialists/neurology-agent";
 import { PediatricsAgent } from "./specialists/pediatrics-agent";
+import { OtolaryngologyAgent } from "./specialists/ent-agent";
 
 export interface OrchestrationResult {
   orchestrator_summary: string;
@@ -29,6 +31,7 @@ export class TriageOrchestrator {
   private cardiology = new CardiologyAgent();
   private neurology = new NeurologyAgent();
   private pediatrics = new PediatricsAgent();
+  private ent = new OtolaryngologyAgent();
 
   /**
    * Helper to verify if a clinical pattern is affirmed or negated.
@@ -116,6 +119,22 @@ export class TriageOrchestrator {
         reason: hasPediatricFlag ? "Pre-screened pediatric crisis / neonatal vulnerability" : "Pediatric health evaluation",
         priority: hasPediatricFlag ? "immediate" : "routine",
         trigger_flags: patientCase.pre_safety_flags.filter(f => f.includes("PEDIATRIC"))
+      });
+    }
+
+    // 5. Otolaryngology (ENT) Triggers
+    const hasPtaFlag = patientCase.pre_safety_flags.some(f => f.includes("PTA") || f.includes("DEEP_NECK") || f.includes("AIRWAY"));
+    const hasAffirmedPtaSymptoms = this.isAffirmed(text, /\b(muffled.*voice|hot\s+potato|swallow.*saliva|saliva.*pain|trismus|stridor)\b/i);
+    const hasSevereThroat = this.isAffirmed(text, /\b(sore\s+throat|throat\s+pain|painful\s+swallow)\b/i) &&
+      (text.includes("fever") || text.includes("severe") || text.includes("8") || text.includes("9") || text.includes("10") || text.includes("muffle") || text.includes("saliva"));
+
+    const needsEnt = !isMedicationRefillOnly && (hasPtaFlag || hasAffirmedPtaSymptoms || hasSevereThroat);
+    if (needsEnt) {
+      requests.push({
+        specialty: "otolaryngology",
+        reason: hasPtaFlag ? "Pre-screened deep neck space infection / peritonsillar abscess risk" : "Head & neck / pharyngeal airway assessment",
+        priority: (hasPtaFlag || hasAffirmedPtaSymptoms) ? "immediate" : "routine",
+        trigger_flags: patientCase.pre_safety_flags.filter(f => f.includes("PTA") || f.includes("DEEP_NECK") || f.includes("AIRWAY"))
       });
     }
 
@@ -208,7 +227,7 @@ export class TriageOrchestrator {
     blackboard.postOpinion(chenInitial);
 
     // Map specialists
-    const activeAgents: { name: string; agent: CardiologyAgent | NeurologyAgent | PediatricsAgent }[] = [];
+    const activeAgents: { name: string; agent: BaseClinicalAgent }[] = [];
     if (requests.some(r => r.specialty === "cardiology")) {
       activeSpecialists.push("Dr. Marcus Vance, MD, FACC (Cardiology)");
       activeAgents.push({ name: "Dr. Marcus Vance", agent: this.cardiology });
@@ -220,6 +239,10 @@ export class TriageOrchestrator {
     if (requests.some(r => r.specialty === "pediatrics")) {
       activeSpecialists.push("Dr. Elena Rostova, MD, FAAP (Pediatrics)");
       activeAgents.push({ name: "Dr. Elena Rostova", agent: this.pediatrics });
+    }
+    if (requests.some(r => r.specialty === "otolaryngology")) {
+      activeSpecialists.push("Dr. Rajiv Sharma, MS (ENT), DLO (Otolaryngology)");
+      activeAgents.push({ name: "Dr. Rajiv Sharma", agent: this.ent });
     }
 
     const allToolsRun: ToolResult[] = [];

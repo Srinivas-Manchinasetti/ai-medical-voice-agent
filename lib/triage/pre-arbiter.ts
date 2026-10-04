@@ -33,7 +33,16 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
     if (idx === -1) return false;
     const windowStart = Math.max(0, idx - 70);
     const window = text.slice(windowStart, idx);
-    return negationPatterns.some((pattern) => pattern.test(window.trim()));
+    const lastBoundary = Math.max(
+      window.lastIndexOf("."),
+      window.lastIndexOf(";"),
+      window.lastIndexOf("!"),
+      window.lastIndexOf("?"),
+      window.lastIndexOf("\n"),
+      window.lastIndexOf(" but ")
+    );
+    const effectiveWindow = lastBoundary !== -1 ? window.slice(lastBoundary) : window;
+    return negationPatterns.some((pattern) => pattern.test(effectiveWindow.trim()));
   };
 
   const hasAffirmative = (patterns: string[]): boolean => {
@@ -46,18 +55,30 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
     const idx = text.search(re);
     const windowStart = Math.max(0, idx - 70);
     const window = text.slice(windowStart, idx);
-    return !negationPatterns.some((pattern) => pattern.test(window.trim()));
+    const lastBoundary = Math.max(
+      window.lastIndexOf("."),
+      window.lastIndexOf(";"),
+      window.lastIndexOf("!"),
+      window.lastIndexOf("?"),
+      window.lastIndexOf("\n"),
+      window.lastIndexOf(" but ")
+    );
+    const effectiveWindow = lastBoundary !== -1 ? window.slice(lastBoundary) : window;
+    return !negationPatterns.some((pattern) => pattern.test(effectiveWindow.trim()));
   };
 
   // 1. Cardiovascular / Acute Coronary Syndrome (ACS) Red Flags
   const hasChestPain = hasAffirmative([
     "chest pain", "chest pressure", "crushing chest", "heavy chest", "tightness in chest",
-    "elephant on chest", "squeezing chest", "pain radiating to left arm", "substernal"
-  ]) || hasAffirmativeRegex(/\b(crushing|heavy|tightness|pressure|squeezing).*chest\b/i);
+    "elephant on chest", "squeezing chest", "pain radiating to left arm", "substernal",
+    "tight pressure in the center", "tight pressure in the middle", "pressure under breastbone"
+  ]) || hasAffirmativeRegex(/\b(crushing|heavy|tightness|tight|pressure|squeezing)[^.,;!?\n]*chest\b/i)
+     || hasAffirmativeRegex(/\bchest[^.,;!?\n]*(pressure|tight|squeeze|crush|heav|pain)\b/i)
+     || (hasAffirmative(["breastbone", "center of my chest", "middle of my chest"]) && hasAffirmative(["pressure", "tight", "squeezing", "heavy", "weight"]));
 
   const hasCardiacRadiation = hasAffirmative([
     "left arm", "jaw pain", "neck pain", "between shoulder blades", "cold sweats", "diaphoresis"
-  ]) || hasAffirmativeRegex(/radiat.*(left arm|arm|jaw)/i);
+  ]) || hasAffirmativeRegex(/radiat[^.,;!?\n]*(left arm|arm|jaw)/i);
 
   if (hasChestPain) {
     pre_safety_flags.push("PRE_FLAG_ACUTE_CHEST_PAIN");
@@ -76,7 +97,7 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
   const hasNeuroDeficit = hasAffirmative([
     "facial droop", "face drooping", "arm weakness", "slurred speech", "cannot speak",
     "sudden numbness", "loss of speech", "sudden confusion", "hemiparesis",
-  ]) || hasAffirmativeRegex(/\b(facial.*droop|face.*droop|arm.*weak|cannot.*lift.*arm|slurred.*speech|sudden.*numb)/i);
+  ]) || hasAffirmativeRegex(/\b(facial[^.,;!?\n]*droop|face[^.,;!?\n]*droop|arm[^.,;!?\n]*weak|cannot[^.,;!?\n]*lift[^.,;!?\n]*arm|slurred[^.,;!?\n]*speech|sudden[^.,;!?\n]*numb)/i);
 
   if (hasNeuroDeficit) {
     pre_safety_flags.push("PRE_FLAG_ACUTE_NEUROLOGIC_DEFICIT");
@@ -96,6 +117,34 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
 
   if (hasAirwayCompromise) {
     pre_safety_flags.push("PRE_FLAG_IMMEDIATE_AIRWAY_FAILURE");
+  }
+
+  // 3b. Deep Neck Space Infection / Peritonsillar Abscess (PTA) Airway Threat Red Flags
+  const hasMuffledVoice = hasAffirmative([
+    "muffled voice", "hot potato voice", "voice sounds muffled", "voice sounds a bit muffled",
+    "something in my mouth", "potato in my mouth"
+  ]) || hasAffirmativeRegex(/\b(voice.*muffled|muffled.*voice|something in.*mouth)\b/i);
+
+  const hasSevereOdynophagiaOrAirwayThreat = hasAffirmative([
+    "swallowing saliva", "swallow saliva", "cannot swallow saliva", "painful to swallow saliva",
+    "hurts to swallow saliva", "drooling", "spitting saliva", "can't open mouth", "cannot open mouth",
+    "trismus", "stridor", "trouble breathing", "throat swelling"
+  ]) || hasAffirmativeRegex(/\b(?:swallowing\s+saliva|saliva\s+is\s+really\s+painful)\b/i);
+
+  const hasFeverInTranscript = hasAffirmative(["fever", "temperature", "chills"]) ||
+    hasAffirmativeRegex(/\b(?:10[0-9](?:\.[0-9]+)?|3[8-9]\.[0-9]|fever)\b/i);
+
+  const hasDeepNeckInfectionRisk = (hasMuffledVoice && hasSevereOdynophagiaOrAirwayThreat && hasFeverInTranscript) ||
+    (hasMuffledVoice && hasSevereOdynophagiaOrAirwayThreat);
+
+  if (hasDeepNeckInfectionRisk) {
+    pre_safety_flags.push("PRE_FLAG_DEEP_NECK_INFECTION_OR_PTA");
+    suggested_specialists.push({
+      specialty: "otolaryngology",
+      reason: "Suspected peritonsillar abscess / deep neck space infection with potential airway compromise",
+      priority: "immediate",
+      trigger_flags: ["PRE_FLAG_DEEP_NECK_INFECTION_OR_PTA"]
+    });
   }
 
   // Check speech features if provided

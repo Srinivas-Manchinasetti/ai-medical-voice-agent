@@ -10,6 +10,7 @@ import { generateDoctorTurnResponse } from "@/lib/ai/clinical-llm";
 import { hospitalRagService } from "@/lib/care-network/hospital-rag";
 import { buildProvenanceEvidenceFromClinicalState } from "@/lib/agents/provenance";
 import { extractSubfieldState } from "@/lib/triage/clinical-state";
+import { evaluatePreArbiter } from "@/lib/triage/pre-arbiter";
 
 import {
   checkRateLimit,
@@ -75,56 +76,83 @@ export async function POST(request: Request) {
     const cleanMsg = message.trim();
     const cleanMsgLower = cleanMsg.toLowerCase();
 
-    // Check if this is a conversational greeting, mic check, or polite small talk without symptoms
-    const isGreeting =
-      /^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me|testing|greetings)[.!?\s]*$/i.test(cleanMsgLower) ||
-      (cleanMsg.length <= 15 && /\b(hello|hi|hey|greetings)\b/i.test(cleanMsgLower));
+    // P0 SAFETY CHECK: Red-flag scan on incoming utterance MUST execute BEFORE greeting or acknowledgment shortcuts!
+    // Ensures utterances like "ok but my chest hurts now" or "hi having chest pain" immediately enter emergency escalation.
+    const preCheck = evaluatePreArbiter({
+      transcript: cleanMsg,
+      speech_features: body.speechFeatures,
+      demographics: {
+        age: body.interviewState?.patientDemographics?.age,
+        age_group: (body.interviewState?.patientDemographics?.age_group || "adult") as any,
+      },
+    });
 
-    const isThankYou = /^(thank\s+you|thanks|thank\s+you\s+so\s+much|ok\s+thanks|bye|goodbye)[.!?\s]*$/i.test(cleanMsgLower);
+    const hasRedFlagOnCurrentUtterance = preCheck.immediate_danger || (preCheck.pre_safety_flags && preCheck.pre_safety_flags.length > 0);
 
-    if (isGreeting) {
-      const greetingReplies: Record<string, string> = {
-        "dr-sarah-chen": "Hello! I'm Dr. Sarah Chen, Chief of Internal Medicine. I can hear you clearly. What symptoms or medical concerns brought you in today?",
-        "dr-marcus-vance": "Hello, I'm Dr. Marcus Vance, Senior Cardiologist. I'm listening closely. Please describe any chest discomfort, palpitations, or symptoms you're feeling.",
-        "dr-elena-rostova": "Hello! I'm Dr. Elena Rostova, Consultant Pediatrician. How can I assist you or your family today?",
-        "dr-arthur-pendelton": "Good day, I'm Dr. Arthur Pendelton in Neurology. How are you feeling today, and what symptoms would you like us to evaluate?",
-        "dr-anna-bennett": "Hello, I'm Dr. Anna Bennett, Consultant Dermatologist. Please tell me about any symptoms, skin changes, or reactions you're experiencing."
-      };
-      const doctorGreeting = greetingReplies[doctor.id] || `Hello! I'm ${doctor.name}. I'm here and ready to help. What symptoms are you experiencing?`;
+    // Only allow greeting, thank-you, or acknowledgment short-circuit when NO red flags exist on current utterance
+    if (!hasRedFlagOnCurrentUtterance) {
+      const isGreeting =
+        /^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me|testing|greetings)[.!?\s]*$/i.test(cleanMsgLower);
 
-      return NextResponse.json({
-        doctorReply: doctorGreeting,
-        doctor: {
-          id: doctor.id,
-          name: doctor.name,
-          specialty: doctor.specialty,
-          avatarUrl: doctor.avatarUrl,
-          voiceGender: doctor.voiceGender,
-          voiceId: doctor.voiceId,
-        },
-        phase: "greeting",
-        board: null,
-        speech_features: null,
-        triage: null
-      });
-    }
+      const isPureThankYou =
+        /^(?:thank\s+you|thanks)(?:\s+(?:doctor|dr\b|chen|vance|rostova|pendelton|bennett|so\s+much|a\s+lot))?[.!?\s]*$/i.test(cleanMsgLower) ||
+        /^(?:bye|goodbye|take\s+care)[.!?\s]*$/i.test(cleanMsgLower);
 
-    if (isThankYou) {
-      return NextResponse.json({
-        doctorReply: "You're very welcome! Please don't hesitate to reach back out if your symptoms change or worsen. Take care and stay safe.",
-        doctor: {
-          id: doctor.id,
-          name: doctor.name,
-          specialty: doctor.specialty,
-          avatarUrl: doctor.avatarUrl,
-          voiceGender: doctor.voiceGender,
-          voiceId: doctor.voiceId,
-        },
-        phase: "closing",
-        board: null,
-        speech_features: null,
-        triage: null
-      });
+      const isPureAcknowledgment =
+        /^(?:ok(?:ay)?|got\s+it|understood|sure|alright|fine|sounds\s+good|cool)(?:\s+(?:doctor|dr\b|chen|vance|rostova|pendelton|bennett|thanks|thank\s+you))?[.!]?$/i.test(cleanMsgLower);
+
+      if (isGreeting) {
+        const greetingReplies: Record<string, string> = {
+          "dr-sarah-chen": "Hello! I'm Dr. Sarah Chen, Chief of Internal Medicine. I can hear you clearly. What symptoms or medical concerns brought you in today?",
+          "dr-marcus-vance": "Hello, I'm Dr. Marcus Vance, Senior Cardiologist. I'm listening closely. Please describe any chest discomfort, palpitations, or symptoms you're feeling.",
+          "dr-elena-rostova": "Hello! I'm Dr. Elena Rostova, Consultant Pediatrician. How can I assist you or your family today?",
+          "dr-arthur-pendelton": "Good day, I'm Dr. Arthur Pendelton in Neurology. How are you feeling today, and what symptoms would you like us to evaluate?",
+          "dr-anna-bennett": "Hello, I'm Dr. Anna Bennett, Consultant Dermatologist. Please tell me about any symptoms, skin changes, or reactions you're experiencing."
+        };
+        const doctorGreeting = greetingReplies[doctor.id] || `Hello! I'm ${doctor.name}. I'm here and ready to help. What symptoms are you experiencing?`;
+
+        return NextResponse.json({
+          doctorReply: doctorGreeting,
+          doctor: {
+            id: doctor.id,
+            name: doctor.name,
+            specialty: doctor.specialty,
+            avatarUrl: doctor.avatarUrl,
+            voiceGender: doctor.voiceGender,
+            voiceId: doctor.voiceId,
+          },
+          phase: "greeting",
+          board: null,
+          speech_features: null,
+          triage: null
+        });
+      }
+
+      if (isPureThankYou || (isPureAcknowledgment && (body.interviewState?.phase === "decided" || body.interviewState?.phase === "closing"))) {
+        const isEmergencyDecided = body.interviewState?.informationState === "emergency_preempted" ||
+          body.interviewState?.slots?.known_facts?.some((f: string) => /EMERGENCY|ESI LEVEL [12]|CRITICAL/i.test(f));
+
+        const closingDoctorReply = isEmergencyDecided
+          ? "Please remember this requires urgent emergency medical evaluation. If you haven't already, please call 108 or have someone take you to the nearest emergency department right now. Do not wait."
+          : "You're very welcome! Please don't hesitate to reach back out if your symptoms change or worsen. Take care and stay safe.";
+
+        return NextResponse.json({
+          doctorReply: closingDoctorReply,
+          doctor: {
+            id: doctor.id,
+            name: doctor.name,
+            specialty: doctor.specialty,
+            avatarUrl: doctor.avatarUrl,
+            voiceGender: doctor.voiceGender,
+            voiceId: doctor.voiceId,
+          },
+          phase: "closing",
+          interviewState: body.interviewState,
+          board: null,
+          speech_features: null,
+          triage: null
+        });
+      }
     }
 
     // Cumulative patient utterances for comprehensive clinical context (filtering out raw greetings)
@@ -447,6 +475,25 @@ export async function POST(request: Request) {
       }
     }
 
+    // POST-DECISION RE-EVALUATION: If the patient was already in 'decided' phase from a previous
+    // board session but new pre-arbiter red flags have appeared on this turn (e.g. "my voice is muffled"
+    // adding PTA risk after the board already ran), force re-convening rather than returning ASK_PATIENT.
+    const previousPhase = body.interviewState?.phase;
+    const previousFlags = new Set<string>(body.interviewState?.slots?.known_facts
+      ?.filter((f: string) => f.startsWith("PRE_FLAG_"))
+      || []);
+    const currentFlags = turnResult.preArbiterResult.pre_safety_flags || [];
+    const newRedFlags = currentFlags.filter((f: string) => !previousFlags.has(f));
+
+    const wasAlreadyDecidedPhase = previousPhase === "decided" || previousPhase === "board_decision" || previousPhase === "closing";
+    if (wasAlreadyDecidedPhase && newRedFlags.length > 0 &&
+        (turnResult.action === "ASK_PATIENT" || turnResult.action === "CLARIFY")) {
+      console.warn(`[MedVoice AI Post-Decision Re-evaluation] New red flags detected post-decision: [${newRedFlags.join(", ")}]. Forcing board re-convene.`);
+      turnResult.action = "EMERGENCY_CONVENE_BOARD" as any;
+      turnResult.state.phase = "decided";
+      turnResult.state.informationState = "emergency_preempted";
+    }
+
     // If conversation manager determined patient follow-up or clarification is needed
     if (turnResult.action === "ASK_PATIENT" || turnResult.action === "CLARIFY") {
       return NextResponse.json({
@@ -467,6 +514,7 @@ export async function POST(request: Request) {
           provider: llmResult.provider,
           model: llmResult.model,
           latencyMs: llmResult.latencyMs,
+          fallbackReason: llmResult.fallbackReason,
         },
         board: {
           phase: turnResult.state.phase,
@@ -584,7 +632,47 @@ export async function POST(request: Request) {
       }
     }
 
-    const finalDoctorReply = activeDoctorReply || turnResult.doctorReply || boardOutput.doctor_reply;
+    const isEmergency = Boolean(
+      turnResult.action === "EMERGENCY_CONVENE_BOARD" ||
+      turnResult.preArbiterResult?.immediate_danger ||
+      (turnResult.preArbiterResult?.pre_safety_flags && turnResult.preArbiterResult.pre_safety_flags.length > 0) ||
+      boardOutput?.post_arbiter?.final_triage_level === "emergency"
+    );
+
+    const wasAlreadyDecided = body.interviewState?.phase === "decided" || body.interviewState?.phase === "board_decision";
+
+    let finalDoctorReply: string;
+
+    if (isEmergency || wasAlreadyDecided) {
+      // Emergency preemption or post-decision turn: active conversational guidance takes absolute precedence
+      finalDoctorReply = activeDoctorReply || turnResult.doctorReply || boardOutput?.doctor_reply || "";
+      if (isEmergency && !/\b(108|112|emergency|ambulance|hospital|urgent|er\b|immediately)\b/i.test(finalDoctorReply)) {
+        finalDoctorReply = `This is a medical emergency. Please call 108 or proceed to the nearest emergency department immediately. ${finalDoctorReply}`.trim();
+      }
+    } else if (boardOutput && boardOutput.doctor_reply) {
+      // Pre-TTS Validator for non-emergency board reply: ensure no fabricated unassessed vitals
+      const text = boardOutput.doctor_reply.toLowerCase();
+      const hasFabricatedVitals = /\b(blood\s+pressure\s+is\s+\d+|bp\s+is\s+\d+|heart\s+rate\s+is\s+\d+)\b/i.test(text);
+      if (hasFabricatedVitals) {
+        finalDoctorReply = activeDoctorReply || turnResult.doctorReply;
+      } else {
+        finalDoctorReply = boardOutput.doctor_reply;
+      }
+    } else {
+      finalDoctorReply = activeDoctorReply || turnResult.doctorReply;
+    }
+
+    // Voice-length guard: board output may be clinician-length text. Truncate for TTS.
+    const finalWordCount = finalDoctorReply.split(/\s+/).filter(Boolean).length;
+    if (finalWordCount > 60) {
+      const sentences = finalDoctorReply.match(/[^.!?]+[.!?]+/g);
+      if (sentences && sentences.length >= 2) {
+        const truncated = sentences.slice(0, 2).join(" ").trim();
+        if (truncated.split(/\s+/).length <= 55) {
+          finalDoctorReply = truncated;
+        }
+      }
+    }
 
     return NextResponse.json({
       doctorReply: finalDoctorReply,
@@ -608,6 +696,7 @@ export async function POST(request: Request) {
         provider: llmResult.provider,
         model: llmResult.model,
         latencyMs: llmResult.latencyMs,
+        fallbackReason: llmResult.fallbackReason,
       },
       sufficiency,
       board: {

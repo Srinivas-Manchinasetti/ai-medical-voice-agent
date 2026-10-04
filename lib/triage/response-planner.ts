@@ -245,18 +245,44 @@ export class ResponsePlanner {
 
     // 8. GENERAL CLINICAL INTAKE: DYNAMIC NEXT-ACTION SELECTION
     const subfields = extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory);
-    const hasChest = Boolean(state.slots.character || state.slots.location === "chest" || /\bchest\b/i.test(state.cumulativeTranscript));
+    const hasChest = Boolean(state.slots.location === "chest" || /\b(chest|heart|sternum|angina|substernal)\b/i.test(state.cumulativeTranscript));
     const hasNeuro = Boolean(state.slots.neurological_signs.length > 0 || /\b(headache|dizz|droop|weak|speech)\b/i.test(state.cumulativeTranscript));
+    const hasThroat = Boolean(state.slots.location === "throat" || /\b(throat|swallow|pharyngitis|voice)\b/i.test(state.cumulativeTranscript));
+    const hasFatigue = /\b(tired|fatigue|exhaust|malaise|weakness|low energy)\b/i.test(state.cumulativeTranscript) ||
+      state.slots.known_facts.some(f => /tired|fatigue/i.test(f));
 
+    const slotAskCount = memory.slotAskCount || {};
     const askedQuestions = new Set(memory.questionsAlreadyAsked.map(q => q.toLowerCase()));
     const deniedSymptoms = new Set((memory.deniedSymptoms || []).map(d => d.toLowerCase()));
     const isTopicAddressed = (topic: string) => {
       const topLower = topic.toLowerCase();
+      // Generic slot repetition guard: if asked 2 or more times without being filled, mark exhausted!
+      if ((slotAskCount[topLower] || 0) >= 2) return true;
       if (askedQuestions.has(topLower)) return true;
       if (deniedSymptoms.has(topLower)) return true;
       if (state.slots.known_facts.some(f => f.toLowerCase().includes(topLower))) return true;
       if ((state.slots as any)[topic]) return true;
+      if (topic === "fever" && (deniedSymptoms.has("fever") || state.slots.known_facts.some(f => /fever/i.test(f)) || state.cumulativeTranscript.toLowerCase().includes("no fever"))) return true;
+      if (topic === "postural_dizziness" && (state.slots.known_facts.some(f => /dizz|lightheaded/i.test(f)) || state.cumulativeTranscript.toLowerCase().includes("dizz") || state.cumulativeTranscript.toLowerCase().includes("lightheaded"))) return true;
+      if (topic === "oral_intake" && (state.slots.known_facts.some(f => /water|drink|eat|intake/i.test(f)) || state.cumulativeTranscript.toLowerCase().includes("drinking much water"))) return true;
+      if (topic === "red_flag_screen" && (state.cumulativeTranscript.toLowerCase().includes("no chest pain") || state.cumulativeTranscript.toLowerCase().includes("no shortness of breath"))) return true;
       return false;
+    };
+
+    const REPHRASED_PHRASINGS: Record<string, string> = {
+      onset_pattern: "Just to clarify, did your symptoms begin all at once out of nowhere, or did they develop slowly over time?",
+      onset_time: "To help me understand the timeline better, roughly when did you first notice this starting?",
+      onset: "To help me pin down the onset, when did this start, and did it come on all of a sudden or gradually?",
+      swallowing_difficulty: "Just to make sure I have this completely right—are you able to swallow liquids and saliva normally, or does it feel stuck or painful?",
+      fever: "Have you felt feverish, hot to the touch, or experienced any temperature spikes or chills?",
+      character: "To help me understand better, how would you describe the feeling — would you say it's more of an ache, a burning sensation, or a sharp pressure?",
+      severity: "On a scale from 0 to 10 where 10 is the worst discomfort imaginable, roughly where would you rate it right now?",
+      radiation: "Does the discomfort stay in one spot, or do you feel it spreading to your shoulder, arm, back, or neck?",
+      exertional: "Does this happen mainly when you're exerting yourself physically, or does it also happen while sitting quietly?",
+      associated_symptoms: "Along with that, have you noticed any other symptoms like cold sweating, nausea, or shortness of breath?",
+      ear_pain: "Has that pain spread up into your ears at all?",
+      course: "Over the last day or two, has the symptom progression been worsening, getting better, or remaining about the same?",
+      neurological_signs: "Just to be thorough, have you felt any weakness on one side, difficulty speaking clearly, or face numbness?",
     };
 
     let nextInquiry: { topic: string; clinicalRationale: string; suggestedPhrasing: string } | undefined = undefined;
@@ -421,14 +447,34 @@ export class ResponsePlanner {
       } else if (!subfields.characterSeverity.character && !isTopicAddressed("character")) {
         nextInquiry = {
           topic: "character",
-          clinicalRationale: "Establish symptom sensation and quality.",
-          suggestedPhrasing: "Could you describe what the sensation feels like — is it sharp, burning, dull, or a tight pressure?",
+          clinicalRationale: hasFatigue ? "Assess functional impact and quality of fatigue." : "Establish symptom sensation and quality.",
+          suggestedPhrasing: hasFatigue
+            ? "Could you describe what this fatigue feels like — does it make it hard to get out of bed, or is it a general exhaustion?"
+            : "Could you describe what the sensation feels like — is it sharp, burning, dull, or a tight pressure?",
         };
       } else if (!subfields.characterSeverity.severity && !isTopicAddressed("severity")) {
         nextInquiry = {
           topic: "severity",
-          clinicalRationale: "Quantify symptom pain intensity.",
+          clinicalRationale: "Quantify symptom pain or fatigue intensity.",
           suggestedPhrasing: "How severe is that discomfort right now on a scale from zero to ten?",
+        };
+      } else if (hasFatigue && !isTopicAddressed("postural_dizziness")) {
+        nextInquiry = {
+          topic: "postural_dizziness",
+          clinicalRationale: "Screen for orthostatic hypotension, dehydration, and lightheadedness in fatigue.",
+          suggestedPhrasing: "Do you feel lightheaded or dizzy when you stand up quickly, or have you had any fever or cough?",
+        };
+      } else if (hasFatigue && !isTopicAddressed("oral_intake")) {
+        nextInquiry = {
+          topic: "oral_intake",
+          clinicalRationale: "Assess hydration and oral caloric intake.",
+          suggestedPhrasing: "How has your fluid and food intake been since this started — have you been drinking plenty of water?",
+        };
+      } else if (hasFatigue && !isTopicAddressed("red_flag_screen")) {
+        nextInquiry = {
+          topic: "red_flag_screen",
+          clinicalRationale: "Screen for cardiopulmonary and neurological red flags in fatigue.",
+          suggestedPhrasing: "Are you having any chest pain, difficulty breathing, or numbness in your hands or feet?",
         };
       } else if (hasThroat && !isTopicAddressed("ear_pain")) {
         nextInquiry = {

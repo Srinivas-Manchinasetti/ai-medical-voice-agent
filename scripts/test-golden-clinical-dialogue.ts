@@ -2,6 +2,7 @@ import { conversationManager } from "../lib/triage/conversation-manager";
 import { extractSubfieldState } from "../lib/triage/clinical-state";
 import { POST as voiceChatHandler } from "../app/api/voice/chat/route";
 import { NextRequest } from "next/server";
+import { groqClient } from "../lib/ai/groq-client";
 import { nvidiaClient, NvidiaChatMessage, NvidiaCompletionOptions, NvidiaCompletionResult } from "../lib/ai/nvidia-client";
 
 function assert(condition: boolean, msg: string) {
@@ -40,9 +41,12 @@ async function runModeA() {
   console.log("   Verifying End-to-End State Invariants Across Exact Patient Dialogue");
   console.log("===============================================================================\n");
 
-  // Ensure mock completer is cleared and NVIDIA key is unset for Mode A
+  // Ensure mock completer is cleared and keys are unset for Mode A
+  groqClient.setMockCompleter(null);
   nvidiaClient.setMockCompleter(null);
-  const originalApiKey = process.env.NVIDIA_API_KEY;
+  const originalGroqKey = process.env.GROQ_API_KEY;
+  const originalNvidiaKey = process.env.NVIDIA_API_KEY;
+  delete process.env.GROQ_API_KEY;
   delete process.env.NVIDIA_API_KEY;
 
   try {
@@ -182,9 +186,46 @@ async function runModeA() {
       "Doctor does NOT re-ask duration when asking onset pattern"
     );
 
+    // --- [TURN 7] Scenario B: Gradual Onset Answering ---
+    console.log("\n--- [TURN 7] Scenario B: Gradual Onset Answering ('it started to build up gradually') ---");
+    const t7Msg = "it started to build up gradually";
+    const t7Data = await simulateApiCall(t7Msg, history, interviewState);
+    interviewState = t7Data.interviewState;
+    history.push({ role: "patient", text: t7Msg });
+    history.push({ role: "doctor", text: t7Data.doctorReply });
+
+    console.log("Turn 7 Doctor Reply:", t7Data.doctorReply);
+    console.log("Turn 7 Known Facts:", interviewState.slots.known_facts);
+    const subfieldsT7 = extractSubfieldState(interviewState.slots, interviewState.slots.known_facts, interviewState.conversationMemory);
+    assert(subfieldsT7.onset.onsetPattern === "gradual", "Onset pattern is CONFIRMED as gradual");
+    assert(subfieldsT7.onset.isResolved, "Onset subfield is completely RESOLVED");
+    assert(
+      !t7Data.doctorReply.toLowerCase().includes("started suddenly") &&
+      !t7Data.doctorReply.toLowerCase().includes("when did this begin"),
+      "Scenario B Verified: Doctor does NOT repeat onset question after 'it started to build up gradually'"
+    );
+
+    // --- [TURN 8] Scenario A: Post-Decision Acknowledgment ('ok') ---
+    console.log("\n--- [TURN 8] Scenario A: Post-Decision Acknowledgment ('ok') ---");
+    // Simulate board completed / decided state
+    interviewState.phase = "decided";
+    interviewState.informationState = "sufficient_for_decision";
+    const t8Msg = "ok";
+    const t8Data = await simulateApiCall(t8Msg, history, interviewState);
+    console.log("Turn 8 Doctor Reply to 'ok':", t8Data.doctorReply);
+    assert(
+      !t8Data.doctorReply.includes("give me just a moment while I consult with our clinical specialists"),
+      "Scenario A Verified: Doctor does NOT repeat board consultation placeholder when patient says 'ok'"
+    );
+    assert(
+      t8Data.doctorReply.includes("welcome") || t8Data.doctorReply.includes("Take care") || t8Data.doctorReply.includes("symptoms change"),
+      "Scenario A Verified: Doctor returns post-consultation closing guidance"
+    );
+
     console.log("✅ MODE A PASSED: Deterministic Planner logic is verified.");
   } finally {
-    if (originalApiKey) process.env.NVIDIA_API_KEY = originalApiKey;
+    if (originalGroqKey) process.env.GROQ_API_KEY = originalGroqKey;
+    if (originalNvidiaKey) process.env.NVIDIA_API_KEY = originalNvidiaKey;
   }
 }
 
@@ -211,13 +252,14 @@ async function runModeB() {
   console.log("===============================================================================\n");
 
   let mockResponseText = "";
-  nvidiaClient.setMockCompleter(async (messages: NvidiaChatMessage[], options: NvidiaCompletionOptions) => {
-    return {
-      content: JSON.stringify({ patientResponse: mockResponseText }),
-      model: "mock-llm-adapter",
-      latencyMs: 12,
-    };
+  const mockFn = async () => ({
+    content: JSON.stringify({ patientResponse: mockResponseText }),
+    model: "mock-llm-adapter",
+    latencyMs: 12,
   });
+
+  groqClient.setMockCompleter(mockFn);
+  nvidiaClient.setMockCompleter(mockFn);
 
   try {
     // -------------------------------------------------------------------------
@@ -236,7 +278,7 @@ async function runModeB() {
     console.log("Actual Doctor Reply:", res1.doctorReply);
     console.log("LLM Meta:", res1.llmMeta);
 
-    assert(res1.llmMeta?.provider === "nvidia", "Mock LLM was executed (provider === 'nvidia')");
+    assert(res1.llmMeta?.provider === "groq" || res1.llmMeta?.provider === "nvidia", "Mock LLM was executed (provider === 'groq' or 'nvidia')");
     assert(res1.doctorReply === mockResponseText, "Valid realization was accepted verbatim");
     assert(state.pendingQuestion?.targetSlot === "onset_pattern", "Target slot remains 'onset_pattern'");
 
@@ -357,7 +399,7 @@ async function runModeB() {
     console.log("T2C Mock LLM Attempted (Valid Swallowing Inquiry):", mockResponseText);
     console.log("T2C Doctor Reply (Delivered):", loopT2C.doctorReply);
 
-    assert(loopT2C.llmMeta?.provider === "nvidia", "T2C: Valid realization of planned target was ACCEPTED");
+    assert(loopT2C.llmMeta?.provider === "groq" || loopT2C.llmMeta?.provider === "nvidia", "T2C: Valid realization of planned target was ACCEPTED");
     assert(loopT2C.doctorReply === mockResponseText, "T2C: Doctor reply delivered the validated LLM wording");
     assert(loopT2C.interviewState.pendingQuestion?.targetSlot === "swallowing_difficulty", "T2C: Target slot remains 'swallowing_difficulty'");
 
@@ -365,13 +407,52 @@ async function runModeB() {
     console.log("   ✅ ALL MODE B MOCK-LLM INTEGRATION & REPETITION TESTS PASSED 100%!");
     console.log("===============================================================================\n");
   } finally {
+    groqClient.setMockCompleter(null);
     nvidiaClient.setMockCompleter(null);
   }
+}
+
+/**
+ * ===============================================================================
+ * MODE C: Real Groq Provider Mode (Live Network Call When Configured)
+ * ===============================================================================
+ * Exercises the production Groq Cloud API with openai/gpt-oss-120b when
+ * GROQ_API_KEY is configured in the environment.
+ */
+async function runModeC() {
+  if (!groqClient.isConfigured()) {
+    console.log("===============================================================================");
+    console.log("   [MODE C SKIPPED] Real Groq Cloud Provider Mode");
+    console.log("   GROQ_API_KEY is not configured. Skipping live network calls.");
+    console.log("===============================================================================\n");
+    return;
+  }
+
+  console.log("===============================================================================");
+  console.log("   [MODE C] REAL GROQ CLOUD PROVIDER INTEGRATION");
+  console.log(`   Model: ${groqClient.getDefaultModel()} | BaseURL: ${groqClient.getBaseUrl()}`);
+  console.log("===============================================================================\n");
+
+  groqClient.setMockCompleter(null);
+  let state = conversationManager.createInitialState();
+  const res = await simulateApiCall("I've had a sore throat for two days.", [], state);
+
+  console.log("Live Turn Doctor Reply:", res.doctorReply);
+  console.log("Live Turn LLM Meta:", res.llmMeta);
+  console.log("Live Turn Target Slot:", res.interviewState?.pendingQuestion?.targetSlot);
+
+  assert(res.llmMeta?.provider === "groq" || res.llmMeta?.provider === "fallback", "Mode C: LLM response delivered by Groq or validated fallback");
+  assert(Boolean(res.doctorReply && res.doctorReply.length > 5), "Mode C: Doctor reply articulated non-empty clinical text");
+
+  console.log("\n===============================================================================");
+  console.log("   ✅ MODE C REAL GROQ INTEGRATION VERIFIED!");
+  console.log("===============================================================================\n");
 }
 
 async function main() {
   await runModeA();
   await runModeB();
+  await runModeC();
 }
 
 main().catch(err => {

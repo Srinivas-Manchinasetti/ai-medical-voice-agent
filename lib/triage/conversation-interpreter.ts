@@ -1,5 +1,5 @@
 import { PendingQuestion } from "../agents/schemas";
-import { extractNumericSeverity, NON_DENIABLE_SLOTS, detectQuestionTargetSlot } from "./clinical-state";
+import { extractNumericSeverity, NON_DENIABLE_SLOTS, detectQuestionTargetSlot, parseOnsetDimensions } from "./clinical-state";
 
 export type PatientIntent =
   | "answer_pending_question"
@@ -425,10 +425,9 @@ export class ConversationInterpreter {
 
       // Check Onset slot
       if (targetSlot === "onset") {
-        const onsetMatch = lower.match(/\b(\d+|twenty|thirty|ten|forty|a\s+week|few\s+days|minutes?|hours?|days?|sudden|gradual)\b/i);
-        if (onsetMatch) {
-          const isSudden = /sudden|abrupt|got\s+worse\s+suddenly/i.test(lower);
-          const val = `${onsetMatch[0]}${isSudden ? " (acute worsening)" : ""}`;
+        const parsedOnset = parseOnsetDimensions(lower);
+        const val = parsedOnset.onsetTime || parsedOnset.onsetPattern;
+        if (val) {
           return {
             rawUtterance: text,
             intent: "answer_pending_question",

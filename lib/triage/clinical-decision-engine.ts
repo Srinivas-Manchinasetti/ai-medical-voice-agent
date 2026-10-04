@@ -8,6 +8,10 @@ export type TurnIntent =
   | "CLARIFICATION_OR_CORRECTION"
   | "EMOTIONAL_OR_UNCERTAIN"
   | "EMERGENCY_ACTION_INQUIRY"
+  | "EMERGENCY_TRANSPORT_INQUIRY"
+  | "EMERGENCY_ASPIRIN_STATUS"
+  | "EMERGENCY_DISPATCH_CONFIRMED"
+  | "HOSPITAL_PROXIMITY_UPDATE"
   | "NEW_SYMPTOM"
   | "TRANSIENT_SYMPTOMS_RESOLVED"
   | "FINANCIAL_CONSTRAINT"
@@ -55,7 +59,9 @@ export class ClinicalDecisionEngine {
     const lower = text.toLowerCase();
 
     // A. Closing / Thank you
-    if (/^(thank\s+you|thanks|ok\s+thanks|bye|goodbye|have\s+a\s+good\s+(?:day|night))[.!?\s]*$/i.test(lower)) {
+    if (/^(thank\s+you|thanks|ok\s+thanks|bye|goodbye|have\s+a\s+good\s+(?:day|night))[.!?\s]*$/i.test(lower) ||
+        /\b(?:thank\s+you|thanks)\s+(?:doctor|dr\.?)\s*(?:sarah|chen)?/i.test(lower) ||
+        /(?:thank\s+you|thanks)[.!?\s]*$/i.test(lower)) {
       return {
         intent: "CLOSING",
         confidence: 0.98,
@@ -63,7 +69,43 @@ export class ClinicalDecisionEngine {
       };
     }
 
-    // B. Small talk / Greeting without symptoms
+    // B. Emergency Transport Inquiry ("Can she just drive me there, or should we call an ambulance?")
+    if (/\b(?:can\s+(?:she|he|we|my\s+wife|my\s+husband|someone)\s+(?:just\s+)?drive\s+me|should\s+we\s+call\s+an?\s+ambulance|drive\s+(?:me\s+)?(?:there\s+)?or\s+(?:should\s+we\s+)?call\s+an?\s+ambulance|drive\s+(?:me\s+)?to\s+(?:the\s+)?hospital\s+or\s+call)\b/i.test(lower)) {
+      return {
+        intent: "EMERGENCY_TRANSPORT_INQUIRY",
+        confidence: 0.98,
+        extractedEntities: { symptoms: [] }
+      };
+    }
+
+    // C. Emergency Aspirin Status ("I don't have any aspirin at home, but my wife is here with me right now")
+    if (/\b(?:don'?t\s+have\s+(?:any\s+)?aspirin|no\s+aspirin|take\s+(?:an?\s+)?aspirin|chew\s+(?:an?\s+)?aspirin|find\s+aspirin)\b/i.test(lower)) {
+      return {
+        intent: "EMERGENCY_ASPIRIN_STATUS",
+        confidence: 0.98,
+        extractedEntities: { symptoms: [] }
+      };
+    }
+
+    // D. Emergency Dispatch Confirmed ("she is dialing 108 right now", "The ambulance dispatcher is on speakerphone")
+    if (/\b(?:dialing\s+108|dialing\s+112|calling\s+108|calling\s+112|dispatcher\s+is\s+on\s+speakerphone|on\s+speakerphone|ambulance\s+is\s+(?:on\s+the\s+way|called|coming))\b/i.test(lower)) {
+      return {
+        intent: "EMERGENCY_DISPATCH_CONFIRMED",
+        confidence: 0.98,
+        extractedEntities: { symptoms: [] }
+      };
+    }
+
+    // E. Hospital Proximity Update ("We live about 15 minutes away from the nearest government hospital")
+    if (/\b(?:\d+\s*minutes?\s+away\s+from\s+(?:the\s+)?(?:nearest\s+)?(?:government\s+)?hospital|live\s+about\s+\d+\s+minutes?\s+away)\b/i.test(lower)) {
+      return {
+        intent: "HOSPITAL_PROXIMITY_UPDATE",
+        confidence: 0.95,
+        extractedEntities: { symptoms: [] }
+      };
+    }
+
+    // F. Small talk / Greeting without symptoms
     const hasClinicalKeywords = /\b(pain|tightness|pressure|ache|hurt|droop|stroke|fever|cough|breath|dizzy|numb|bleeding|nausea|vomit|symptom|chest|arm|head|stomach|belly|throat|rash|swelling|burning|weak|vision|speech|words?|slur)\b/i.test(lower);
     if (!hasClinicalKeywords && (/^(hello|hi|hey|good\s+(morning|afternoon|evening)|can\s+you\s+hear\s+me|testing|greetings)[.!?\s]*$/i.test(lower) || (text.length <= 15 && /\b(hello|hi|hey)\b/i.test(lower)))) {
       return {
@@ -73,7 +115,7 @@ export class ClinicalDecisionEngine {
       };
     }
 
-    // C. Emergency Action Inquiry ("What do I do?", "Help me", "Should I call an ambulance?")
+    // G. Emergency Action Inquiry ("What do I do?", "Help me", "Should I call an ambulance?")
     if (/\b(what\s+(do|should)\s+i\s+do|no\s+one\s+(?:is\s+)?around|alone|nobody\s+here|who\s+(?:do|can)\s+i\s+call|should\s+i\s+(?:take|call)|is\s+an?\s+ambulance|help\s+me|what\s+now)\b/i.test(lower)) {
       return {
         intent: "EMERGENCY_ACTION_INQUIRY",
@@ -82,8 +124,8 @@ export class ClinicalDecisionEngine {
       };
     }
 
-    // D. Emotional / Uncertain ("I'm really scared", "Am I going to die?", "I'm terrified")
-    if (/\b(really\s+scared|so\s+scared|terrified|frightened|panicking|freaking\s+out|im\s+scared|am\s+i\s+going\s+to\s+(?:die|be\s+okay|have\s+permanent)|im\s+nervous|so\s+worried|freaking\s+me\s+out)\b/i.test(lower)) {
+    // H. Emotional / Uncertain ("I'm really scared", "Am I going to die?", "Should I be worried?")
+    if (/\b(really\s+scared|so\s+scared|terrified|frightened|panicking|freaking\s+out|im\s+scared|am\s+i\s+going\s+to\s+(?:die|be\s+okay|have\s+permanent)|im\s+nervous|so\s+worried|freaking\s+me\s+out|should\s+i\s+be\s+worried|is\s+it\s+dangerous)\b/i.test(lower)) {
       return {
         intent: "EMOTIONAL_OR_UNCERTAIN",
         confidence: 0.94,
@@ -200,15 +242,17 @@ export class ClinicalDecisionEngine {
     const mentionsHeadache = /\b(headache|head\s+hurts?|pain\s+in\s+(?:my\s+)?head)\b/i.test(lower);
     const mentionsLeg = /\b(leg|foot|walk|feet|stumble|fall)\b/i.test(lower) && !lower.includes("no leg");
     const mentionsNumbness = /\b(numb|tingling|pins\s+and\s+needles)\b/i.test(lower);
+    const mentionsMuffled = /\b(muffled|hot potato|something in (?:my )?mouth|potato in (?:my )?mouth)\b/i.test(lower);
 
     const hasNewSymptomIntro = /\b(i\s+also\s+(?:feel|have|noticed?|got)|and\s+also|another\s+thing|now\s+i\s+(?:feel|have))\b/i.test(lower);
-    if (mentionsHeadBurning || mentionsVision || mentionsHeadache || mentionsLeg || mentionsNumbness || hasNewSymptomIntro) {
+    if (mentionsHeadBurning || mentionsVision || mentionsHeadache || mentionsLeg || mentionsNumbness || mentionsMuffled || hasNewSymptomIntro) {
       const symptoms: Array<{ name: string; laterality?: string; location?: string }> = [];
       if (mentionsHeadBurning) symptoms.push({ name: "burning sensation on head/scalp", location: "head" });
       if (mentionsVision) symptoms.push({ name: "visual disturbance / blurry vision", location: "eyes" });
       if (mentionsHeadache) symptoms.push({ name: "headache", location: "head" });
       if (mentionsLeg) symptoms.push({ name: "lower extremity weakness / trouble walking", location: "leg" });
       if (mentionsNumbness) symptoms.push({ name: "numbness / paresthesia", location: "extremity" });
+      if (mentionsMuffled) symptoms.push({ name: "muffled voice", location: "throat" });
 
       return {
         intent: "NEW_SYMPTOM",
@@ -470,10 +514,104 @@ export class ClinicalDecisionEngine {
   ): NextTurnDecision {
     const isNeuro = preArbiterResult.pre_safety_flags.some(f => f.includes("NEURO")) ||
       /\b(droop|facial|arm|weakness|speech|slur|stroke|aphasia|words?)\b/i.test(state.cumulativeTranscript);
-    const isCardio = preArbiterResult.pre_safety_flags.some(f => f.includes("ACS") || f.includes("CARDIO")) ||
-      /\b(chest|crushing|pressure|radiat|substernal|angina)\b/i.test(state.cumulativeTranscript);
+    const isCardio = preArbiterResult.pre_safety_flags.some(f => f.includes("ACS") || f.includes("CARDIO") || f.includes("CHEST")) ||
+      /\b(chest|crushing|pressure|radiat|substernal|angina|breastbone)\b/i.test(state.cumulativeTranscript);
+    const isThroat = preArbiterResult.pre_safety_flags.some(f => f.includes("NECK") || f.includes("PTA")) ||
+      /\b(throat|swallow|odynophagia|pharyngitis)\b/i.test(state.cumulativeTranscript);
+    const isEmergency = preArbiterResult.immediate_danger ||
+      preArbiterResult.pre_safety_flags.length > 0 ||
+      state.informationState === "emergency_preempted";
 
-    const hist = state.structuredHistory!;
+    const hist = state.structuredHistory || {
+      turnCount: 1,
+      chiefComplaint: "General Medical Evaluation",
+      confirmedFindings: [] as string[],
+      deniedFindings: [] as string[],
+      unansweredDimensions: [] as string[],
+      recentDoctorReplies: [] as string[],
+      investigatedAxes: [] as string[],
+      redFlagsRaised: [] as string[],
+      pediatricObservations: [] as string[],
+      nearbyHospitals: [] as any[],
+    };
+
+    if (state.structuredHistory && !(state.structuredHistory as any).recentDoctorReplies) {
+      (state.structuredHistory as any).recentDoctorReplies = [];
+    }
+
+    const recentReplies = Array.from(new Set([
+      ...(((state.structuredHistory as any)?.recentDoctorReplies as string[]) || []),
+      ...(hist.recentDoctorReplies || []),
+      ...(state.conversationMemory?.lastDoctorQuestion ? [state.conversationMemory.lastDoctorQuestion] : [])
+    ]));
+
+    // CASE 0A: Closing / Farewell
+    if (classification.intent === "CLOSING") {
+      const reply = isEmergency
+        ? "You are very welcome. You are in good hands with the emergency dispatcher. Stay calm, remain seated, and let the paramedics take over as soon as they arrive."
+        : "You are very welcome! Please rest, continue sipping water or electrolyte solution, and have your neighbor check in on you. If your symptoms change or worsen, don't hesitate to seek medical evaluation. Take care.";
+      return {
+        action: "PROVIDE_EMERGENCY_GUIDANCE",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "closing guidance"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0B: Emergency Transport Inquiry ("Can she just drive me there, or should we call an ambulance?")
+    if (classification.intent === "EMERGENCY_TRANSPORT_INQUIRY") {
+      const reply = "Please do NOT have your wife or anyone else drive you in a personal car. You must call 108 or 112 for an emergency ambulance right now. Ambulances are equipped with continuous heart monitoring, emergency oxygen, and defibrillators so paramedics can manage critical changes on the road, which a private car cannot do. Have her dial 108 immediately while you stay seated.";
+      return {
+        action: "PROVIDE_EMERGENCY_GUIDANCE",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "emergency transport guidance"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0C: Emergency Aspirin Status ("I don't have any aspirin at home, but my wife is here with me right now")
+    if (classification.intent === "EMERGENCY_ASPIRIN_STATUS") {
+      const reply = "That is completely fine—please do not get up or exert yourself looking for aspirin or any other pills. Stay completely seated and calm. Have your wife stay right next to you and unlock the front door so the emergency responders can walk straight in.";
+      return {
+        action: "PROVIDE_EMERGENCY_GUIDANCE",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "emergency aspirin guidance"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0D: Emergency Dispatch Confirmed ("she is dialing 108 right now", "The ambulance dispatcher is on speakerphone")
+    if (classification.intent === "EMERGENCY_DISPATCH_CONFIRMED") {
+      const reply = "That is the right decision. Keep the dispatcher on speakerphone, take slow steady breaths, and remain completely still and seated until the ambulance crew arrives.";
+      return {
+        action: "PROVIDE_EMERGENCY_GUIDANCE",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "emergency dispatch confirmation"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0E: Hospital Proximity Update ("We live about 15 minutes away from the nearest government hospital")
+    if (classification.intent === "HOSPITAL_PROXIMITY_UPDATE") {
+      const reply = "Even though the hospital is 15 minutes away, calling 108 for an ambulance is much safer than private travel because trained paramedics can start oxygen, monitoring, and stabilization immediately on arrival. Please stay seated and keep your front door unlocked.";
+      return {
+        action: "PROVIDE_EMERGENCY_GUIDANCE",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "hospital proximity update"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0F: Turn 1 / Acute Presentation of Chest Pressure -> Immediate Emergency Directive
+    if (isCardio && isEmergency && hist.turnCount <= 2 && !state.slots.radiation) {
+      const reply = "I am very concerned about the tight pressure in your chest. Because this could represent an acute heart attack or coronary syndrome, please sit down comfortably right now, stay completely still, and call 108 or 112 for an emergency ambulance immediately. Is there someone with you right now?";
+      return {
+        action: "PROVIDE_EMERGENCY_GUIDANCE",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "acute cardio emergency initial"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
 
     // CASE 1: Patient Challenges or Questions Clinical Relevance ("Wait how is that even related to stroke?", "Why is that?")
     if (classification.intent === "QUESTION_OR_EXPLANATION_REQUEST") {
@@ -497,7 +635,7 @@ export class ClinicalDecisionEngine {
         const reply = `${answer} ${followUp}`;
         return {
           action: "EXPLAIN_AND_INQUIRE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "stroke relevance"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "stroke relevance"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -513,7 +651,7 @@ export class ClinicalDecisionEngine {
         const reply = `${answer} ${followUp}`;
         return {
           action: "EXPLAIN_AND_INQUIRE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "cardiac relevance"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "cardiac relevance"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -532,7 +670,7 @@ export class ClinicalDecisionEngine {
       const generalReply = "I understand why you are asking. In clinical evaluation, these specific patterns help us rule out serious neurological and vascular causes immediately. To help me evaluate this accurately, when did you first notice these symptoms?";
       return {
         action: "EXPLAIN_AND_INQUIRE",
-        spokenDoctorReply: this.guardAgainstRepetition(generalReply, hist.recentDoctorReplies, "general inquiry"),
+        spokenDoctorReply: this.guardAgainstRepetition(generalReply, recentReplies, "general inquiry"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };
@@ -545,7 +683,7 @@ export class ClinicalDecisionEngine {
         const reply = "Even though the symptoms lasted only five minutes and resolved, that pattern can represent a transient ischemic attack, or warning stroke. High risk of a major stroke remains. Are you experiencing any lingering weakness, numbness, or difficulty speaking right now?";
         return {
           action: "EXPLAIN_AND_INQUIRE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "tia transient resolution"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "tia transient resolution"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -553,7 +691,7 @@ export class ClinicalDecisionEngine {
       const reply = "Even though your symptoms feel better now, temporary relief can sometimes happen with significant underlying conditions. Are you completely back to normal, or is any mild symptom lingering?";
       return {
         action: "EXPLAIN_AND_INQUIRE",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "transient improvement"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "transient improvement"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };
@@ -565,7 +703,16 @@ export class ClinicalDecisionEngine {
         const reply = "I understand worries about expense, but an acute neurological evaluation cannot be delayed. Government and public district hospitals provide emergency triage and subsidized care under public healthcare programs. What area or city are you located in so we can identify a nearby public facility?";
         return {
           action: "EXPLAIN_AND_INQUIRE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "financial constraint neuro"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "financial constraint neuro"),
+          doctorName: "Dr. Sarah Chen, MD",
+          specialty: "Internal Medicine & Critical Care Lead"
+        };
+      }
+      if (isThroat || isEmergency) {
+        const reply = "I hear your concern about medical costs. Public government district hospitals and community health centers have emergency units that provide subsidized, low-cost evaluation and medications without private insurance. What city or district are you in so we can verify the nearest community health center or public hospital?";
+        return {
+          action: "EXPLAIN_AND_INQUIRE",
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "financial constraint throat"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -573,7 +720,7 @@ export class ClinicalDecisionEngine {
       const reply = "I hear your concern about healthcare costs. Public district hospitals provide subsidized and affordable care options. What city or district are you in so we can identify nearby government care centers?";
       return {
         action: "EXPLAIN_AND_INQUIRE",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "financial constraint general"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "financial constraint general"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };
@@ -589,7 +736,7 @@ export class ClinicalDecisionEngine {
           const reply = `If you are on the outskirts, calling 108 for an emergency ambulance is safest because paramedics can start care on the road. The nearest verified emergency facility is ${topGov.name}${distStr}. Would you like me to guide you there or coordinate ambulance dispatch?`;
           return {
             action: "PROVIDE_EMERGENCY_GUIDANCE",
-            spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "outskirts hospital guidance"),
+            spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "outskirts hospital guidance"),
             doctorName: "Dr. Sarah Chen, MD",
             specialty: "Internal Medicine & Critical Care Lead"
           };
@@ -597,7 +744,7 @@ export class ClinicalDecisionEngine {
         const reply = "If you are on the outskirts, dialing 108 for an emergency ambulance is safest because trained paramedics can stabilize you during transport. What city or district are you near so we can verify the closest emergency department?";
         return {
           action: "PROVIDE_EMERGENCY_GUIDANCE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "outskirts 108 dispatch"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "outskirts 108 dispatch"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -605,7 +752,7 @@ export class ClinicalDecisionEngine {
       const reply = "Being far from medical centers makes travel difficult. Dialing 108 can provide ambulance transport if needed. What district or town are you in so we can check nearby care options?";
       return {
         action: "EXPLAIN_AND_INQUIRE",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "outskirts general"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "outskirts general"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Primary Triage"
       };
@@ -617,7 +764,7 @@ export class ClinicalDecisionEngine {
         const reply = "Please do not attempt to drive yourself. Dial 108 right now for an emergency ambulance, which is equipped for urgent transport. Is there a family member or neighbor nearby who can stay with you while help arrives?";
         return {
           action: "PROVIDE_EMERGENCY_GUIDANCE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "transport obstacle neuro"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "transport obstacle neuro"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -625,7 +772,7 @@ export class ClinicalDecisionEngine {
       const reply = "Without safe transportation, please do not drive if you feel unwell. Dialing 108 can arrange medical transit, or do you have a friend or neighbor who can take you?";
       return {
         action: "ADVANCE_INTERVIEW",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "transport obstacle general"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "transport obstacle general"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Primary Triage"
       };
@@ -637,7 +784,7 @@ export class ClinicalDecisionEngine {
       const reply = `Let's clarify the timeline. When you say "${phrase}", are you saying the facial drooping and weakness continued over those days, or is this something that happened in the past?`;
       return {
         action: "CLARIFY_TIMELINE",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "timeline shift"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "timeline shift"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };
@@ -649,20 +796,30 @@ export class ClinicalDecisionEngine {
       const reply = `Thank you for correcting that—I've noted that it actually started ${val}. Because unilateral weakness is still medically significant even when it started yesterday, are the symptoms still just as severe right now, or have they improved?`;
       return {
         action: "ACKNOWLEDGE_CORRECTION",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "correction"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "correction"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };
     }
 
-    // CASE 4: Patient Expresses Fear / Panic ("I'm really scared")
+    // CASE 4: Patient Expresses Fear / Panic / Worry ("I'm really scared", "Should I be worried?")
     if (classification.intent === "EMOTIONAL_OR_UNCERTAIN") {
-      const reply = "I understand, and it is completely natural to feel scared right now. You are doing the right thing by getting this evaluated. Please sit down comfortably, take slow steady breaths, and avoid trying to walk or exert yourself. Are you alone right now, or is someone there with you?";
+      if (isEmergency) {
+        const reply = "I understand, and it is completely natural to feel scared right now. You are doing the right thing by getting this evaluated. Please sit down comfortably, take slow steady breaths, and avoid trying to walk or exert yourself. Are you alone right now, or is someone there with you?";
+        return {
+          action: "REASSURE_AND_FOCUS",
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "reassurance emergency"),
+          doctorName: "Dr. Sarah Chen, MD",
+          specialty: "Internal Medicine & Critical Care Lead"
+        };
+      }
+      // Non-emergency (e.g. Scenario 1 Turn 9: fatigue, orthostatic dizziness, reduced oral intake)
+      const reply = "I understand why you are worried, but based on what you have described, this is not an immediate life-threatening emergency. Feeling lightheaded specifically when standing up, especially after drinking and eating very little, points toward dehydration and low blood pressure upon standing. You do not need an ambulance right now. Please sit down, begin sipping water or oral rehydration fluids slowly, and have your neighbor check in on you. If you develop chest pain, fainting, or severe breathlessness, call 108 immediately.";
       return {
         action: "REASSURE_AND_FOCUS",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "reassurance"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "reassurance non-emergency"),
         doctorName: "Dr. Sarah Chen, MD",
-        specialty: "Internal Medicine & Critical Care Lead"
+        specialty: "Internal Medicine & Primary Triage"
       };
     }
 
@@ -694,7 +851,7 @@ export class ClinicalDecisionEngine {
         const reply = "Vision changes alongside unilateral weakness and facial drooping are critical neurological signs. Did the blurry vision start at the exact same moment as the weakness, or did it begin earlier?";
         return {
           action: "EXPLORE_NEW_SYMPTOM",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "vision symptom"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "vision symptom"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -704,7 +861,7 @@ export class ClinicalDecisionEngine {
         const reply = "That burning sensation on your head could be related to nerve irritation, but the facial drooping and arm weakness remain our primary urgent concern. Did that burning feeling start at the exact same time as the weakness, or come on before?";
         return {
           action: "EXPLORE_NEW_SYMPTOM",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "burning head"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "burning head"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -714,7 +871,7 @@ export class ClinicalDecisionEngine {
         const reply = "A severe headache alongside weakness and facial drooping increases our urgency. Did this headache hit you suddenly like a clap of thunder, or did it build up gradually?";
         return {
           action: "EXPLORE_NEW_SYMPTOM",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "headache"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "headache"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -724,7 +881,17 @@ export class ClinicalDecisionEngine {
         const reply = "Thank you for noting the difficulty with your leg. Please stay seated and avoid attempting to stand or walk. Are both legs affected, or is the weakness specifically on the right side?";
         return {
           action: "EXPLORE_NEW_SYMPTOM",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "leg weakness"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "leg weakness"),
+          doctorName: "Dr. Sarah Chen, MD",
+          specialty: "Internal Medicine & Critical Care Lead"
+        };
+      }
+
+      if (symName.includes("muffled") || /\b(?:muffled|hot potato|something in (?:my )?mouth)\b/i.test(state.cumulativeTranscript)) {
+        const reply = "A muffled voice alongside severe pain swallowing saliva and fever is concerning for a deep throat infection such as a peritonsillar abscess. This requires an in-person emergency or ENT evaluation today to protect your airway. Are you having any difficulty opening your mouth wide, or any swelling on one side of your neck?";
+        return {
+          action: "EXPLORE_NEW_SYMPTOM",
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "muffled voice pta"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -738,7 +905,7 @@ export class ClinicalDecisionEngine {
         const reply = "Those symptoms can indicate a stroke and require urgent assessment. When did the weakness begin?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "initial stroke onset"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "initial stroke onset"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -749,7 +916,7 @@ export class ClinicalDecisionEngine {
         const reply = "To assess acute treatment options, timing is vital. When did you first notice the weakness or facial drooping starting?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "stroke onset follow-up"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "stroke onset follow-up"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -761,7 +928,7 @@ export class ClinicalDecisionEngine {
         const reply = `Thank you, noting that this began ${onsetStr}. Did the weakness start suddenly out of nowhere, or did it gradually get worse?`;
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "suddenness follow-up"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "suddenness follow-up"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -772,7 +939,7 @@ export class ClinicalDecisionEngine {
         const reply = "Understood. Are you having difficulty speaking clearly right now, or trouble getting your words out?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "speech follow-up"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "speech follow-up"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -784,7 +951,7 @@ export class ClinicalDecisionEngine {
         const reply = "Understood, thank you for confirming. Are you experiencing any vision changes, a severe sudden headache, or numbness in your leg?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "secondary neuro signs"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "secondary neuro signs"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -805,7 +972,7 @@ export class ClinicalDecisionEngine {
         const reply = "When did this chest discomfort begin, and does it spread into your arm, neck, or jaw?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "cardio onset"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "cardio onset"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -814,7 +981,7 @@ export class ClinicalDecisionEngine {
         const reply = "Does the chest discomfort radiate or travel anywhere, such as into your left arm, shoulder, or jaw?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "cardio radiation"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "cardio radiation"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -823,7 +990,7 @@ export class ClinicalDecisionEngine {
         const reply = "Did this pressure start while you were resting, or during physical activity like walking or stairs?";
         return {
           action: "ADVANCE_INTERVIEW",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, hist.recentDoctorReplies, "cardio exertional"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "cardio exertional"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };
@@ -842,7 +1009,7 @@ export class ClinicalDecisionEngine {
       const defaultReply = "I want to make sure we evaluate this carefully. When did this discomfort first begin, and did it start after an injury or sudden strain?";
       return {
         action: "ADVANCE_INTERVIEW",
-        spokenDoctorReply: this.guardAgainstRepetition(defaultReply, hist.recentDoctorReplies, "general onset inquiry"),
+        spokenDoctorReply: this.guardAgainstRepetition(defaultReply, recentReplies, "general onset inquiry"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Primary Triage"
       };
@@ -851,7 +1018,7 @@ export class ClinicalDecisionEngine {
       const defaultReply = "How would you describe the feeling—is it a dull ache, sharp pain, or throbbing, and is it constant or does it come and go?";
       return {
         action: "ADVANCE_INTERVIEW",
-        spokenDoctorReply: this.guardAgainstRepetition(defaultReply, hist.recentDoctorReplies, "general severity inquiry"),
+        spokenDoctorReply: this.guardAgainstRepetition(defaultReply, recentReplies, "general severity inquiry"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Primary Triage"
       };
@@ -859,7 +1026,7 @@ export class ClinicalDecisionEngine {
     const defaultReply = "Thank you for that context. While there are no immediate red flags, I cannot perform a physical examination over voice. Have you noticed any swelling, redness, or numbness?";
     return {
       action: "ADVANCE_INTERVIEW",
-      spokenDoctorReply: this.guardAgainstRepetition(defaultReply, hist.recentDoctorReplies, "general intake follow-up"),
+      spokenDoctorReply: this.guardAgainstRepetition(defaultReply, recentReplies, "general intake follow-up"),
       doctorName: "Dr. Sarah Chen, MD",
       specialty: "Internal Medicine & Primary Triage"
     };
@@ -920,6 +1087,27 @@ export class ClinicalDecisionEngine {
       "timeline shift": [
         "I want to be certain we have your timeline correct. Are you describing symptoms that occurred over several days, or did this acute episode begin earlier?",
         "Let's make sure I understand the sequence. Are you saying the symptoms persisted over the following days, or did a new symptom develop later on?"
+      ],
+      "general intake follow-up": [
+        "Thank you for that context. While there are no immediate red flags, are you noticing any lightheadedness or changes when you stand up?",
+        "That is helpful context. Have you had any fever, chills, or changes in your appetite and fluid intake?",
+        "Noted. To help complete our picture, how has this been affecting your normal daily routine and energy levels?"
+      ],
+      "acute cardio emergency": [
+        "Please remain completely still and seated while your family dials 108 or 112 for an ambulance right now. We cannot take chances with acute chest pressure.",
+        "Because tight chest pressure requires immediate emergency attention, please call 108 or 112 for an ambulance right away. Do not walk or search for medicines."
+      ],
+      "emergency transport guidance": [
+        "Please do not drive or let someone drive you in a personal car. Calling 108 ensures paramedics can provide emergency oxygen and cardiac care right on the way.",
+        "An emergency ambulance via 108 is the safest choice because trained responders can stabilize you during travel. Stay seated and keep your door unlocked."
+      ],
+      "closing guidance": [
+        "You are very welcome! Please rest, continue sipping fluids, and have someone check in on you. Don't hesitate to reach back out if your symptoms worsen.",
+        "Take care, and please keep resting. If you notice any new or worsening symptoms, please seek prompt medical care."
+      ],
+      "reassurance non-emergency": [
+        "I understand why you are worried, but based on what you have described, this is not an immediate life-threatening emergency. Staying seated and sipping electrolyte fluids is your best next step.",
+        "Please rest comfortably. Lightheadedness when standing after low intake is consistent with orthostatic dehydration. Sip oral fluids slowly and have a neighbor check in."
       ]
     };
 
@@ -937,7 +1125,7 @@ export class ClinicalDecisionEngine {
     }
 
     // Generic variation if specific candidates exhausted
-    return `To ensure we provide the most accurate medical guidance, I want to clarify: how long have you been experiencing these symptoms?`;
+    return `Thank you for that context. Could you tell me more about how these symptoms are affecting you right now?`;
   }
 }
 

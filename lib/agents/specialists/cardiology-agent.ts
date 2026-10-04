@@ -2,6 +2,7 @@ import { BaseClinicalAgent } from "../base-agent";
 import { AgentOpinion, PatientCase, ToolResult, PeerChallenge, AgentRequest } from "../schemas";
 import { Blackboard } from "../blackboard";
 import { clinicalKnowledgeRetriever } from "../../clinical-knowledge/retriever";
+import { parseOnsetDimensions } from "../../triage/clinical-state";
 
 export class CardiologyAgent extends BaseClinicalAgent {
   constructor() {
@@ -256,7 +257,8 @@ export class CardiologyAgent extends BaseClinicalAgent {
     if (!hasCardiacSignal) return [];
 
     // 1. Onset & Duration
-    const hasOnset = /\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|sudden(?:ly)?|just\s+started|thirty\s+minutes|an?\s+hour|twenty\s+minutes|this\s+morning)\b/i.test(text);
+    const parsedOnset = parseOnsetDimensions(text);
+    const hasOnset = Boolean(parsedOnset.onsetTime || parsedOnset.onsetPattern || patientCase.detected_symptoms?.some(f => /ONSET/i.test(f)));
     if (!hasOnset) {
       requests.push({
         id: `req-cardio-onset-v${caseVer}`,

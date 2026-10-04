@@ -2,6 +2,7 @@ import { BaseClinicalAgent } from "../base-agent";
 import { AgentOpinion, PatientCase, ToolResult, PeerChallenge, AgentRequest } from "../schemas";
 import { Blackboard } from "../blackboard";
 import { clinicalKnowledgeRetriever } from "../../clinical-knowledge/retriever";
+import { parseOnsetDimensions } from "../../triage/clinical-state";
 
 export class NeurologyAgent extends BaseClinicalAgent {
   constructor() {
@@ -228,7 +229,8 @@ export class NeurologyAgent extends BaseClinicalAgent {
     }
 
     // 2. Onset / Last Known Well (LKW)
-    const hasOnset = /\b(\d+\s*(?:minutes?|hours?|days?|weeks?|mins?|hrs?)|sudden(?:ly)?|thunderclap|just\s+started|this\s+morning|twenty\s+minutes|thirty\s+minutes)\b/i.test(text);
+    const parsedOnset = parseOnsetDimensions(text);
+    const hasOnset = Boolean(parsedOnset.onsetTime || parsedOnset.onsetPattern || /thunderclap/i.test(text) || patientCase.detected_symptoms?.some(f => /ONSET/i.test(f)));
     if (!hasOnset) {
       requests.push({
         id: `req-neuro-onset-v${caseVer}`,
@@ -238,7 +240,7 @@ export class NeurologyAgent extends BaseClinicalAgent {
         targetSlot: "onset",
         urgency: "critical",
         reason: "Establish exact time of onset / last known well to determine eligibility for acute reperfusion therapy",
-        suggestedQuestion: "Exactly what time did these neurological symptoms begin, and did they come on abruptly like a thunderclap?",
+        suggestedQuestion: "Roughly when did you first notice these neurological symptoms?",
         status: "pending",
         caseVersion: caseVer,
       });

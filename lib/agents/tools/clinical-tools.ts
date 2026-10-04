@@ -327,3 +327,56 @@ export function checkDrugInteractions(params: {
     }
   };
 }
+
+// 7. OTOLARYNGOLOGY (ENT) TOOL: Deep Neck Infection & Airway Threat Analyzer
+export function assessDeepNeckAirwayRisk(params: {
+  transcript: string;
+  vitals?: Record<string, any>;
+}): ToolResult {
+  const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const text = (params.transcript || "").toLowerCase();
+
+  const hasMuffledVoice = /\b(muffled.*voice|hot\s+potato|something in.*mouth|potato in.*mouth|voice.*muffled)\b/i.test(text);
+  const hasSalivaOdynophagia = /\b(saliva|swallow.*saliva|drool|spit|cannot swallow saliva|painful.*saliva)\b/i.test(text);
+  const hasTrismus = /\b(trismus|cannot open mouth|can't open mouth|jaw.*stiff|jaw.*lock|unable to open mouth)\b/i.test(text);
+  const hasStridorOrDyspnea = /\b(stridor|noisy breathing|cannot breathe|throat.*closing|throat.*swelling)\b/i.test(text);
+  const hasFever = /\b(fever|temp|temperature|10[0-9]|3[8-9]\.[0-9])\b/i.test(text);
+  const hasUnilateralSwelling = /\b(one side|unilateral|left side of throat|right side of throat|neck swelling|lump in neck)\b/i.test(text);
+
+  let airwayThreatLevel: "critical" | "high" | "moderate" | "low" = "low";
+  let interpretation = "Low probability of deep neck space infection or airway compromise. Routine outpatient management indicated.";
+  let recommendedUrgency: "emergent_ent_evaluation" | "urgent_same_day" | "routine_outpatient" = "routine_outpatient";
+
+  if (hasStridorOrDyspnea || (hasMuffledVoice && hasSalivaOdynophagia && (hasTrismus || hasUnilateralSwelling))) {
+    airwayThreatLevel = "critical";
+    interpretation = "CRITICAL AIRWAY THREAT: Suspected peritonsillar abscess / deep neck space phlegmon with impending airway compromise. Immediate ENT surgical evaluation and fiberoptic laryngoscopy required.";
+    recommendedUrgency = "emergent_ent_evaluation";
+  } else if ((hasMuffledVoice && hasSalivaOdynophagia) || (hasSalivaOdynophagia && hasFever && hasTrismus)) {
+    airwayThreatLevel = "high";
+    interpretation = "HIGH RISK: Signs consistent with acute peritonsillar abscess (Quinsy) / epiglottitis screening risk. Same-day emergency ENT evaluation indicated for needle aspiration / IV antibiotics.";
+    recommendedUrgency = "emergent_ent_evaluation";
+  } else if (hasSalivaOdynophagia || (hasFever && hasMuffledVoice)) {
+    airwayThreatLevel = "moderate";
+    interpretation = "MODERATE RISK: Severe pharyngitis with significant odynophagia. Urgent outpatient ENT evaluation within 12-24 hours recommended.";
+    recommendedUrgency = "urgent_same_day";
+  }
+
+  const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+  return {
+    tool_name: "assess_deep_neck_airway",
+    status: "success",
+    latency_ms: Math.round(t1 - t0),
+    clinical_summary: interpretation,
+    output: {
+      hasMuffledVoice,
+      hasSalivaOdynophagia,
+      hasTrismus,
+      hasStridorOrDyspnea,
+      hasFever,
+      hasUnilateralSwelling,
+      airwayThreatLevel,
+      recommendedUrgency
+    }
+  };
+}
