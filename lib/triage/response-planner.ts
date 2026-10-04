@@ -2,7 +2,7 @@ import { ClinicalInterviewState, ConversationMemory } from "./conversation-manag
 import { SemanticInterpretation } from "./conversation-interpreter";
 import { PreArbiterResult } from "./pre-arbiter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
-import { extractSubfieldState } from "./clinical-state";
+import { extractSubfieldState, isAbdominalPresentation } from "./clinical-state";
 
 export type PlanGoal =
   | "CONFIRM_CORRECTION_AND_PROCEED"
@@ -246,6 +246,8 @@ export class ResponsePlanner {
     // 8. GENERAL CLINICAL INTAKE: DYNAMIC NEXT-ACTION SELECTION
     const subfields = extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory);
     const hasChest = Boolean(state.slots.location === "chest" || /\b(chest|heart|sternum|angina|substernal)\b/i.test(state.cumulativeTranscript));
+    const hasAbdomen = isAbdominalPresentation(state.cumulativeTranscript) ||
+      Boolean(state.slots.location && /abdom|stomach|belly|quadrant|periumbilical|epigastr/i.test(String(state.slots.location)));
     const hasNeuro = Boolean(state.slots.neurological_signs.length > 0 || /\b(headache|dizz|droop|weak|speech)\b/i.test(state.cumulativeTranscript));
     const hasThroat = Boolean(state.slots.location === "throat" || /\b(throat|swallow|pharyngitis|voice)\b/i.test(state.cumulativeTranscript));
     const hasFatigue = /\b(tired|fatigue|exhaust|malaise|weakness|low energy)\b/i.test(state.cumulativeTranscript) ||
@@ -260,8 +262,19 @@ export class ResponsePlanner {
       if ((slotAskCount[topLower] || 0) >= 2) return true;
       if (askedQuestions.has(topLower)) return true;
       if (deniedSymptoms.has(topLower)) return true;
-      if (state.slots.known_facts.some(f => f.toLowerCase().includes(topLower))) return true;
-      if ((state.slots as any)[topic]) return true;
+      if (topLower === "location" || topLower === "abdominal_location") {
+        return Boolean(state.slots.location) || state.slots.known_facts.some(f => /^Abdominal location:/i.test(f));
+      }
+      if (topLower === "associated_symptoms" || topLower === "associated_general") {
+        return state.slots.associated_symptoms.length > 0;
+      }
+      if (state.slots.known_facts.some(f => f.toLowerCase().includes(topLower) && !/^ONSET_AND_LOCATION:/i.test(f))) return true;
+      const slotVal = (state.slots as any)[topic];
+      if (Array.isArray(slotVal)) {
+        if (slotVal.length > 0) return true;
+      } else if (slotVal) {
+        return true;
+      }
       if (topic === "fever" && (deniedSymptoms.has("fever") || state.slots.known_facts.some(f => /fever/i.test(f)) || state.cumulativeTranscript.toLowerCase().includes("no fever"))) return true;
       if (topic === "postural_dizziness" && (state.slots.known_facts.some(f => /dizz|lightheaded/i.test(f)) || state.cumulativeTranscript.toLowerCase().includes("dizz") || state.cumulativeTranscript.toLowerCase().includes("lightheaded"))) return true;
       if (topic === "oral_intake" && (state.slots.known_facts.some(f => /water|drink|eat|intake/i.test(f)) || state.cumulativeTranscript.toLowerCase().includes("drinking much water"))) return true;
@@ -280,6 +293,11 @@ export class ResponsePlanner {
       radiation: "Does the discomfort stay in one spot, or do you feel it spreading to your shoulder, arm, back, or neck?",
       exertional: "Does this happen mainly when you're exerting yourself physically, or does it also happen while sitting quietly?",
       associated_symptoms: "Along with that, have you noticed any other symptoms like cold sweating, nausea, or shortness of breath?",
+      abdominal_location: "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?",
+      location: "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?",
+      vomiting: "Have you had any vomiting with this?",
+      gi_associated: "Have you had any vomiting, fever, or blood in your stool?",
+      blood_in_stool: "Have you noticed any blood in your stool?",
       ear_pain: "Has that pain spread up into your ears at all?",
       course: "Over the last day or two, has the symptom progression been worsening, getting better, or remaining about the same?",
       neurological_signs: "Just to be thorough, have you felt any weakness on one side, difficulty speaking clearly, or face numbness?",
@@ -331,6 +349,75 @@ export class ResponsePlanner {
           topic: "associated_symptoms",
           clinicalRationale: "Screen for diaphoresis, dyspnea, nausea, and presyncope.",
           suggestedPhrasing: "Are you feeling any shortness of breath, cold sweating, nausea, or lightheadedness alongside it?",
+        };
+      }
+    } else if (hasAbdomen) {
+      const hasGiFact = (name: string) =>
+        state.slots.associated_symptoms.some(s => s.toLowerCase().includes(name)) ||
+        state.slots.known_facts.some(f => f.toLowerCase().includes(name)) ||
+        deniedSymptoms.has(name);
+
+      if (!isTopicAddressed("abdominal_location") && !isTopicAddressed("location")) {
+        nextInquiry = {
+          topic: "abdominal_location",
+          clinicalRationale: "Localize abdominal pain to a quadrant or region before broadening the history.",
+          suggestedPhrasing: "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?",
+        };
+      } else if (!subfields.onset.isResolved) {
+        if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset_pattern")) {
+          nextInquiry = {
+            topic: "onset_pattern",
+            clinicalRationale: "Establish whether abdominal pain began suddenly or built up gradually.",
+            suggestedPhrasing: "Did the abdominal pain start suddenly, or did it build up gradually?",
+          };
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern !== "unknown" && !isTopicAddressed("onset_time") && !isTopicAddressed("onset")) {
+          nextInquiry = {
+            topic: "onset_time",
+            clinicalRationale: "Establish how long the abdominal pain has been present.",
+            suggestedPhrasing: "Roughly how long have you had this abdominal pain?",
+          };
+        } else if (!subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset")) {
+          nextInquiry = {
+            topic: "onset_time",
+            clinicalRationale: "Establish the timeline of abdominal pain.",
+            suggestedPhrasing: "When did this abdominal pain first begin?",
+          };
+        }
+      } else if (!subfields.characterSeverity.character && !isTopicAddressed("character")) {
+        nextInquiry = {
+          topic: "character",
+          clinicalRationale: "Characterize abdominal pain quality.",
+          suggestedPhrasing: "Does the pain feel more dull, cramping, burning, or sharp?",
+        };
+      } else if (!subfields.characterSeverity.severity && !isTopicAddressed("severity")) {
+        nextInquiry = {
+          topic: "severity",
+          clinicalRationale: "Quantify usual versus peak abdominal pain.",
+          suggestedPhrasing: "On a scale from zero to ten, how bad is it usually, and how bad does it get at its worst?",
+        };
+      } else if (!hasGiFact("vomiting") && !isTopicAddressed("vomiting")) {
+        nextInquiry = {
+          topic: "vomiting",
+          clinicalRationale: "Screen for vomiting as a high-yield GI associated symptom.",
+          suggestedPhrasing: "Have you had any vomiting with this?",
+        };
+      } else if (!hasGiFact("fever") && !isTopicAddressed("fever")) {
+        nextInquiry = {
+          topic: "fever",
+          clinicalRationale: "Screen for systemic infection alongside abdominal pain.",
+          suggestedPhrasing: "Have you had a fever or felt feverish?",
+        };
+      } else if (!hasGiFact("blood_in_stool") && !hasGiFact("blood in stool") && !isTopicAddressed("blood_in_stool")) {
+        nextInquiry = {
+          topic: "blood_in_stool",
+          clinicalRationale: "Screen for GI bleeding.",
+          suggestedPhrasing: "Have you noticed any blood in your stool?",
+        };
+      } else if (!hasGiFact("diarrhea") && !isTopicAddressed("diarrhea")) {
+        nextInquiry = {
+          topic: "diarrhea",
+          clinicalRationale: "Establish whether bowel movements are loose or watery.",
+          suggestedPhrasing: "Have your stools been loose or watery?",
         };
       }
     } else if (hasNeuro) {
@@ -499,7 +586,10 @@ export class ResponsePlanner {
       }
     }
 
-    const defaultPhrasing = nextInquiry?.suggestedPhrasing || "Could you tell me a little more about what you're experiencing?";
+    const defaultPhrasing = nextInquiry?.suggestedPhrasing ||
+      (hasAbdomen
+        ? "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?"
+        : "Could you tell me a little more about what you're experiencing?");
 
     const mustAvoid = [...memory.questionsAlreadyAsked];
     if (subfields.onset.duration) {
@@ -519,6 +609,12 @@ export class ResponsePlanner {
     }
     if (subfields.episodic.episodeDuration) {
       mustAvoid.push("how long does each one last");
+    }
+    if (state.slots.location || state.slots.known_facts.some(f => /^Abdominal location:/i.test(f))) {
+      mustAvoid.push("abdominal_location", "location", "where in your abdomen");
+    }
+    if (state.slots.associated_symptoms.some(s => /diarrh|loose/i.test(s))) {
+      mustAvoid.push("associated_symptoms", "what else you've been noticing", "any other symptoms");
     }
 
     return {

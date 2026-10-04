@@ -209,6 +209,18 @@ export const HISTORY_WEIGHTS = {
 };
 
 /**
+ * Completeness may arrive as a 0–1 fraction (intake) or a 0–100 percentage (board).
+ * Never multiply an already-percent value by 100 (that produced figures such as 8800%).
+ */
+export function normalizeCompletenessPercent(raw: number | null | undefined): number {
+  if (raw === null || raw === undefined || !Number.isFinite(Number(raw))) return 0;
+  const n = Number(raw);
+  if (n < 0) return 0;
+  if (n <= 1) return Math.min(100, Math.max(0, Math.round(n * 100)));
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+/**
  * Deterministically compute history completeness score based on validated clinical facts.
  */
 export function calculateHistoryCompleteness(
@@ -244,7 +256,7 @@ export function calculateHistoryCompleteness(
   const earnedRedFlag = Math.round(redFlagRatio * HISTORY_WEIGHTS.redFlagScreening);
 
   const rawScore = earnedCC + earnedOnset + earnedCourse + earnedChar + earnedAssoc + earnedRedFlag;
-  const finalScore = Math.min(100, Math.max(0, Math.round(rawScore)));
+  const finalScore = normalizeCompletenessPercent(rawScore);
 
   return {
     score: finalScore,
@@ -718,6 +730,198 @@ export function extractNumericSeverity(text: string, isSeverityPrompt: boolean =
   return null;
 }
 
+export type AbdominalLocationCode =
+  | "upper_abdomen"
+  | "lower_abdomen"
+  | "right_upper"
+  | "right_lower"
+  | "left_upper"
+  | "left_lower"
+  | "central_periumbilical"
+  | "diffuse";
+
+export const ABDOMINAL_LOCATION_LABELS: Record<AbdominalLocationCode, string> = {
+  upper_abdomen: "upper abdomen",
+  lower_abdomen: "lower abdomen",
+  right_upper: "right upper quadrant",
+  right_lower: "right lower quadrant",
+  left_upper: "left upper quadrant",
+  left_lower: "left lower quadrant",
+  central_periumbilical: "central / periumbilical",
+  diffuse: "diffuse",
+};
+
+export function parseAbdominalLocations(text: string): AbdominalLocationCode[] {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  const found = new Set<AbdominalLocationCode>();
+
+  if (/\b(?:right\s+upper|ruq|right\s+upper\s+quadrant|under\s+(?:the\s+)?right\s+rib|liver|gallbladder)\b/i.test(lower)) {
+    found.add("right_upper");
+  }
+  if (/\b(?:right\s+lower|rlq|right\s+lower\s+quadrant|appendix|lower\s+right)\b/i.test(lower)) {
+    found.add("right_lower");
+  }
+  if (/\b(?:left\s+upper|luq|left\s+upper\s+quadrant|spleen)\b/i.test(lower)) {
+    found.add("left_upper");
+  }
+  if (/\b(?:left\s+lower|llq|left\s+lower\s+quadrant|lower\s+left)\b/i.test(lower)) {
+    found.add("left_lower");
+  }
+  if (/\b(?:around\s+(?:my\s+)?(?:belly\s*button|navel|umbilicus)|periumbilical|center\s+of\s+(?:my\s+)?(?:stomach|belly|abdomen)|central)\b/i.test(lower)) {
+    found.add("central_periumbilical");
+  }
+  if (/\b(?:all\s+over|everywhere|whole\s+(?:stomach|belly|abdomen)|diffuse|general(?:ized)?)\b/i.test(lower)) {
+    found.add("diffuse");
+  }
+  if (found.size === 0 && /\b(?:upper|epigastr|above\s+(?:my\s+)?belly\s*button)\b/i.test(lower)) {
+    found.add("upper_abdomen");
+  }
+  if (found.size === 0 && /\b(?:lower|suprapubic|below\s+(?:my\s+)?belly\s*button|pelvi)\b/i.test(lower)) {
+    found.add("lower_abdomen");
+  }
+
+  return [...found];
+}
+
+export function isAbdominalPresentation(text: string): boolean {
+  if (!text) return false;
+  return /\b(stomach|abdom|belly|gut|epigastr|umbilic)\b/i.test(text);
+}
+
+export interface GiAssociatedFinding {
+  name: string;
+  label: string;
+  status: "present" | "absent";
+}
+
+export function extractGiAssociatedSymptoms(text: string): GiAssociatedFinding[] {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  const findings: GiAssociatedFinding[] = [];
+
+  const specs: Array<{
+    name: string;
+    label: string;
+    present: RegExp;
+    absent: RegExp;
+  }> = [
+    {
+      name: "diarrhea",
+      label: "Diarrhea / loose stools",
+      present: /\b(diarrh(?:oe)?a|loose\s+motions?|loose\s+stools?|watery\s+stools?|watery\s+motions?|running\s+stool|frequent\s+loose|bad\s+poop(?:ing)?)\b/i,
+      absent: /\bno\s+(?:diarrh(?:oe)?a|loose\s+motions?|loose\s+stools?)\b/i,
+    },
+    {
+      name: "vomiting",
+      label: "Vomiting",
+      present: /\b(vomit(?:ing|ed)?|throwing\s+up|threw\s+up|emesis)\b/i,
+      absent: /\bno\s+(?:vomiting|vomit|throwing\s+up)\b/i,
+    },
+    {
+      name: "nausea",
+      label: "Nausea",
+      present: /\b(nause(?:a|ated|ous)|queasy|sick\s+to\s+(?:my\s+)?stomach)\b/i,
+      absent: /\bno\s+nause/i,
+    },
+    {
+      name: "blood_in_stool",
+      label: "Blood in stool",
+      present: /\b(blood\s+in\s+(?:the\s+)?(?:stool|poop|motions?)|bloody\s+stool|melena|black\s+tarry|hematochezia|rectal\s+bleeding)\b/i,
+      absent: /\bno\s+(?:blood\s+in\s+(?:the\s+)?(?:stool|poop)|bloody\s+stool|rectal\s+bleeding)\b/i,
+    },
+    {
+      name: "constipation",
+      label: "Constipation",
+      present: /\b(constipat(?:ed|ion)|cannot\s+poop|hard\s+stools?|no\s+bowel\s+movement)\b/i,
+      absent: /\bno\s+constipat/i,
+    },
+    {
+      name: "bloating",
+      label: "Bloating",
+      present: /\b(bloat(?:ed|ing)?|gassy|gas\s+pain|distended)\b/i,
+      absent: /\bno\s+(?:bloat|gas)\b/i,
+    },
+  ];
+
+  for (const spec of specs) {
+    if (spec.absent.test(lower)) {
+      findings.push({ name: spec.name, label: spec.label, status: "absent" });
+    } else if (spec.present.test(lower)) {
+      findings.push({ name: spec.name, label: spec.label, status: "present" });
+    }
+  }
+
+  return findings;
+}
+
+export interface EpisodicSeverity {
+  baseline?: number;
+  peak?: number;
+  pattern?: "constant" | "intermittent";
+  display: string;
+}
+
+function parseSeverityToken(raw: string): number | null {
+  const token = raw.toLowerCase();
+  const num = WORD_TO_NUM[token] !== undefined ? WORD_TO_NUM[token] : parseInt(token, 10);
+  if (Number.isNaN(num) || num < 0 || num > 10) return null;
+  return num;
+}
+
+export function extractAllNumericSeverities(text: string): number[] {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  const found: number[] = [];
+  const re =
+    /\b([0-9]|10|zero|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:\/|\s*out\s+of\s*|\s*by\s*|\s*on\s*|\s*of\s*)\s*(?:10|ten)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(lower)) !== null) {
+    const num = parseSeverityToken(match[1]);
+    if (num !== null) found.push(num);
+  }
+  return [...new Set(found)];
+}
+
+/**
+ * Preserve usual vs peak pain rather than collapsing "4/10 usually, 9/10 when sharp" to a single 4.
+ */
+export function extractEpisodicSeverity(text: string, isSeverityPrompt = false): EpisodicSeverity | null {
+  if (!text) return null;
+  const nums = extractAllNumericSeverities(text);
+  const intermittent = /\b(usually|usual|typically|most\s+of\s+the\s+time|at\s+times|when\s+(?:it'?s\s+)?sharp|when\s+it\s+hurts|comes?\s+and\s+goes|flare|peak|intermittent|episodic)\b/i.test(text);
+
+  if (nums.length >= 2) {
+    const baseline = Math.min(...nums);
+    const peak = Math.max(...nums);
+    return {
+      baseline,
+      peak,
+      pattern: intermittent || peak !== baseline ? "intermittent" : "constant",
+      display: `${baseline}/10 usual, ${peak}/10 peak`,
+    };
+  }
+
+  if (nums.length === 1) {
+    return {
+      baseline: nums[0],
+      peak: intermittent ? undefined : nums[0],
+      pattern: intermittent ? "intermittent" : "constant",
+      display: `${nums[0]}/10`,
+    };
+  }
+
+  const single = extractNumericSeverity(text, isSeverityPrompt);
+  if (!single) return null;
+  const n = parseInt(single.split("/")[0], 10);
+  return {
+    baseline: n,
+    peak: n,
+    pattern: intermittent ? "intermittent" : "constant",
+    display: single,
+  };
+}
+
 /**
  * Slots that represent categorical or quantitative dimensions and can NEVER be treated as denied symptoms.
  */
@@ -731,6 +935,8 @@ export const NON_DENIABLE_SLOTS = new Set([
   "timing_pattern",
   "severity",
   "character",
+  "location",
+  "abdominal_location",
   "chief_complaint",
   "patient_objection",
   "emotional_concern",
@@ -766,7 +972,17 @@ export function detectQuestionTargetSlot(questionText: string, defaultSlot?: str
   // 3. Fever / chills
   if (/fever|chills|temperature/i.test(lower)) return "fever";
 
-  // 4. Severity (numerical scale / 0-10 / rate pain) vs Character (quality / sensation)
+  // 4. Abdominal / GI location and associated GI facts
+  if (/where\s+in\s+(?:your\s+)?(?:abdomen|stomach|belly)|feel\s+strongest|which\s+(?:part|side|quadrant)|upper\s+or\s+lower/i.test(lower)) {
+    return "abdominal_location";
+  }
+  if (/\b(loose\s+motions?|diarrh(?:oe)?a|blood\s+in\s+(?:your\s+)?stool|vomiting|bowel)\b/i.test(lower) && /have\s+you|any\s+(?:vomiting|fever|blood)/i.test(lower)) {
+    return "gi_associated";
+  }
+  if (/\bdiarrh(?:oe)?a|loose\s+motions?|loose\s+stools?\b/i.test(lower)) return "diarrhea";
+  if (/\bvomit/i.test(lower)) return "vomiting";
+
+  // 5. Severity (numerical scale / 0-10 / rate pain) vs Character (quality / sensation)
   if (/scale|0\s*[-–to]\s*10|zero\s*[-–to]\s*ten|how\s+severe|severity|rate\s+your\s+pain/i.test(lower)) return "severity";
   if (/what\s+(?:does\s+it|it)\s+feel\s+like|sharp|dull|burning|pressure|tightness|squeezing|character|crushing|throbbing/i.test(lower)) return "character";
 
@@ -814,6 +1030,12 @@ export function detectQuestionTargetSlots(questionText: string): string[] {
   if (/what\s+(?:does\s+it|it)\s+feel\s+like|sharp|dull|burning|pressure|tightness|squeezing|character|crushing|throbbing/.test(lower)) targets.add("character");
   if (/bright\s+light|light\s+(?:bother|sensitivity)|sensitive\s+to\s+(?:bright\s+)?light|photophob|loud\s+(?:sound|noise)|sound\s+(?:bother|sensitivity)|sensitive\s+to\s+(?:sound|noise)|phonophob/.test(lower)) targets.add("associated_symptoms");
   if (/other\s+symptoms|associated|alongside/.test(lower)) targets.add("associated_symptoms");
+  if (/where\s+in\s+(?:your\s+)?(?:abdomen|stomach|belly)|feel\s+strongest|which\s+(?:part|side|quadrant)|upper\s+or\s+lower/.test(lower)) {
+    targets.add("abdominal_location");
+  }
+  if (/\bdiarrh(?:oe)?a|loose\s+motions?|loose\s+stools?/.test(lower)) targets.add("diarrhea");
+  if (/\bvomit/.test(lower)) targets.add("vomiting");
+  if (/blood\s+in\s+(?:your\s+)?stool|bloody\s+stool/.test(lower)) targets.add("blood_in_stool");
   if (/fever|chills|temperature/.test(lower)) targets.add("fever");
   if (/swallow(?:ing)?\s+liquids|liquids\s+and\s+saliva|difficulty\s+swallowing|trouble\s+swallowing|able\s+to\s+swallow|choking|dysphagia/.test(lower)) targets.add("swallowing_difficulty");
   if (/ear\s*pain|earache|ears/.test(lower)) targets.add("ear_pain");
@@ -860,9 +1082,26 @@ export function isTargetSlotMatch(expectedTopic: string, detectedSlot: string): 
     return true;
   }
 
-  // Associated symptoms variants: photophobia, phonophobia, light/sound sensitivity
-  const assocGroup = new Set(["associated_symptoms", "photophobia", "phonophobia", "photophobia_phonophobia"]);
+  // Associated symptoms variants: photophobia, phonophobia, light/sound sensitivity, GI
+  const assocGroup = new Set([
+    "associated_symptoms",
+    "associated_general",
+    "photophobia",
+    "phonophobia",
+    "photophobia_phonophobia",
+    "diarrhea",
+    "vomiting",
+    "nausea",
+    "blood_in_stool",
+    "bloating",
+    "constipation",
+    "gi_associated",
+  ]);
   if (assocGroup.has(exp) && assocGroup.has(det)) {
+    return true;
+  }
+
+  if ((exp === "location" || exp === "abdominal_location") && (det === "location" || det === "abdominal_location")) {
     return true;
   }
 
@@ -1010,6 +1249,14 @@ export function validateDoctorReplyTarget(
         isValid: false,
         detectedTarget,
         reason: "LLM_REPEATED_RESOLVED_DIMENSION: symptom character is already resolved",
+      };
+    }
+
+    if (slots.location && (detectedTarget === "abdominal_location" || detectedTarget === "location")) {
+      return {
+        isValid: false,
+        detectedTarget,
+        reason: "LLM_REPEATED_RESOLVED_DIMENSION: abdominal location is already resolved",
       };
     }
   }

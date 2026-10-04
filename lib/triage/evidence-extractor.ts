@@ -14,8 +14,11 @@ import {
   ClinicalFact,
   ClinicalInterviewStateV2,
   RedFlagDomainAssessment,
-  extractNumericSeverity,
+  extractEpisodicSeverity,
   parseOnsetDimensions,
+  parseAbdominalLocations,
+  extractGiAssociatedSymptoms,
+  ABDOMINAL_LOCATION_LABELS,
 } from "./clinical-state";
 
 export interface ExtractedEvidenceResult {
@@ -376,6 +379,68 @@ export class EvidenceExtractor {
       associatedSymptomsUpdates.push(fact);
     }
 
+    // 5b. ABDOMINAL / GI
+    const giFindings = extractGiAssociatedSymptoms(lower);
+    for (const gi of giFindings) {
+      const fact: ClinicalFact = {
+        id: `fact-${gi.name}-${turnId}`,
+        name: gi.name,
+        label: gi.label,
+        category: "associated_symptom",
+        status: gi.status,
+        value: gi.status === "present",
+        normalizedText: gi.status === "present" ? `Present (${gi.label})` : `Denied (${gi.label})`,
+        confidence: 0.95,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+      associatedSymptomsUpdates.push(fact);
+      if (gi.status === "absent") deniedTopics.push(gi.name);
+      if (gi.status === "present" && !state.associatedSymptoms.some(s => s.name === gi.name)) {
+        newFindingsDetected.push(gi.name);
+      }
+    }
+
+    const abdominalLocations = parseAbdominalLocations(lower);
+    if (abdominalLocations.length > 0) {
+      const labels = abdominalLocations.map(code => ABDOMINAL_LOCATION_LABELS[code]).join(", ");
+      const locFact: ClinicalFact = {
+        id: `fact-abd-loc-${turnId}`,
+        name: "location",
+        label: "Abdominal location",
+        category: "symptom_profile",
+        status: "present",
+        value: labels,
+        normalizedText: labels,
+        confidence: 0.94,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(locFact);
+      symptomProfileUpdates.location = locFact;
+    }
+
+    const hasStomachPain = /\b(stomach\s+(?:ache|pain|cramp)|abdominal\s+pain|belly\s+(?:ache|pain)|tummy\s+(?:ache|pain))\b/i.test(lower);
+    if (hasStomachPain) {
+      const fact: ClinicalFact = {
+        id: `fact-abd-pain-${turnId}`,
+        name: "abdominal_pain",
+        label: "Abdominal pain",
+        category: "chief_complaint",
+        status: "present",
+        value: true,
+        normalizedText: "Present (Abdominal pain)",
+        confidence: 0.97,
+        source: "patient",
+        turnId,
+        timestamp,
+      };
+      newFacts.push(fact);
+    }
+
     // 6. TIMELINE, ONSET & COURSE (STRICT NORMALIZATION - NO UTTERANCE LEAKS)
     // Extract Onset
     const timeMatch = lower.match(/\b(?:since|from|about|approx\.?|roughly)?\s*(\d+\s*(?:minutes?|hours?|days?|weeks?)|morning\s+\d+\s+days?\s+ago|\d+\s+days?\s+ago|yesterday|this\s+morning|an?\s+hour|two\s+days|three\s+days)\b/i);
@@ -448,20 +513,24 @@ export class EvidenceExtractor {
       symptomProfileUpdates.course = courseFact;
     }
 
-    // 7. SEVERITY (0-10 or Mild/Moderate/Severe)
+    // 7. SEVERITY (0-10, including usual vs peak)
     const isSeverityPrompt = lastTarget === "severity" || /\b(severity|scale|0\s*[-–to]\s*10|zero\s*[-–to]\s*ten|how\s+severe)\b/i.test(lastDoctorQuestion || state.nextBestQuestion?.suggestedPhrasing || (state as any).conversationMemory?.lastPlannedQuestion?.suggestedPhrasing || "");
-    const severityExtracted = extractNumericSeverity(lower, isSeverityPrompt);
+    const episodic = extractEpisodicSeverity(lower, isSeverityPrompt);
     const hasQualSeverity = /\b(mild|moderate|severe|unbearable|excruciating|tolerable)\b/i.test(lower);
 
-    if (severityExtracted) {
+    if (episodic) {
       const sevFact: ClinicalFact = {
         id: `fact-severity-${turnId}`,
         name: "severity",
         label: "Pain severity",
         category: "symptom_profile",
         status: "present",
-        value: parseInt(severityExtracted.split("/")[0], 10),
-        normalizedText: severityExtracted,
+        value: {
+          baseline: episodic.baseline,
+          peak: episodic.peak,
+          pattern: episodic.pattern,
+        },
+        normalizedText: episodic.display,
         confidence: 0.96,
         source: "patient",
         turnId,

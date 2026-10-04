@@ -62,6 +62,7 @@ import { SwipeToast } from "@/components/feedback/SwipeToast";
 import { PeekRating } from "@/components/feedback/PeekRating";
 import { splitIntoSpeechChunks } from "@/lib/audio/sentence-splitter";
 import { AcousticDSPAnalyzer, LiveAudioMetrics } from "@/lib/acoustic/acoustic-dsp-analyzer";
+import { normalizeCompletenessPercent } from "@/lib/triage/clinical-state";
 
 
 type AudioState =
@@ -360,6 +361,14 @@ function formatClinicalFact(raw: string): string {
       return val.toLowerCase() === "sudden" ? "Onset: sudden" : "Onset: gradual";
     }
 
+    if (key === "SEVERITY") {
+      return `Severity: ${val}`;
+    }
+
+    if (key === "ABDOMINAL LOCATION") {
+      return `Abdominal location: ${val}`;
+    }
+
     if (key === "VOICE_CHANGE" || key === "VOICE CHANGE") {
       return "Voice change present";
     }
@@ -438,7 +447,8 @@ export default function ConsultPage() {
   const [locationPermission, setLocationPermission] = useState<"granted" | "denied" | "unknown">("unknown");
 
   // Context Tab State Calculations
-  const contextKnownFacts: string[] = boardData?.known_facts || interviewState?.slots?.known_facts || [];
+  const contextKnownFacts: string[] = (boardData?.known_facts || interviewState?.slots?.known_facts || [])
+    .filter((fact: string) => !/^ONSET_AND_LOCATION:/i.test(fact));
   const hasContextFacts = contextKnownFacts.length > 0;
 
   const defaultMissingDimensions = [
@@ -457,7 +467,7 @@ export default function ConsultPage() {
     ? boardData.completeness_score
     : (hasContextFacts ? Math.min(0.95, Math.round((contextKnownFacts.length / (contextKnownFacts.length + (contextMissingDimensions.length || 1))) * 100) / 100) : 0);
 
-  const completenessPercent = Math.round(rawCompleteness * 100);
+  const completenessPercent = normalizeCompletenessPercent(rawCompleteness);
 
   const contextTitle = hasContextFacts ? "Context established" : "Consultation context";
   let contextSubtitle = "Building as you talk";

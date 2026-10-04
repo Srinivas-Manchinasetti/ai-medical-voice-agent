@@ -50,6 +50,9 @@ export class QuestionPlanner {
       if (top === "severity" && state.symptomProfile.severity && state.symptomProfile.severity.status !== "unknown") return true;
       if (top === "character" && state.symptomProfile.character && state.symptomProfile.character.status !== "unknown") return true;
       if (top === "duration" && state.symptomProfile.duration && state.symptomProfile.duration.status !== "unknown") return true;
+      if (top === "location" || top === "abdominal_location") {
+        if (state.symptomProfile.location && state.symptomProfile.location.status !== "unknown") return true;
+      }
       if (top === "swallowing_difficulty") {
         const sw = state.redFlags.swallowing;
         if (sw && sw.assessed) return true;
@@ -164,6 +167,7 @@ export class QuestionPlanner {
     const isThroatPresentation = ccName.includes("throat") || ccName.includes("swallow") || state.establishedFacts.some(f => f.name.includes("throat") || f.name.includes("swallow"));
     const isChestPresentation = ccName.includes("chest") || state.establishedFacts.some(f => f.name.includes("chest"));
     const isNeuroPresentation = ccName.includes("neuro") || state.establishedFacts.some(f => f.name.includes("droop") || f.name.includes("weakness"));
+    const isAbdominalCase = ccName.includes("abdom") || ccName.includes("stomach") || state.establishedFacts.some(f => f.name.includes("abdom") || f.name === "diarrhea");
 
     // --- DOMAIN A: THROAT / ENT / PHARYNGITIS ---
     if (isThroatPresentation) {
@@ -365,6 +369,82 @@ export class QuestionPlanner {
       }
     }
 
+    // --- DOMAIN D: ABDOMINAL / GI ---
+    if (isAbdominalCase) {
+      if (!state.symptomProfile.location && !isBlocked("abdominal_location") && !isBlocked("location")) {
+        return {
+          target: "abdominal_location",
+          label: "Abdominal location",
+          clinicalRationale: "Localize pain to a quadrant or region before broadening GI associated-symptom screening.",
+          suggestedPhrasing: "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?",
+          isEmergencyIntervention: false,
+          isPivotToNewFinding: false,
+          priority: "high",
+        };
+      }
+      if (!isBlocked("onset") && !state.symptomProfile.onset) {
+        return {
+          target: "onset",
+          label: "Onset timeline",
+          clinicalRationale: "Establish when abdominal pain began.",
+          suggestedPhrasing: "When did this abdominal pain first begin?",
+          isEmergencyIntervention: false,
+          isPivotToNewFinding: false,
+          priority: "high",
+        };
+      }
+      const hasDiarrhea = state.associatedSymptoms.some(s => s.name === "diarrhea" && s.status !== "unknown") ||
+        state.establishedFacts.some(f => f.name === "diarrhea" && f.status !== "unknown");
+      const hasVomiting = state.associatedSymptoms.some(s => s.name === "vomiting") || isBlocked("vomiting");
+      const hasFever = state.associatedSymptoms.some(s => s.name === "fever") || isBlocked("fever");
+      const hasBlood = state.associatedSymptoms.some(s => s.name === "blood_in_stool") || isBlocked("blood_in_stool");
+
+      if (!hasVomiting) {
+        return {
+          target: "vomiting",
+          label: "Vomiting",
+          clinicalRationale: "Screen for vomiting as a high-yield GI associated symptom.",
+          suggestedPhrasing: "Have you had any vomiting with this?",
+          isEmergencyIntervention: false,
+          isPivotToNewFinding: false,
+          priority: "high",
+        };
+      }
+      if (!hasFever) {
+        return {
+          target: "fever",
+          label: "Fever",
+          clinicalRationale: "Screen for systemic infection with abdominal pain.",
+          suggestedPhrasing: "Have you had a fever or felt feverish?",
+          isEmergencyIntervention: false,
+          isPivotToNewFinding: false,
+          priority: "high",
+        };
+      }
+      if (!hasBlood) {
+        return {
+          target: "blood_in_stool",
+          label: "Blood in stool",
+          clinicalRationale: "Screen for GI bleeding.",
+          suggestedPhrasing: "Have you noticed any blood in your stool?",
+          isEmergencyIntervention: false,
+          isPivotToNewFinding: false,
+          priority: "normal",
+        };
+      }
+      if (!hasDiarrhea && !isBlocked("diarrhea")) {
+        return {
+          target: "diarrhea",
+          label: "Diarrhea",
+          clinicalRationale: "Establish bowel pattern.",
+          suggestedPhrasing: "Have your stools been loose or watery?",
+          isEmergencyIntervention: false,
+          isPivotToNewFinding: false,
+          priority: "normal",
+        };
+      }
+    }
+
     // --- DEFAULT FALLBACK: GENERAL CLINICAL INTAKE ---
     if (!state.symptomProfile.onset && !isBlocked("onset")) {
       return {
@@ -444,6 +524,12 @@ export function validatePlannedQuestionAgainstState(
     return {
       isValid: false,
       violationReason: `Golden Invariant Violation: Target 'character' is already established (${state.symptomProfile.character.normalizedText}).`,
+    };
+  }
+  if ((target === "location" || target === "abdominal_location") && state.symptomProfile.location && state.symptomProfile.location.status !== "unknown") {
+    return {
+      isValid: false,
+      violationReason: `Golden Invariant Violation: Target 'location' is already established (${state.symptomProfile.location.normalizedText}).`,
     };
   }
 

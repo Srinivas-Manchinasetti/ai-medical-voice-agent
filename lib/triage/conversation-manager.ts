@@ -8,7 +8,7 @@ import { ConversationInterpreter } from "./conversation-interpreter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
-import { extractSubfieldState, extractNumericSeverity, NON_DENIABLE_SLOTS, parseOnsetDimensions } from "./clinical-state";
+import { extractSubfieldState, extractNumericSeverity, extractEpisodicSeverity, extractGiAssociatedSymptoms, parseAbdominalLocations, ABDOMINAL_LOCATION_LABELS, NON_DENIABLE_SLOTS, parseOnsetDimensions, isAbdominalPresentation } from "./clinical-state";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -46,6 +46,9 @@ export interface ClinicalInterviewState {
     radiation?: string;
     exertional?: boolean | string;
     severity?: string;
+    baseline_severity?: string;
+    peak_severity?: string;
+    severity_pattern?: "constant" | "intermittent";
     associated_symptoms: string[];
     neurological_signs: string[];
     pediatric_signs: string[];
@@ -461,39 +464,29 @@ export class ConversationManager {
         }
       }
 
-      // C.7 ABDOMINAL — ONSET AND LOCATION
-      if (slot === "onset_and_location") {
-        const locations: string[] = [];
-        if (/\b(?:upper|epigastr|above\s+(?:my\s+)?belly\s*button)\b/i.test(textLower)) locations.push("upper abdomen / epigastric");
-        if (/\b(?:lower|suprapubic|below\s+(?:my\s+)?belly\s*button|pelvi)\b/i.test(textLower)) locations.push("lower abdomen");
-        if (/\b(?:right\s+side|right\s+lower|rlq|appendix)\b/i.test(textLower)) locations.push("right lower quadrant");
-        if (/\b(?:left\s+side|left\s+lower|llq)\b/i.test(textLower)) locations.push("left lower quadrant");
-        if (/\b(?:right\s+upper|ruq|liver|gallbladder)\b/i.test(textLower)) locations.push("right upper quadrant");
-        if (/\b(?:left\s+upper|luq|spleen)\b/i.test(textLower)) locations.push("left upper quadrant");
-        if (/\b(?:all\s+over|everywhere|whole\s+(?:stomach|belly|abdomen)|diffuse|general(?:ized)?)\b/i.test(textLower)) locations.push("diffuse / generalized");
-        if (/\b(?:around\s+(?:my\s+)?(?:belly\s*button|navel|umbilicus)|periumbilical)\b/i.test(textLower)) locations.push("periumbilical");
-
+      // C.7 ABDOMINAL — LOCATION (do not collapse onto onset)
+      if (slot === "onset_and_location" || slot === "abdominal_location" || slot === "location") {
+        const locations = parseAbdominalLocations(textLower);
         const parsedOnset = parseOnsetDimensions(textLower);
-        const hasOnset = !!(parsedOnset.onsetTime || parsedOnset.onsetPattern);
 
-        if (locations.length > 0 || hasOnset) {
-          const parts: string[] = [];
-          if (locations.length > 0) parts.push(`Location: ${locations.join(", ")}`);
-          if (parsedOnset.onsetTime) parts.push(`Onset: ${parsedOnset.onsetTime}`);
-          if (parsedOnset.onsetPattern) parts.push(`Pattern: ${parsedOnset.onsetPattern}`);
-
-          if (locations.length > 0) {
-            const locFact = `Abdominal location: ${locations.join(", ")}`;
-            if (!state.slots.known_facts.includes(locFact)) state.slots.known_facts.push(locFact);
-          }
-          if (parsedOnset.onsetTime || parsedOnset.onsetPattern) {
-            state.slots.onset = parsedOnset.onsetTime || parsedOnset.onsetPattern || "";
-          }
-
+        if (locations.length > 0) {
+          const labels = locations.map(code => ABDOMINAL_LOCATION_LABELS[code]);
+          const locFact = `Abdominal location: ${labels.join(", ")}`;
+          if (!state.slots.known_facts.includes(locFact)) state.slots.known_facts.push(locFact);
+          state.slots.location = labels.join(", ");
           return {
             intent: "answer_question",
-            resolvedSlot: "onset_and_location",
-            resolvedValue: parts.join("; "),
+            resolvedSlot: "abdominal_location",
+            resolvedValue: labels.join(", "),
+          };
+        }
+
+        if (parsedOnset.onsetTime || parsedOnset.onsetPattern) {
+          const onsetVal = parsedOnset.onsetTime || parsedOnset.onsetPattern!;
+          return {
+            intent: "answer_question",
+            resolvedSlot: parsedOnset.onsetPattern && !parsedOnset.onsetTime ? "onset_pattern" : "onset",
+            resolvedValue: onsetVal,
           };
         }
       }
@@ -507,14 +500,16 @@ export class ConversationManager {
       }
 
       // E. ASSOCIATED SYMPTOMS
-      if (slot === "associated_symptoms") {
+      if (slot === "associated_symptoms" || slot === "associated_general" || slot === "gi_associated" || slot === "diarrhea") {
         const found: string[] = [];
         if (/\b(sweat|cold\s+sweats|clammy|diaphoresis)\b/i.test(textLower)) found.push("cold sweats");
         if (/\b(breath|shortness|dyspnea|gasp)\b/i.test(textLower)) found.push("shortness of breath");
-        if (/\b(nausea|vomit|queasy|sick)\b/i.test(textLower)) found.push("nausea");
         if (/\b(dizz|lightheaded|faint|presyncope|syncope|black\s*out)\b/i.test(textLower)) found.push("dizziness");
         if (/\b(headache|head\s+hurts)\b/i.test(textLower)) found.push("headache");
         if (/\b(voice\s+change|hoarse|hoarseness)\b/i.test(textLower)) found.push("voice change");
+        for (const gi of extractGiAssociatedSymptoms(textLower)) {
+          if (gi.status === "present") found.push(gi.name === "diarrhea" ? "diarrhea" : gi.name.replace(/_/g, " "));
+        }
 
         if (found.length > 0) {
           return { intent: "answer_question", resolvedSlot: "associated_symptoms", resolvedValue: found };
@@ -833,7 +828,13 @@ export class ConversationManager {
               state.conversationMemory.questionsAlreadyAsked.push("onset_time");
             }
           }
-        } else {
+        } else if (slot === "abdominal_location" || slot === "location") {
+          state.slots.location = String(val);
+          const locFact = `Abdominal location: ${val}`;
+          if (!state.slots.known_facts.includes(locFact)) {
+            state.slots.known_facts.push(locFact);
+          }
+        } else if (slot !== "onset_and_location") {
           (state.slots as any)[slot] = val;
           state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
           if (slot === "onset") {
@@ -1178,7 +1179,13 @@ export class ConversationManager {
             state.conversationMemory.questionsAlreadyAsked.push("onset_time");
           }
         }
-      } else {
+      } else if (slot === "abdominal_location" || slot === "location") {
+        state.slots.location = String(val);
+        const locFact = `Abdominal location: ${val}`;
+        if (!state.slots.known_facts.includes(locFact)) {
+          state.slots.known_facts.push(locFact);
+        }
+      } else if (slot !== "onset_and_location") {
         (state.slots as any)[slot] = val;
         state.slots.known_facts.push(`${slot.toUpperCase()}: ${val}`);
         if (slot === "onset") {
@@ -1476,7 +1483,7 @@ export class ConversationManager {
     const isChestPresentation = /\b(chest|heart|sternum|angina)\b/i.test(msgLower);
     const isLegNerveMuscle = /\b(leg|calf|thigh|hamstring|quadricep|shin)\b/i.test(msgLower) &&
                             /\b(needle|digged|digging|pins|sharp|stab|cramp|spasm|shoot|burning|numb|tingl|sciatica)\b/i.test(msgLower);
-    const isAbdominal = /\b(stomach|abdom|belly|gut|nausea|vomit)\b/i.test(msgLower);
+    const isAbdominal = isAbdominalPresentation(msgLower);
     const isHeadache = /\b(headache|migraine|head\s+pain)\b/i.test(msgLower) && !isChestPresentation;
 
     if (isLegNerveMuscle) {
@@ -1487,10 +1494,10 @@ export class ConversationManager {
       } else {
         initialDoctorReply = "I understand you're experiencing sharp, needle-like pain in your leg muscles. Does this pain shoot down from your lower back or hip, do you notice any numbness or weakness in your foot, and did it start suddenly or build up over time?";
       }
-    } else if (isAbdominal) {
-      initialTargetSlot = "onset_and_location";
-      initialPurpose = "Establish quadrant and onset of abdominal discomfort";
-      initialDoctorReply = "I understand you're feeling abdominal discomfort. Could you tell me where in your abdomen it's located—such as the upper or lower part—and when it began?";
+    } else if (isAbdominal && !state.slots.location && !state.slots.known_facts.some(f => /^Abdominal location:/i.test(f))) {
+      initialTargetSlot = "abdominal_location";
+      initialPurpose = "Localize abdominal pain to a quadrant or region";
+      initialDoctorReply = "I understand you're feeling abdominal discomfort. Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?";
     } else if (isHeadache && extractSubfieldState(state.slots, state.slots.known_facts, state.conversationMemory).onset.onsetPattern === "unknown") {
       initialTargetSlot = "onset_pattern";
       initialPurpose = "Establish whether headache onset was sudden or gradual";
@@ -1712,17 +1719,52 @@ export class ConversationManager {
       if (!state.slots.known_facts.some(f => /phonophobia/i.test(f))) state.slots.known_facts.push("Associated: phonophobia (sound sensitivity)");
     }
 
-    // Opportunistic Severity Extraction (0-10, /10, "8 by 10", "pain is 6", etc.)
-    if (!state.slots.severity) {
-      const extractedSev = extractNumericSeverity(state.cumulativeTranscript);
-      if (extractedSev) {
-        state.slots.severity = extractedSev;
-        const fact = `SEVERITY: ${extractedSev}`;
-        if (!state.slots.known_facts.some(f => f.startsWith("SEVERITY"))) {
-          state.slots.known_facts.push(fact);
-        }
+    // Opportunistic Severity Extraction (0-10, /10, "8 by 10", "pain is 6", dual usual/peak)
+    const episodic = extractEpisodicSeverity(state.cumulativeTranscript);
+    if (episodic) {
+      const isDual = episodic.baseline !== undefined && episodic.peak !== undefined && episodic.baseline !== episodic.peak;
+      if (isDual || !state.slots.severity) {
+        state.slots.severity = episodic.display;
+        if (episodic.baseline !== undefined) state.slots.baseline_severity = `${episodic.baseline}/10`;
+        if (episodic.peak !== undefined) state.slots.peak_severity = `${episodic.peak}/10`;
+        if (episodic.pattern) state.slots.severity_pattern = episodic.pattern;
+        const fact = `SEVERITY: ${episodic.display}${episodic.pattern === "intermittent" ? " (intermittent)" : ""}`;
+        state.slots.known_facts = state.slots.known_facts.filter(f => !f.startsWith("SEVERITY"));
+        state.slots.known_facts.push(fact);
       }
     }
+
+    // Opportunistic abdominal location
+    if (!state.slots.location) {
+      const locations = parseAbdominalLocations(state.cumulativeTranscript);
+      if (locations.length > 0) {
+        const labels = locations.map(code => ABDOMINAL_LOCATION_LABELS[code]);
+        state.slots.location = labels.join(", ");
+        const locFact = `Abdominal location: ${labels.join(", ")}`;
+        if (!state.slots.known_facts.includes(locFact)) state.slots.known_facts.push(locFact);
+      }
+    }
+
+    // Opportunistic GI associated symptoms (diarrhea / vomiting / blood in stool / etc.)
+    for (const gi of extractGiAssociatedSymptoms(state.cumulativeTranscript)) {
+      if (gi.status === "present") {
+        const assocName = gi.name === "diarrhea" ? "diarrhea" : gi.name.replace(/_/g, " ");
+        if (!state.slots.associated_symptoms.includes(assocName)) {
+          state.slots.associated_symptoms.push(assocName);
+        }
+        const fact = `Associated: ${gi.label}`;
+        if (!state.slots.known_facts.some(f => f.toLowerCase().includes(gi.name.replace(/_/g, " ")) || f.toLowerCase().includes(gi.label.toLowerCase()))) {
+          state.slots.known_facts.push(fact);
+        }
+      } else if (state.conversationMemory && !state.conversationMemory.deniedSymptoms.includes(gi.name)) {
+        state.conversationMemory.deniedSymptoms.push(gi.name);
+        const fact = `Denied: ${gi.label}`;
+        if (!state.slots.known_facts.includes(fact)) state.slots.known_facts.push(fact);
+      }
+    }
+
+    // Never surface the compound onset+location duplicate
+    state.slots.known_facts = state.slots.known_facts.filter(f => !/^ONSET_AND_LOCATION:/i.test(f));
 
     // Opportunistic Fever Screening (Denial vs Presence)
     const hasFeverDenial = /\b(no\s+fever|haven'?t\s+had\s+(?:a\s+)?fever|without\s+fever|no\s+temperature|denies\s+fever|no\s+fever\s+or\s+chills)\b/i.test(state.cumulativeTranscript);

@@ -1,5 +1,5 @@
 import { PendingQuestion } from "../agents/schemas";
-import { extractNumericSeverity, NON_DENIABLE_SLOTS, detectQuestionTargetSlot, parseOnsetDimensions } from "./clinical-state";
+import { extractNumericSeverity, extractEpisodicSeverity, extractGiAssociatedSymptoms, NON_DENIABLE_SLOTS, detectQuestionTargetSlot, parseOnsetDimensions } from "./clinical-state";
 
 export type PatientIntent =
   | "answer_pending_question"
@@ -518,7 +518,7 @@ export class ConversationInterpreter {
 
     // 6. Generic Symptom Report
     const extracted: Array<{ slot: string; value: string }> = [];
-    const opportunisticSev = extractNumericSeverity(lower);
+    const opportunisticSev = extractEpisodicSeverity(lower)?.display || extractNumericSeverity(lower);
     if (opportunisticSev) {
       extracted.push({ slot: "severity", value: opportunisticSev });
     }
@@ -528,11 +528,19 @@ export class ConversationInterpreter {
     if (/throat\s+pain|sore\s+throat|throat\s+is\s+paining|throat\s+hurts?/i.test(lower)) {
       extracted.push({ slot: "chief_complaint", value: "throat pain" });
     }
+    if (/stomach\s+ache|stomach\s+pain|abdominal\s+pain|belly\s+ache/i.test(lower)) {
+      extracted.push({ slot: "chief_complaint", value: "abdominal pain" });
+    }
     if (/voice\s+has\s+been\s+ruined|voice\s+changed|voice\s+is\s+different|lost\s+my\s+voice|hoarse|hoarseness/i.test(lower)) {
       extracted.push({ slot: "associated_symptoms", value: "voice change" });
     }
     if (/sweat|clammy|diaphoresis/i.test(lower)) {
       extracted.push({ slot: "associated_symptoms", value: "cold sweats/diaphoresis" });
+    }
+    for (const gi of extractGiAssociatedSymptoms(lower)) {
+      if (gi.status === "present") {
+        extracted.push({ slot: "associated_symptoms", value: gi.name === "diarrhea" ? "diarrhea" : gi.name.replace(/_/g, " ") });
+      }
     }
     if (/droop|facial\s+droop/i.test(lower)) {
       extracted.push({ slot: "neurological_signs", value: "facial droop" });

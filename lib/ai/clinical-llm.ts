@@ -241,7 +241,9 @@ export async function generateDoctorTurnResponse(
   // Validate that fallback reply doesn't violate mustAvoidAsking or re-ask denied symptoms.
   // IMPORTANT: The planner's own target slot is excluded from avoidance — the avoidance list
   // prevents LLM drift, not the planner's deliberate re-ask of an unresolved slot.
-  const safeGenericReply = "I understand. Thank you for sharing that. Could you tell me what else you've been noticing or how things have changed?";
+  const plannedPhrase = effectiveInquiry?.suggestedPhrasing;
+  const safeGenericReply = plannedPhrase ||
+    "I understand. Thank you for sharing that. Could you tell me what else you've been noticing or how things have changed?";
   let effectiveFallback = rawFallback;
   if (!isEmergency && (mustAvoid.length > 0 || deniedSymptoms.length > 0)) {
     const activeTargetSlot = effectiveInquiry?.topic || pendingQ?.targetSlot;
