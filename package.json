@@ -17,6 +17,7 @@
     "test:manager": "tsx scripts/test-conversational-manager.ts",
     "test:interpreter": "tsx scripts/test-conversation-interpreter.ts",
     "test:rag": "tsx scripts/test-clinical-rag.ts",
+    "test:context-rag": "tsx scripts/test-context-aware-retrieval.ts",
     "test:explanatory": "tsx scripts/test-explanatory-clinical-reasoning.ts",
     "test:planner": "tsx scripts/test-response-planner-scenarios.ts",
     "test:dispatch": "tsx tests/emergency-eval/dispatch.test.ts",

@@ -32,6 +32,9 @@ export interface IngestedPassage {
   authority: "government_reference";
   content: string;
   keyTerms: string[];
+  domain?: string;
+  population?: string[];
+  acuity?: string[];
 }
 
 function cleanHtml(rawHtml: string): string {
@@ -130,6 +133,59 @@ function parseSectionsFromSummary(rawSummary: string): Record<string, string> {
   }
 
   return sections;
+}
+
+function inferPopulation(title: string, content: string): string[] {
+  const text = (title + " " + content).toLowerCase();
+  const pops: string[] = [];
+  if (/\b(infant|newborn|neonatal|neonate)\b/.test(text)) {
+    pops.push("neonate", "infant");
+  }
+  if (/\b(child|children|pediatric|toddler|school.age|kid)\b/.test(text)) {
+    pops.push("pediatric");
+  }
+  if (/\b(adolescent|teen|teenager)\b/.test(text)) {
+    pops.push("adolescent");
+  }
+  if (/\b(pregnan|prenatal|gestational|obstetric|trimester|postpartum)\b/.test(text)) {
+    pops.push("pregnant");
+  }
+  if (/\b(elder|elderly|geriatric|older adult|aging|senior)\b/.test(text)) {
+    pops.push("older_adult");
+  }
+  if (pops.length === 0) {
+    pops.push("adult");
+  }
+  return [...new Set(pops)];
+}
+
+function inferAcuity(section: string, content: string): string[] {
+  if (section === "emergency_guidance") return ["emergent"];
+  if (/\b(call 911|emergency|immediate|life.threat|ambulance|cardiac arrest)\b/i.test(content)) {
+    return ["emergent", "urgent"];
+  }
+  if (section === "prevention") return ["preventive"];
+  if (section === "treatment") return ["routine", "urgent"];
+  return ["routine"];
+}
+
+function inferDomainExpanded(title: string, content: string): string {
+  const text = (title + " " + content).toLowerCase();
+  if (/\b(heart|cardiac|coronary|chest pain|angina|arrhythmia|hypertension|cholesterol|atherosclerosis|myocardial)\b/.test(text)) return "cardiology";
+  if (/\b(stroke|brain|neurolog|headache|seizure|paralysis|tia|dementia|epilepsy|neuropathy|migraine)\b/.test(text)) return "neurology";
+  if (/\b(pediatric|child|infant|newborn|baby|neonatal|toddler)\b/.test(text)) return "pediatrics";
+  if (/\b(stomach|abdom|gastro|intestin|bowel|colon|liver|hepat|pancrea|gerd|ulcer|diarrhea|constipation|gall)\b/.test(text)) return "gastroenterology";
+  if (/\b(lung|pulmon|asthma|bronch|pneumonia|copd|respiratory|breathing|wheez)\b/.test(text)) return "pulmonology";
+  if (/\b(diabetes|thyroid|endocrin|insulin|hormone|pituitary|adrenal|metabol)\b/.test(text)) return "endocrinology";
+  if (/\b(infection|bacteria|virus|fungal|antibiotic|sepsis|hiv|tuberculosis|malaria|hepatitis)\b/.test(text)) return "infectious_disease";
+  if (/\b(pregnan|obstetric|gynecol|menstrual|ovarian|uterine|cervical|pelvic|fertility)\b/.test(text)) return "obstetrics_gynecology";
+  if (/\b(bone|joint|fracture|arthritis|spine|orthoped|musculoskeletal|tendon|ligament)\b/.test(text)) return "orthopedics";
+  if (/\b(skin|dermat|rash|eczema|psoriasis|acne|melanoma|wound)\b/.test(text)) return "dermatology";
+  if (/\b(mental|depress|anxiety|psychiatric|bipolar|schizophren|ptsd|ocd|panic)\b/.test(text)) return "psychiatry";
+  if (/\b(ear|nose|throat|sinus|tonsil|laryn|pharyn|hearing|tinnitus|vertigo)\b/.test(text)) return "ent";
+  if (/\b(drug|medication|prescription|dose|contraindic|pharma)\b/.test(text)) return "medications";
+  if (/\b(emergency|trauma|resuscit|cpr|first aid|poison|overdose|burn|drowning)\b/.test(text)) return "emergency_medicine";
+  return "general";
 }
 
 export async function ingestMedlinePlusXml(): Promise<{
@@ -265,6 +321,9 @@ export async function ingestMedlinePlusXml(): Promise<{
             authority: "government_reference",
             content: secContent,
             keyTerms,
+            domain: inferDomainExpanded(title, secContent),
+            population: inferPopulation(title, secContent),
+            acuity: inferAcuity(secName, secContent),
           };
 
           passagesStream.write(JSON.stringify(passage) + "\n");

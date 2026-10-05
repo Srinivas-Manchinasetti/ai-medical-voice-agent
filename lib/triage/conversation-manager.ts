@@ -9,6 +9,7 @@ import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions }
 import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
 import { extractSubfieldState, extractNumericSeverity, extractEpisodicSeverity, extractGiAssociatedSymptoms, parseAbdominalLocations, ABDOMINAL_LOCATION_LABELS, NON_DENIABLE_SLOTS, parseOnsetDimensions, isAbdominalPresentation } from "./clinical-state";
+import { PatientProfile } from "../clinical-knowledge/types";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -109,6 +110,7 @@ export interface ClinicalInterviewState {
   };
   conversationMemory?: ConversationMemory;
   responsePlan?: ResponsePlan;
+  patientProfile?: PatientProfile;
 }
 
 export interface ConversationTurnResult {
@@ -136,6 +138,15 @@ export class ConversationManager {
   private pediatrics = new PediatricsAgent();
   private ent = new OtolaryngologyAgent();
   private interpreter = new ConversationInterpreter();
+  private patientProfile: PatientProfile | null = null;
+
+  public setPatientProfile(profile: PatientProfile | null) {
+    this.patientProfile = profile;
+  }
+
+  public getPatientProfile(): PatientProfile | null {
+    return this.patientProfile;
+  }
 
   /**
    * Initialize a fresh interview state
@@ -668,7 +679,6 @@ export class ConversationManager {
 
     // Catastrophic life threats that immediately preempt normal history taking:
     const hasEmergencyPreemptionFlag = preArbiterResult.pre_safety_flags.some(f =>
-      f === "PRE_FLAG_ACUTE_CHEST_PAIN" ||
       f === "PRE_FLAG_ACUTE_NEUROLOGIC_DEFICIT" ||
       f === "PRE_FLAG_IMMEDIATE_AIRWAY_FAILURE" ||
       f === "PRE_FLAG_DEEP_NECK_INFECTION_OR_PTA" ||

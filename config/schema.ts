@@ -113,6 +113,8 @@ export const auditEventsTable = pgTable("audit_events", {
   createdAt: timestamp("created_at").defaultNow()
 });
 
+export { patientProfilesTable } from "../lib/patient/profile-store";
+
 
 
 

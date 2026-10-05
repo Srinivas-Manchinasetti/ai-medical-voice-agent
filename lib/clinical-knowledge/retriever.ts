@@ -8,6 +8,8 @@ import {
   AuthorityTier,
   MedicationTaskType,
   MedicationQueryResult,
+  ContextAwareQuery,
+  PopulationTag,
 } from "./types";
 import { CURATED_GUIDELINES } from "./guidelines";
 
@@ -16,57 +18,30 @@ let cachedPassages: ClinicalPassage[] | null = null;
 const AUTHORITY_PRIORITY: Record<AuthorityTier, number> = {
   deterministic_safety: 100,
   clinical_guideline: 80,
+  national_guideline: 75,
   government_reference: 60,
   medication_label: 55,
   medication_identity: 50,
   regulatory_adverse: 45,
+  peer_reviewed_evidence: 40,
 };
 
 function inferDomainFromTopic(topicTitle: string, content: string): ClinicalDomain {
   const text = (topicTitle + " " + content).toLowerCase();
-  if (
-    text.includes("heart") ||
-    text.includes("cardiac") ||
-    text.includes("coronary") ||
-    text.includes("chest pain") ||
-    text.includes("angina") ||
-    text.includes("arrhythmia") ||
-    text.includes("hypertension") ||
-    text.includes("cholesterol")
-  ) {
-    return "cardiology";
-  }
-  if (
-    text.includes("stroke") ||
-    text.includes("brain") ||
-    text.includes("neurolog") ||
-    text.includes("headache") ||
-    text.includes("seizure") ||
-    text.includes("paralysis") ||
-    text.includes("tia") ||
-    text.includes("dementia")
-  ) {
-    return "neurology";
-  }
-  if (
-    text.includes("pediatric") ||
-    text.includes("child") ||
-    text.includes("infant") ||
-    text.includes("newborn") ||
-    text.includes("baby") ||
-    text.includes("birth")
-  ) {
-    return "pediatrics";
-  }
-  if (
-    text.includes("drug") ||
-    text.includes("medication") ||
-    text.includes("prescription") ||
-    text.includes("dose") ||
-    text.includes("contraindic")
-  ) {
-    return "medications";
-  }
+  if (/\b(heart|cardiac|coronary|chest pain|angina|arrhythmia|hypertension|cholesterol|atherosclerosis|myocardial)\b/.test(text)) return "cardiology";
+  if (/\b(stroke|brain|neurolog|headache|seizure|paralysis|tia|dementia|epilepsy|neuropathy|migraine)\b/.test(text)) return "neurology";
+  if (/\b(pediatric|child|infant|newborn|baby|neonatal|toddler)\b/.test(text)) return "pediatrics";
+  if (/\b(stomach|abdom|gastro|intestin|bowel|colon|liver|hepat|pancrea|gerd|ulcer|diarrhea|constipation|gall)\b/.test(text)) return "gastroenterology";
+  if (/\b(lung|pulmon|asthma|bronch|pneumonia|copd|respiratory|wheez)\b/.test(text)) return "pulmonology";
+  if (/\b(diabetes|thyroid|endocrin|insulin|hormone|pituitary|adrenal|metabol)\b/.test(text)) return "endocrinology";
+  if (/\b(infection|bacteria|virus|fungal|antibiotic|sepsis|hiv|tuberculosis|malaria|hepatitis)\b/.test(text)) return "infectious_disease";
+  if (/\b(pregnan|obstetric|gynecol|menstrual|ovarian|uterine|cervical|fertility)\b/.test(text)) return "obstetrics_gynecology";
+  if (/\b(bone|joint|fracture|arthritis|spine|orthoped|musculoskeletal|tendon|ligament)\b/.test(text)) return "orthopedics";
+  if (/\b(skin|dermat|rash|eczema|psoriasis|acne|melanoma|wound)\b/.test(text)) return "dermatology";
+  if (/\b(mental|depress|anxiety|psychiatric|bipolar|schizophren|ptsd|ocd|panic)\b/.test(text)) return "psychiatry";
+  if (/\b(ear|nose|throat|sinus|tonsil|laryn|pharyn|hearing|tinnitus)\b/.test(text)) return "ent";
+  if (/\b(drug|medication|prescription|dose|contraindic|pharma)\b/.test(text)) return "medications";
+  if (/\b(emergency|trauma|resuscit|cpr|first aid|poison|overdose|burn)\b/.test(text)) return "emergency_medicine";
   return "general";
 }
 
@@ -82,7 +57,8 @@ function loadAllPassages(): ClinicalPassage[] {
       for (const line of lines) {
         if (!line.trim()) continue;
         const parsed = JSON.parse(line);
-        const domain = inferDomainFromTopic(parsed.title, parsed.content);
+        // Prefer pre-tagged domain from ingestion pipeline; fall back to runtime inference
+        const domain = (parsed.domain as ClinicalDomain) || inferDomainFromTopic(parsed.title, parsed.content);
         passages.push({
           id: parsed.id,
           topicId: parsed.topicId,
@@ -95,6 +71,12 @@ function loadAllPassages(): ClinicalPassage[] {
           domain,
           content: parsed.content,
           keyTerms: parsed.keyTerms || [],
+          // Phase 1: Population & context metadata from enriched ingestion pipeline
+          population: parsed.population || undefined,
+          acuity: parsed.acuity || undefined,
+          conditions: parsed.conditions || undefined,
+          country: parsed.country || undefined,
+          sourceType: parsed.sourceType || undefined,
         });
       }
     } catch (err) {
@@ -160,18 +142,42 @@ export class ClinicalKnowledgeRetriever {
       minScore?: number;
     } = {}
   ): KnowledgeContext {
-    const topK = options.topK || 4;
-    const cleanQuery = query.toLowerCase().trim();
+    return this.retrieveWithContext({
+      query,
+      domain,
+      targetSection: options.targetSection,
+      topK: options.topK,
+      minScore: options.minScore,
+    });
+  }
+
+  public retrieveWithContext(ctx: ContextAwareQuery): KnowledgeContext {
+    const topK = ctx.topK || 4;
+    const cleanQuery = ctx.query.toLowerCase().trim();
     const queryTokens = cleanQuery
       .split(/[^a-z0-9-]+/)
       .filter((t) => t.length > 2);
 
     const isAcuteSymptomQuery =
-      /sudden|acute|crushing|pressure|radiat|droop|weakness|numb|speech|fever|lethargy|grunting|pain/i.test(
+      /sudden|acute|crushing|pressure|radiat|droop|weakness|numb|speech|fever|lethargy|grunting|pain|bleed|vomit/i.test(
         cleanQuery
       );
     const isDiagnosisQuery = /diagnos|test|workup|criteria|score/i.test(cleanQuery);
     const isPreventionQuery = /prevent|lifestyle|diet|exercise/i.test(cleanQuery);
+
+    const patient = ctx.patient;
+    const encounter = ctx.encounter;
+    const isPediatricPatient =
+      patient &&
+      (patient.ageGroup === "neonate" ||
+        patient.ageGroup === "infant" ||
+        patient.ageGroup === "pediatric" ||
+        (typeof patient.age === "number" && patient.age < 18));
+    const isElderlyPatient =
+      patient &&
+      (patient.ageGroup === "older_adult" ||
+        (typeof patient.age === "number" && patient.age >= 65));
+    const isPregnant = patient && patient.pregnancyStatus === "pregnant";
 
     const scored = this.passages.map((passage) => {
       let score = 0;
@@ -189,18 +195,17 @@ export class ClinicalKnowledgeRetriever {
       }
 
       // 2. Domain Alignment
-      if (domain && domain !== "general") {
-        if (passage.domain === domain) {
+      if (ctx.domain && ctx.domain !== "general") {
+        if (passage.domain === ctx.domain) {
           score += 15;
         } else if (passage.domain !== "general" && passage.domain !== "medications") {
-          // Penalize wrong clinical specialist domain
           score -= 10;
         }
       }
 
       // 3. Section-Aware Boosting
-      if (options.targetSection) {
-        if (passage.section === options.targetSection) {
+      if (ctx.targetSection) {
+        if (passage.section === ctx.targetSection) {
           score += 25;
         }
       } else {
@@ -220,6 +225,116 @@ export class ClinicalKnowledgeRetriever {
       const authorityWeight = AUTHORITY_PRIORITY[passage.authority] || 50;
       score += (authorityWeight / 100) * 8;
 
+      // 5. Population-Aware Scoring
+      if (patient) {
+        const passagePop = passage.population || [];
+        const isPediatricPassage =
+          passagePop.some((p) => p === "pediatric" || p === "infant" || p === "neonate") ||
+          passage.domain === "pediatrics" ||
+          /\b(pediatric|child|infant|baby|newborn|toddler)\b/i.test(passage.title);
+
+        if (isPediatricPatient) {
+          if (isPediatricPassage) {
+            score += 25;
+          } else if (
+            passagePop.length === 1 &&
+            (passagePop.includes("adult") || passagePop.includes("older_adult"))
+          ) {
+            score -= 15;
+          }
+        } else {
+          // Non-pediatric patient: penalize exclusively pediatric content
+          if (isPediatricPassage && !passagePop.includes("adult")) {
+            score -= 20;
+          }
+        }
+
+        if (isElderlyPatient) {
+          if (
+            passagePop.includes("older_adult") ||
+            /\b(geriatric|elderly|older adult)\b/i.test(contentLower)
+          ) {
+            score += 15;
+          }
+        }
+
+        if (isPregnant) {
+          if (
+            passagePop.includes("pregnant") ||
+            /\b(pregnant|pregnancy|prenatal|gestational)\b/i.test(passage.title) ||
+            /\b(pregnancy|pregnant|fetal|teratogen)\b/i.test(contentLower)
+          ) {
+            score += 25;
+          }
+        }
+      }
+
+      // 6. Medication Context Relevance
+      if (patient?.currentMedications && patient.currentMedications.length > 0) {
+        for (const med of patient.currentMedications) {
+          const medName = med.name.toLowerCase();
+          const brand = med.brandName?.toLowerCase();
+          const matchMed =
+            contentLower.includes(medName) ||
+            (brand && contentLower.includes(brand)) ||
+            passage.keyTerms.some((k) => k.includes(medName) || (brand && k.includes(brand)));
+
+          if (matchMed) {
+            if (
+              passage.section === "contraindications" ||
+              passage.section === "interactions" ||
+              passage.section === "adverse_events"
+            ) {
+              score += 28;
+            } else {
+              score += 12;
+            }
+          }
+        }
+      }
+
+      // 7. Drug Allergy Screening
+      if (patient?.drugAllergies && patient.drugAllergies.length > 0) {
+        for (const allergy of patient.drugAllergies) {
+          const allergyDrug = allergy.drugName.toLowerCase();
+          if (
+            contentLower.includes(allergyDrug) ||
+            titleLower.includes(allergyDrug) ||
+            passage.keyTerms.some((k) => k.includes(allergyDrug))
+          ) {
+            score += 25;
+          }
+        }
+      }
+
+      // 8. Known Conditions Context
+      if (patient?.knownConditions && patient.knownConditions.length > 0) {
+        for (const cond of patient.knownConditions) {
+          const cleanCond = cond.toLowerCase().replace(/_/g, " ");
+          if (
+            titleLower.includes(cleanCond) ||
+            contentLower.includes(cleanCond) ||
+            passage.conditions?.some((c) => c.toLowerCase().includes(cleanCond))
+          ) {
+            score += 14;
+          }
+        }
+      }
+
+      // 9. Acuity Level Modulation
+      if (isAcuteSymptomQuery || (encounter?.severity && /^[7-9]|10/i.test(encounter.severity))) {
+        if (passage.acuity?.includes("emergent") || passage.section === "emergency_guidance") {
+          score += 20;
+        } else if (passage.section === "symptoms") {
+          score += 12;
+        } else if (passage.section === "overview") {
+          score -= 6;
+        }
+        if (passage.acuity?.includes("preventive") || passage.section === "prevention") {
+          score -= 10;
+        }
+      }
+
       return {
         ...passage,
         relevanceScore: Math.round(score * 10) / 10,
@@ -234,16 +349,17 @@ export class ClinicalKnowledgeRetriever {
       return (AUTHORITY_PRIORITY[b.authority] || 0) - (AUTHORITY_PRIORITY[a.authority] || 0);
     });
 
-    const minScore = options.minScore || 5;
+    const minScore = ctx.minScore || 5;
     const filtered = scored.filter((p) => (p.relevanceScore || 0) >= minScore);
     const topPassages = filtered.slice(0, topK);
 
     return {
       retrievedAt: new Date().toISOString(),
-      query,
-      domain: domain || "general",
+      query: ctx.query,
+      domain: ctx.domain || "general",
       passages: topPassages,
       authorityHierarchyApplied: true,
+      patientContextApplied: Boolean(patient || encounter),
     };
   }
 }
