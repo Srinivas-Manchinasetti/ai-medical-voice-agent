@@ -1,9 +1,11 @@
 import { PatientCase, SpecialistRequest } from "../agents/schemas";
+import { evaluateUniversalRedFlags, RedFlagResult } from "./universal-red-flags";
 
 export interface PreArbiterResult {
   immediate_danger: boolean;
   pre_safety_flags: string[];
   suggested_specialists: SpecialistRequest[];
+  universal_red_flag_result?: RedFlagResult;
   latency_us: number; // empirical latency in microseconds
 }
 
@@ -23,8 +25,8 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
 
   // Helper for lookbehind negation detection
   const negationPatterns = [
-    /(?:no|denies|without|never|rules?\s+out|negative\s+for|not|free\s+of)(?:\s+[a-z0-9_-]+){0,3}\s+(?:or|and|\/)\s*$/i,
-    /(?:no|denies|without|never|rules?\s+out|negative\s+for|not|free\s+of)(?:\s+[a-z0-9_-]+){0,3}\s*$/i,
+    /(?:no|denies|denied|without|never|rules?\s+out|negative\s+for|not|don'?t(?:\s+have)?|doesn'?t(?:\s+have)?|do\s+not(?:\s+have)?|does\s+not(?:\s+have)?|haven'?t(?:\s+had)?|free\s+of)(?:\s+[a-z0-9_-]+){0,4}\s+(?:or|and|\/)\s*$/i,
+    /(?:no|denies|denied|without|never|rules?\s+out|negative\s+for|not|don'?t(?:\s+have)?|doesn'?t(?:\s+have)?|do\s+not(?:\s+have)?|does\s+not(?:\s+have)?|haven'?t(?:\s+had)?|free\s+of)(?:\s+[a-z0-9_-]+){0,4}\s*$/i,
   ];
 
   // Helper for lookbehind negation detection
@@ -67,14 +69,19 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
     return !negationPatterns.some((pattern) => pattern.test(effectiveWindow.trim()));
   };
 
+  // Historical resolved episode filter (past symptoms currently resolved do not trigger acute preemption)
+  const isPastResolved =
+    /\b(?:yesterday|days?\s+ago|last\s+night|previous|past)\b/i.test(text) &&
+    /\b(?:fine\s+now|gone\s+now|better\s+now|well\s+now|resolved|no\s+longer|no\s+pain\s+now)\b/i.test(text);
+
   // 1. Cardiovascular / Acute Coronary Syndrome (ACS) Red Flags
-  const hasChestPain = hasAffirmative([
+  const hasChestPain = !isPastResolved && (hasAffirmative([
     "chest pain", "chest pressure", "crushing chest", "heavy chest", "tightness in chest",
     "elephant on chest", "squeezing chest", "pain radiating to left arm", "substernal",
     "tight pressure in the center", "tight pressure in the middle", "pressure under breastbone"
   ]) || hasAffirmativeRegex(/\b(crushing|heavy|tightness|tight|pressure|squeezing)[^.,;!?\n]*chest\b/i)
      || hasAffirmativeRegex(/\bchest[^.,;!?\n]*(pressure|tight|squeeze|crush|heav|pain)\b/i)
-     || (hasAffirmative(["breastbone", "center of my chest", "middle of my chest"]) && hasAffirmative(["pressure", "tight", "squeezing", "heavy", "weight"]));
+     || (hasAffirmative(["breastbone", "center of my chest", "middle of my chest"]) && hasAffirmative(["pressure", "tight", "squeezing", "heavy", "weight"])));
 
   const hasCardiacRadiation = hasAffirmative([
     "left arm", "jaw pain", "neck pain", "between shoulder blades", "cold sweats", "diaphoresis"
@@ -181,6 +188,27 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
     }
   }
 
+  // Presentation-independent Universal Red-Flag Screen
+  const pSpec = (patientCase as any).patientSpec;
+  const demo = patientCase.demographics as any;
+  const universalResult = evaluateUniversalRedFlags({
+    rawText: text,
+    cumulativeTranscript: text,
+    patient: pSpec || {
+      ageYears: demo?.age,
+      pregnancy: demo?.is_pregnant ? { status: "pregnant" } : undefined,
+      modifiers: demo?.risk_factors || [],
+    }
+  });
+
+  if (universalResult.level === "EMERGENCY_NOW") {
+    for (const fired of universalResult.firedRules) {
+      if (!pre_safety_flags.includes(fired.ruleId)) {
+        pre_safety_flags.push(fired.ruleId);
+      }
+    }
+  }
+
   // Determine immediate danger threshold
   const immediate_danger = pre_safety_flags.length > 0;
 
@@ -191,6 +219,7 @@ export function evaluatePreArbiter(patientCase: Partial<PatientCase>): PreArbite
     immediate_danger,
     pre_safety_flags,
     suggested_specialists,
+    universal_red_flag_result: universalResult,
     latency_us
   };
 }

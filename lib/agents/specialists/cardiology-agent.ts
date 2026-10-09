@@ -253,7 +253,8 @@ export class CardiologyAgent extends BaseClinicalAgent {
     const caseVer = patientCase.case_version || 1;
 
     // Check if cardiac domain is active (chest discomfort, palpitations, breathlessness, angina)
-    const hasCardiacSignal = /\b(chest|heart|sternum|angina|palpitation|pressure|tightness|squeezing)\b/i.test(text);
+    const hasCardiacSignal = /\b(chest|heart|sternum|angina|palpitation)\b/i.test(text) ||
+      (/\b(pressure|tightness|squeezing)\b/i.test(text) && /\b(chest|heart|sternum|breastbone|chhati)\b/i.test(text));
     if (!hasCardiacSignal) return [];
 
     // 1. Onset & Duration

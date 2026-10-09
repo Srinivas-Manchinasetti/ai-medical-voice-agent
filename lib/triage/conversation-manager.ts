@@ -10,6 +10,8 @@ import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
 import { extractSubfieldState, extractNumericSeverity, extractEpisodicSeverity, extractGiAssociatedSymptoms, parseAbdominalLocations, ABDOMINAL_LOCATION_LABELS, NON_DENIABLE_SLOTS, parseOnsetDimensions, isAbdominalPresentation } from "./clinical-state";
 import { PatientProfile } from "../clinical-knowledge/types";
+import { PresentationContext } from "../clinical-knowledge/presentation-types";
+import { presentationClassifier } from "../clinical-knowledge/presentation-classifier";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -111,6 +113,7 @@ export interface ClinicalInterviewState {
   conversationMemory?: ConversationMemory;
   responsePlan?: ResponsePlan;
   patientProfile?: PatientProfile;
+  presentationContext?: PresentationContext;
 }
 
 export interface ConversationTurnResult {
@@ -218,7 +221,11 @@ export class ConversationManager {
         patientConcerns: [],
         accessConstraints: [],
         uncertainties: [],
-      }
+      },
+      presentationContext: {
+        active: [],
+        supporting: [],
+      },
     };
   }
 
@@ -504,7 +511,7 @@ export class ConversationManager {
 
       // D. CHARACTER / QUALITY
       if (slot === "character") {
-        const charMatch = textLower.match(/\b(crushing|pressure|tightness|heavy|squeezing|sharp|stabbing|burning|throbbing|ache|dull|elephant)\b/i);
+        const charMatch = textLower.match(/\b(crushing|pressure|tightness|heavy|squeezing|sharp|stabbing|burning|throbbing|ache|dull|elephant|cramp(?:ing)?|colic(?:ky)?|spasm|gnawing)\b/i);
         if (charMatch) {
           return { intent: "answer_question", resolvedSlot: "character", resolvedValue: charMatch[0] };
         }
@@ -581,6 +588,22 @@ export class ConversationManager {
         return { intent: "answer_question", resolvedSlot: "ear_pain", resolvedValue: hasSpecificDenial ? "denied" : (hasSpecificEar ? "ear pain reported" : "denied") };
       }
 
+      // K. RASH & BLEEDING TENDENCY
+      if (slot === "rash_bleeding" || slot === "rash") {
+        const hasSpecificDenial = /\b(no\s+rash|no\s+bleeding|no\s+spots|no\s+bruising|denies\s+rash)\b/i.test(textLower) ||
+          /^(?:no|nope|neither|none|nothing)[.!?\s]*$/i.test(textLower);
+        const hasSpecificFinding = /\b(rash|spots|petechiae|bruising|bleeding|red\s+dots)\b/i.test(textLower) && !hasSpecificDenial;
+        return { intent: "answer_question", resolvedSlot: "rash_bleeding", resolvedValue: hasSpecificDenial ? "denied" : (hasSpecificFinding ? "rash / bleeding tendency reported" : "denied") };
+      }
+
+      // L. TRISMUS / JAW OPENING
+      if (slot === "trismus" || slot === "trismus_or_jaw_opening") {
+        const hasSpecificDenial = /\b(no\s+stiffness|can\s+open\s+(?:my\s+mouth|normally|fully)|no\s+trismus|jaw\s+is\s+fine)\b/i.test(textLower) ||
+          /^(?:no|nope|neither|none|can\s+open\s+fine)[.!?\s]*$/i.test(textLower);
+        const hasSpecificTrismus = /\b(cannot\s+open|can't\s+open|stiff\s+jaw|limited\s+opening|painful\s+to\s+open|lockjaw|trismus)\b/i.test(textLower) && !hasSpecificDenial;
+        return { intent: "answer_question", resolvedSlot: "trismus", resolvedValue: hasSpecificDenial ? "denied" : (hasSpecificTrismus ? "trismus / limited jaw opening reported" : "denied") };
+      }
+
       // F. NEUROLOGICAL SIGNS
       if (slot === "neurological_signs") {
         const signs: string[] = [];
@@ -616,8 +639,21 @@ export class ConversationManager {
       return { intent: "answer_question", resolvedSlot: "swallowing_difficulty", resolvedValue: "difficulty swallowing reported" };
     }
 
+    // Check affirmative stomach / abdominal location
+    if (/\b(stomach|belly|abdomen|tummy|gut)\b/i.test(textLower)) {
+      const idx = textLower.search(/\b(stomach|belly|abdomen|tummy|gut)\b/i);
+      const before = idx !== -1 ? textLower.substring(Math.max(0, idx - 40), idx) : "";
+      if (!/\b(?:no|not|don'?t\s+have|without|denies)\b/i.test(before)) {
+        return { intent: "answer_question", resolvedSlot: "abdominal_location", resolvedValue: "abdomen/stomach" };
+      }
+    }
+
     if (/\b(chest|heart|sternum|angina|palpitation)\b/i.test(textLower)) {
-      return { intent: "answer_question", resolvedSlot: "location", resolvedValue: "chest" };
+      const idx = textLower.search(/\b(chest|heart|sternum|angina|palpitation)\b/i);
+      const before = idx !== -1 ? textLower.substring(Math.max(0, idx - 40), idx) : "";
+      if (!/\b(?:no|not|don'?t\s+have|without|denies)\b/i.test(before)) {
+        return { intent: "answer_question", resolvedSlot: "location", resolvedValue: "chest" };
+      }
     }
 
     return { intent: "unrelated" };
@@ -642,13 +678,83 @@ export class ConversationManager {
 
     // --- STEP 1: PRE-ARBITER DETERMINISTIC SAFETY SCREENING ON EVERY TURN ---
     // (Invariant: Safety > Conversational State > Specialist Reasoning)
+    const profile = this.patientProfile || state.patientProfile;
+    const pAge = (profile?.age != null && profile.age > 0)
+      ? profile.age
+      : (demographics?.age != null && demographics.age > 0 ? demographics.age : undefined);
+    const patientSpec = {
+      ageYears: pAge,
+      ageMonths: profile?.ageMonths ?? (profile ? (profile.age !== undefined && profile.age < 2 ? Math.round(profile.age * 12) : undefined) : undefined),
+      pregnancy: profile?.pregnancy
+        ? {
+            status: (profile.pregnancy.isPregnant ? "pregnant" : "not_pregnant") as any,
+            weeks: profile.pregnancy.gestationalWeeks,
+          }
+        : undefined,
+      modifiers: profile?.conditions || [],
+      drugAllergies: profile?.allergies?.map(a => a.allergen) || [],
+    };
+
     const preArbiterResult = evaluatePreArbiter({
       transcript: state.cumulativeTranscript,
       demographics: {
-        age: demographics.age ?? undefined,
-        age_group: demographics.age_group || "adult"
+        age: pAge ?? undefined,
+        age_group: profile ? (profile.age < 1 ? "infant" : profile.age < 16 ? "pediatric" : "adult") : (demographics.age_group || "adult"),
+      },
+      patientSpec,
+    } as any);
+
+    // Ingest extracted demographics & modifiers from speech into patient profile & state
+    const extDemo = preArbiterResult?.universal_red_flag_result?.extractedDemographics;
+    if (extDemo) {
+      const extAge = (extDemo.ageYears != null && extDemo.ageYears > 0)
+        ? extDemo.ageYears
+        : (extDemo.ageMonths != null && extDemo.ageMonths > 0 ? Number((extDemo.ageMonths / 12).toFixed(2)) : undefined);
+
+      if (!state.patientProfile) {
+        state.patientProfile = {
+          id: "caller-" + Date.now(),
+          name: "Caller",
+          age: extAge ?? 0,
+          gender: extDemo.sexAtBirth || "other",
+          language: "en",
+          conditions: [...extDemo.modifiers],
+          medications: [],
+          allergies: [],
+          pregnancy: {
+            isPregnant: !!extDemo.isPregnant,
+            gestationalWeeks: undefined,
+          },
+        };
+      } else {
+        if ((!state.patientProfile.age || state.patientProfile.age === 0) && extAge) {
+          state.patientProfile.age = extAge;
+        }
+        if (extDemo.isPregnant && !state.patientProfile.pregnancy?.isPregnant) {
+          state.patientProfile.pregnancy = {
+            isPregnant: true,
+            gestationalWeeks: undefined,
+          };
+        }
+        for (const m of extDemo.modifiers) {
+          if (!state.patientProfile.conditions.includes(m)) {
+            state.patientProfile.conditions.push(m);
+          }
+        }
       }
-    });
+
+      if (extDemo.ageYears && !state.slots.known_facts.some(f => /Patient Age:/i.test(f))) {
+        state.slots.known_facts.push(`Patient Age: ${extDemo.ageYears} years`);
+      } else if (extDemo.ageMonths !== undefined && !state.slots.known_facts.some(f => /Patient Age:/i.test(f))) {
+        state.slots.known_facts.push(`Patient Age: ${extDemo.ageMonths} months`);
+      }
+      for (const m of extDemo.modifiers) {
+        const fact = `Comorbidity: ${m}`;
+        if (!state.slots.known_facts.includes(fact)) {
+          state.slots.known_facts.push(fact);
+        }
+      }
+    }
 
     // Run semantic interpreter for emergency inquiry and intent awareness
     const isEmergencyActive = state.informationState === "emergency_preempted" || preArbiterResult.immediate_danger;
@@ -684,7 +790,8 @@ export class ConversationManager {
       f === "PRE_FLAG_DEEP_NECK_INFECTION_OR_PTA" ||
       f === "PRE_FLAG_ACS_RADIATION_OR_DIAPHORESIS" ||
       f === "PRE_FLAG_PEDIATRIC_CRISIS" ||
-      f === "PRE_FLAG_ACOUSTIC_SEVERE_RESPIRATORY_DISTRESS"
+      f === "PRE_FLAG_ACOUSTIC_SEVERE_RESPIRATORY_DISTRESS" ||
+      f.startsWith("UNI-")
     ) || /\b(unconscious|unresponsive|not\s+breathing|cardiac\s+arrest|collapsed)\b/i.test(state.cumulativeTranscript);
 
     if (hasEmergencyPreemptionFlag || state.informationState === "emergency_preempted") {
@@ -792,6 +899,8 @@ export class ConversationManager {
           if (/swallow/i.test(questionText) || slot === "swallowing_difficulty") deniedList.push("swallowing_difficulty");
           if (/fever|chills/i.test(questionText) || slot === "fever") deniedList.push("fever");
           if (/ear/i.test(questionText) || slot === "ear_pain") deniedList.push("ear_pain");
+          if (/rash|bleeding|spots|bruising/i.test(questionText) || slot === "rash_bleeding") deniedList.push("rash_bleeding");
+          if (/trismus|jaw/i.test(questionText) || slot === "trismus") deniedList.push("trismus");
 
           if (deniedList.length === 0 && !NON_DENIABLE_SLOTS.has(slot)) {
             deniedList.push(slot);
@@ -838,9 +947,15 @@ export class ConversationManager {
               state.conversationMemory.questionsAlreadyAsked.push("onset_time");
             }
           }
-        } else if (slot === "abdominal_location" || slot === "location") {
+        } else if (slot === "abdominal_location" || (slot === "location" && isAbdominalPresentation(cleanMsg))) {
           state.slots.location = String(val);
           const locFact = `Abdominal location: ${val}`;
+          if (!state.slots.known_facts.includes(locFact)) {
+            state.slots.known_facts.push(locFact);
+          }
+        } else if (slot === "location") {
+          state.slots.location = String(val);
+          const locFact = `Location: ${val}`;
           if (!state.slots.known_facts.includes(locFact)) {
             state.slots.known_facts.push(locFact);
           }
@@ -902,6 +1017,18 @@ export class ConversationManager {
 
     // Refresh opportunistic facts after resolving pending answer
     this.extractOpportunisticFacts(state);
+
+    // --- STEP 1.4: MULTI-PRESENTATION SYNDROME CLASSIFICATION ---
+    // Invariant: Identifies active presentations without creating a parallel clinical state.
+    const prevConcepts = [
+      ...state.slots.associated_symptoms,
+      ...(state.presentationContext?.active.flatMap(a => a.triggeredBy) || []),
+    ];
+    state.presentationContext = presentationClassifier.classify(
+      cleanMsg,
+      state.cumulativeTranscript,
+      prevConcepts
+    );
 
     // --- STEP 1.5: RESPONSE PLANNER EXECUTION ---
     const plan = responsePlanner.plan(cleanMsg, semantic, state, preArbiterResult, [], localeConfig);
@@ -1143,6 +1270,8 @@ export class ConversationManager {
         if (/swallow/i.test(questionText) || slot === "swallowing_difficulty") deniedList.push("swallowing_difficulty");
         if (/fever|chills/i.test(questionText) || slot === "fever") deniedList.push("fever");
         if (/ear/i.test(questionText) || slot === "ear_pain") deniedList.push("ear_pain");
+        if (/rash|bleeding|spots|bruising/i.test(questionText) || slot === "rash_bleeding") deniedList.push("rash_bleeding");
+        if (/trismus|jaw/i.test(questionText) || slot === "trismus") deniedList.push("trismus");
 
         if (deniedList.length === 0 && !NON_DENIABLE_SLOTS.has(slot)) {
           deniedList.push(slot);
@@ -1189,9 +1318,15 @@ export class ConversationManager {
             state.conversationMemory.questionsAlreadyAsked.push("onset_time");
           }
         }
-      } else if (slot === "abdominal_location" || slot === "location") {
+      } else if (slot === "abdominal_location" || (slot === "location" && isAbdominalPresentation(cleanMsg))) {
         state.slots.location = String(val);
         const locFact = `Abdominal location: ${val}`;
+        if (!state.slots.known_facts.includes(locFact)) {
+          state.slots.known_facts.push(locFact);
+        }
+      } else if (slot === "location") {
+        state.slots.location = String(val);
+        const locFact = `Location: ${val}`;
         if (!state.slots.known_facts.includes(locFact)) {
           state.slots.known_facts.push(locFact);
         }
@@ -1420,6 +1555,27 @@ export class ConversationManager {
       };
     }
 
+    // B0. Check for targeted syndromic directives or clinical inquiries from clinicalDecisionEngine
+    const turnClassification = clinicalDecisionEngine.classifyTurn(cleanMsg, state);
+    const engineDecision = clinicalDecisionEngine.decideNextAction(
+      turnClassification,
+      state,
+      preArbiterResult,
+      localeConfig
+    );
+
+    if (engineDecision.action !== "ADVANCE_INTERVIEW") {
+      state.phase = engineDecision.action === "PROVIDE_EMERGENCY_GUIDANCE" ? "decided" : "active_inquiring";
+      return {
+        action: engineDecision.action === "PROVIDE_EMERGENCY_GUIDANCE" ? "EMERGENCY_CONVENE_BOARD" : "ASK_PATIENT",
+        doctorReply: engineDecision.spokenDoctorReply,
+        doctorName: engineDecision.doctorName || "Dr. Sarah Chen, MD",
+        specialty: engineDecision.specialty || "Internal Medicine & Critical Care Lead",
+        state,
+        preArbiterResult,
+      };
+    }
+
     // B. Check for outstanding AgentRequests
     const pendingRequests = state.agentRequests.filter(r => r.status === "pending");
 
@@ -1496,7 +1652,12 @@ export class ConversationManager {
     const isAbdominal = isAbdominalPresentation(msgLower);
     const isHeadache = /\b(headache|migraine|head\s+pain)\b/i.test(msgLower) && !isChestPresentation;
 
-    if (isLegNerveMuscle) {
+    if (preArbiterResult?.universal_red_flag_result?.discriminatorQuestion) {
+      const dq = preArbiterResult.universal_red_flag_result.discriminatorQuestion;
+      initialTargetSlot = dq.intent;
+      initialPurpose = `Universal red-flag screen discriminator for rule ${dq.ruleId}`;
+      initialDoctorReply = dq.text;
+    } else if (isLegNerveMuscle) {
       initialTargetSlot = "radiation_or_back";
       initialPurpose = "Differentiate sciatic radiculopathy, focal muscle spasm, and peripheral nerve irritation";
       if (semantic.isExplanatoryInquiry || msgLower.includes("why")) {
@@ -1608,7 +1769,7 @@ export class ConversationManager {
     }
     if (!state.slots.character) {
       // Affirmative character extraction: ensure matched character word is NOT preceded by an active negation in the same clause
-      const charRegex = /\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant)\b/gi;
+      const charRegex = /\b(tightness|pressure|squeezing|crushing|burning|sharp|heavy|elephant|cramp(?:ing)?|colic(?:ky)?|spasm|gnawing)\b/gi;
       let matchedChar: string | null = null;
       let charExec: RegExpExecArray | null;
       while ((charExec = charRegex.exec(state.cumulativeTranscript)) !== null) {
@@ -1866,6 +2027,20 @@ export class ConversationManager {
       }
       if (state.conversationMemory && !state.conversationMemory.uncertainties.includes("weakness_distribution")) {
         state.conversationMemory.uncertainties.push("distribution of weakness/numbness (unilateral vs bilateral)");
+      }
+    }
+
+    // Opportunistic Petechiae / Bleeding tendency (MoHFW Dengue Warning Signs)
+    if (/\b(red\s+spots|petechiae|purpura|bleeding\s+gums|gum\s+bleeding|nosebleed|epistaxis|unusual\s+bruising)\b/i.test(state.cumulativeTranscript)) {
+      if (!state.slots.known_facts.some(f => /BLEEDING_TENDENCY|petechiae/i.test(f))) {
+        state.slots.known_facts.push("BLEEDING_TENDENCY: petechiae / bleeding gums present");
+      }
+    }
+
+    // Opportunistic Trismus (Peritonsillar Abscess / Airway Compromise)
+    if (/\b(cannot\s+open\s+mouth|hard\s+to\s+open\s+jaw|jaw\s+stiff|trismus|mouth\s+won'?t\s+open)\b/i.test(state.cumulativeTranscript)) {
+      if (!state.slots.known_facts.some(f => /TRISMUS/i.test(f))) {
+        state.slots.known_facts.push("TRISMUS: limited jaw opening present");
       }
     }
   }

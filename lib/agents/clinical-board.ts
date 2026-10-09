@@ -137,14 +137,18 @@ export class ClinicalBoard {
     const durItem = patientReported.find(p => p.domain === "duration")?.value;
     const courseItem = patientReported.find(p => p.domain === "course")?.value;
     const sevItem = patientReported.find(p => p.domain === "pain_severity")?.value;
+    const demoItems = patientReported.filter(p => p.domain === "patient_age" || p.domain === "pregnancy" || p.domain === "comorbidity");
     const reportedSyms = patientReported
-      .filter(p => p.domain !== "chief_complaint" && p.domain !== "onset" && p.domain !== "duration" && p.domain !== "course" && p.domain !== "pain_severity")
+      .filter(p => p.domain !== "chief_complaint" && p.domain !== "onset" && p.domain !== "duration" && p.domain !== "course" && p.domain !== "pain_severity" && p.domain !== "patient_age" && p.domain !== "pregnancy" && p.domain !== "comorbidity")
       .map(p => p.label || p.description);
 
     const subjectiveLines: string[] = [
       "[PATIENT-REPORTED]",
       `• Chief Complaint: ${ccItem}`,
     ];
+    if (demoItems.length > 0) {
+      subjectiveLines.push(`• Patient Context & History: ${demoItems.map(d => d.description).join("; ")}`);
+    }
     if (onsetItem || durItem || courseItem) {
       const timelineParts = [
         onsetItem ? `Onset: ${onsetItem}` : null,

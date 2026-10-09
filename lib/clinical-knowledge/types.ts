@@ -130,6 +130,7 @@ export interface PatientProfile {
   yearOfBirth?: number;
   dateOfBirth?: string;
   age?: number;
+  ageMonths?: number;
   ageGroup: PopulationTag;
   sexAssignedAtBirth?: "male" | "female" | "intersex";
   pregnancyStatus?: "pregnant" | "not_pregnant" | "unknown" | "not_applicable";

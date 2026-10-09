@@ -223,6 +223,58 @@ export function buildProvenanceEvidenceFromClinicalState(
     });
   });
 
+  // Demographics & Comorbidities (Patient-Reported)
+  const patientProfile = state.patientProfile;
+  if (patientProfile?.age && !evidence.some(e => e.domain === "patient_age")) {
+    evidence.push({
+      id: "ev-patient-age",
+      domain: "patient_age",
+      label: "Patient Age",
+      type: "demographic",
+      description: `Patient Age: ${patientProfile.age} years`,
+      value: patientProfile.age,
+      status: "present",
+      source: "patient_reported",
+      confidence: 0.99,
+      confidence_semantics: "patient_statement",
+      timestamp: now,
+    });
+  }
+  if (patientProfile?.pregnancy?.isPregnant && !evidence.some(e => e.domain === "pregnancy")) {
+    evidence.push({
+      id: "ev-patient-pregnancy",
+      domain: "pregnancy",
+      label: "Pregnancy Status",
+      type: "demographic",
+      description: "Patient is pregnant",
+      value: true,
+      status: "present",
+      source: "patient_reported",
+      confidence: 0.99,
+      confidence_semantics: "patient_statement",
+      timestamp: now,
+    });
+  }
+  if (patientProfile?.conditions) {
+    patientProfile.conditions.forEach((cond, idx) => {
+      if (!evidence.some(e => e.description === cond && e.domain === "comorbidity")) {
+        evidence.push({
+          id: `ev-comorbidity-${idx}`,
+          domain: "comorbidity",
+          label: `Comorbidity (${cond})`,
+          type: "medical_history",
+          description: cond,
+          value: cond,
+          status: "present",
+          source: "patient_reported",
+          confidence: 0.95,
+          confidence_semantics: "patient_statement",
+          timestamp: now,
+        });
+      }
+    });
+  }
+
   // 6. [PATIENT-REPORTED / DENIED] Explicit Symptom Denials
   const allDenied = new Set<string>();
   (memory.deniedSymptoms || []).forEach(d => allDenied.add(d.toLowerCase()));

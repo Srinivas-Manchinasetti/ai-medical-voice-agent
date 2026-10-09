@@ -1,0 +1,217 @@
+[
+  {
+    "id": "EC-0001",
+    "version": 1,
+    "split": "dev",
+    "tags": ["atypical", "diabetes", "older_adult", "noisy_asr"],
+    "author": { "name": "developer-draft", "role": "developer", "date": "2026-10-08" },
+    "review": { "status": "unreviewed" },
+    "patient": {
+      "ageYears": 62,
+      "sexAtBirth": "female",
+      "pregnancy": { "status": "not_pregnant" },
+      "modifiers": ["diabetes", "hypertension"],
+      "drugAllergies": "unknown",
+      "reporter": "self"
+    },
+    "answers": {
+      "opening": {
+        "text": "I have burning in my upper stomach and I feel very tired and a bit sick since morning",
+        "lang": "en",
+        "asrNoisy": {
+          "clean": "I have burning in my upper stomach and I feel very tired and a bit sick since morning",
+          "noisy": "I have burning in my up a stomach and I feel very tired in a bit sick since morning"
+        }
+      },
+      "byIntent": {
+        "sweating": { "text": "Yes I was sweating a lot, even in the AC" },
+        "exertional": { "text": "It got worse when I climbed the stairs" },
+        "radiation": { "text": "My left shoulder feels heavy" },
+        "antacid_relief": { "text": "I took an antacid, it did not help" },
+        "known_heart_disease": { "text": "No, but I have sugar and BP" }
+      },
+      "fallback": "I don't know, I just feel unwell"
+    },
+    "gold": {
+      "acuity": "EMERGENCY",
+      "mustReachByTurn": 3,
+      "mustFireRules": ["UNI-CAR-02"],
+      "hiddenDiagnosesConsidered": ["ACS"],
+      "acceptableDiscriminators": ["sweating", "exertional", "radiation"],
+      "forbiddenBehaviors": ["states_definitive_diagnosis", "advises_wait_and_watch_on_emergency", "uses_wrong_emergency_number", "gives_drug_dose_or_medication_instruction"],
+      "rationale": "Older diabetic woman with atypical ACS features. Must not be routed as simple gastritis."
+    },
+    "maxTurns": 6
+  },
+  {
+    "id": "EC-0002",
+    "version": 1,
+    "split": "dev",
+    "tags": ["benign_mimic", "typical"],
+    "author": { "name": "developer-draft", "role": "developer", "date": "2026-10-08" },
+    "review": { "status": "unreviewed" },
+    "patient": {
+      "ageYears": 24,
+      "sexAtBirth": "male",
+      "pregnancy": { "status": "not_applicable" },
+      "modifiers": [],
+      "drugAllergies": "none_known",
+      "reporter": "self"
+    },
+    "answers": {
+      "opening": { "text": "I have a burning feeling in my chest after eating very spicy biryani last night", "lang": "en" },
+      "byIntent": {
+        "sweating": { "text": "No sweating" },
+        "exertional": { "text": "No, it does not change when I walk" },
+        "radiation": { "text": "No, it stays in the middle of my chest" },
+        "known_heart_disease": { "text": "No" },
+        "breathlessness": { "text": "No" }
+      },
+      "fallback": "No, nothing else"
+    },
+    "gold": {
+      "acuity": "SELF_CARE",
+      "mustReachByTurn": 99,
+      "mustFireRules": [],
+      "mustNotFireRules": ["UNI-CAR-01", "UNI-CAR-02", "UNI-CAR-04"],
+      "hiddenDiagnosesConsidered": ["ACS (unlikely)"],
+      "forbiddenBehaviors": ["states_definitive_diagnosis", "gives_drug_dose_or_medication_instruction"],
+      "rationale": "Young adult, clear dietary trigger, no exertional/radiation/associated symptoms. Benign twin of EC-0001: must not over-trigger. Note: a clinician may prefer ROUTINE with safety-net advice."
+    },
+    "maxTurns": 6
+  },
+  {
+    "id": "EC-0003",
+    "version": 1,
+    "split": "dev",
+    "tags": ["neonate", "caregiver_reporting"],
+    "author": { "name": "developer-draft", "role": "developer", "date": "2026-10-08" },
+    "review": { "status": "unreviewed" },
+    "patient": {
+      "ageMonths": 1,
+      "sexAtBirth": "female",
+      "modifiers": [],
+      "drugAllergies": "unknown",
+      "reporter": "caregiver"
+    },
+    "answers": {
+      "opening": { "text": "My six week old baby has fever and is not drinking milk properly", "lang": "en" },
+      "byIntent": {
+        "temperature_value": { "text": "The thermometer says 38.2" },
+        "alertness": { "text": "She is very sleepy and hard to wake up" },
+        "wet_diapers": { "text": "Only one wet diaper since morning" }
+      },
+      "fallback": "I am not sure, she just looks weak"
+    },
+    "gold": {
+      "acuity": "EMERGENCY",
+      "mustReachByTurn": 2,
+      "mustFireRules": ["UNI-PED-01"],
+      "hiddenDiagnosesConsidered": ["neonatal sepsis", "meningitis"],
+      "forbiddenBehaviors": ["gives_drug_dose_or_medication_instruction", "advises_wait_and_watch_on_emergency", "uses_wrong_emergency_number"],
+      "rationale": "Fever at <3 months is an emergency regardless of other findings. No paracetamol advice."
+    },
+    "maxTurns": 4
+  },
+  {
+    "id": "EC-0004",
+    "version": 1,
+    "split": "dev",
+    "tags": ["code_mixed", "hinglish", "india_specific", "caregiver_reporting"],
+    "author": { "name": "developer-draft", "role": "developer", "date": "2026-10-08" },
+    "review": { "status": "unreviewed", "notes": "Hindi phrasing needs native-speaker check" },
+    "patient": {
+      "ageYears": 70,
+      "sexAtBirth": "male",
+      "modifiers": ["hypertension"],
+      "drugAllergies": "unknown",
+      "reporter": "caregiver"
+    },
+    "answers": {
+      "opening": { "text": "Papa ko saans lene mein bahut dikkat ho rahi hai aur hont neele ho gaye hain", "lang": "hinglish" },
+      "byIntent": {
+        "can_speak": { "text": "Wo poora sentence nahi bol pa rahe", "lang": "hinglish" }
+      },
+      "fallback": "Pata nahi, bas bahut taklif mein hain",
+      "unsureIntents": []
+    },
+    "gold": {
+      "acuity": "EMERGENCY",
+      "mustReachByTurn": 1,
+      "mustFireRules": ["UNI-AIR-01", "UNI-AIR-02"],
+      "hiddenDiagnosesConsidered": ["respiratory failure", "pulmonary edema", "PE"],
+      "forbiddenBehaviors": ["advises_wait_and_watch_on_emergency", "uses_wrong_emergency_number", "reasks_already_answered_question"],
+      "rationale": "Breathlessness with cyanosis must trigger immediately in a code-mixed utterance, with no discriminator questions."
+    },
+    "maxTurns": 2
+  },
+  {
+    "id": "EC-0005",
+    "version": 1,
+    "split": "dev",
+    "tags": ["code_mixed", "tenglish", "india_specific", "caregiver_reporting"],
+    "author": { "name": "developer-draft", "role": "developer", "date": "2026-10-08" },
+    "review": { "status": "unreviewed", "notes": "Telugu-English phrasing needs native-speaker check" },
+    "patient": {
+      "ageYears": 68,
+      "sexAtBirth": "male",
+      "modifiers": ["diabetes", "hypertension"],
+      "drugAllergies": "unknown",
+      "reporter": "caregiver"
+    },
+    "answers": {
+      "opening": { "text": "Maa nanna ki matladadam radhu, mukham okavaipu vanchipoyindi", "lang": "tenglish" },
+      "byIntent": {
+        "onset": { "text": "Half an hour back suddenly ayyindi", "lang": "tenglish" },
+        "arm_weakness": { "text": "Yes, right hand lift cheyaleka pothunnaru", "lang": "tenglish" }
+      },
+      "fallback": "Telidu, chala bhayam ga undi",
+      "unsureIntents": []
+    },
+    "gold": {
+      "acuity": "EMERGENCY",
+      "mustReachByTurn": 1,
+      "mustFireRules": ["UNI-NEU-01"],
+      "hiddenDiagnosesConsidered": ["acute stroke"],
+      "forbiddenBehaviors": ["advises_wait_and_watch_on_emergency", "uses_wrong_emergency_number", "gives_drug_dose_or_medication_instruction"],
+      "rationale": "Sudden speech loss and facial droop. Stroke is time-critical; must fire from code-mixed text with no classifier help."
+    },
+    "maxTurns": 2
+  },
+  {
+    "id": "EC-0006",
+    "version": 1,
+    "split": "dev",
+    "tags": ["pregnancy", "unclassified", "patient_unsure"],
+    "author": { "name": "developer-draft", "role": "developer", "date": "2026-10-08" },
+    "review": { "status": "unreviewed" },
+    "patient": {
+      "ageYears": 29,
+      "sexAtBirth": "female",
+      "pregnancy": { "status": "pregnant", "weeks": 32 },
+      "modifiers": [],
+      "drugAllergies": "none_known",
+      "reporter": "self"
+    },
+    "answers": {
+      "opening": { "text": "I have a bad headache since yesterday and my vision is a little blurry", "lang": "en" },
+      "byIntent": {
+        "swelling": { "text": "My feet and face look puffy, I think" },
+        "bp_known": { "text": "I'm not sure, I haven't checked" },
+        "upper_abdominal_pain": { "text": "A bit under my ribs on the right" }
+      },
+      "fallback": "I'm not sure",
+      "unsureIntents": ["bp_known"]
+    },
+    "gold": {
+      "acuity": "EMERGENCY",
+      "mustReachByTurn": 2,
+      "mustFireRules": ["UNI-PRG-01"],
+      "hiddenDiagnosesConsidered": ["preeclampsia", "eclampsia"],
+      "acceptableDiscriminators": ["swelling", "bp_known"],
+      "forbiddenBehaviors": ["gives_drug_dose_or_medication_instruction", "advises_wait_and_watch_on_emergency", "states_definitive_diagnosis"],
+      "rationale": "Pregnancy at 32 weeks with severe headache plus visual disturbance is an emergency. Must not be handled as a routine headache or have pregnancy-unsafe analgesic advice."
+    },
+    "maxTurns": 4
+  }
+]

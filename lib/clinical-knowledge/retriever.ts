@@ -12,6 +12,7 @@ import {
   PopulationTag,
 } from "./types";
 import { CURATED_GUIDELINES } from "./guidelines";
+import { normalizeClinicalSymptoms } from "./synonyms";
 
 let cachedPassages: ClinicalPassage[] | null = null;
 
@@ -153,7 +154,9 @@ export class ClinicalKnowledgeRetriever {
 
   public retrieveWithContext(ctx: ContextAwareQuery): KnowledgeContext {
     const topK = ctx.topK || 4;
-    const cleanQuery = ctx.query.toLowerCase().trim();
+    // Clinical concept normalization (multilingual & colloquial mapping)
+    const normalized = normalizeClinicalSymptoms(ctx.query);
+    const cleanQuery = normalized.normalizedQuery.toLowerCase().trim();
     const queryTokens = cleanQuery
       .split(/[^a-z0-9-]+/)
       .filter((t) => t.length > 2);
@@ -195,11 +198,11 @@ export class ClinicalKnowledgeRetriever {
       }
 
       // 2. Domain Alignment
+      // Invariant: Matching domain receives a boost; non-matching domains are NOT penalized (-10 removed)
+      // to avoid suppressing valid cross-specialty differentials (e.g. GERD vs angina in chest pain)
       if (ctx.domain && ctx.domain !== "general") {
         if (passage.domain === ctx.domain) {
           score += 15;
-        } else if (passage.domain !== "general" && passage.domain !== "medications") {
-          score -= 10;
         }
       }
 
@@ -269,45 +272,11 @@ export class ClinicalKnowledgeRetriever {
         }
       }
 
-      // 6. Medication Context Relevance
-      if (patient?.currentMedications && patient.currentMedications.length > 0) {
-        for (const med of patient.currentMedications) {
-          const medName = med.name.toLowerCase();
-          const brand = med.brandName?.toLowerCase();
-          const matchMed =
-            contentLower.includes(medName) ||
-            (brand && contentLower.includes(brand)) ||
-            passage.keyTerms.some((k) => k.includes(medName) || (brand && k.includes(brand)));
-
-          if (matchMed) {
-            if (
-              passage.section === "contraindications" ||
-              passage.section === "interactions" ||
-              passage.section === "adverse_events"
-            ) {
-              score += 28;
-            } else {
-              score += 12;
-            }
-          }
-        }
-      }
-
-      // 7. Drug Allergy Screening
-      if (patient?.drugAllergies && patient.drugAllergies.length > 0) {
-        for (const allergy of patient.drugAllergies) {
-          const allergyDrug = allergy.drugName.toLowerCase();
-          if (
-            contentLower.includes(allergyDrug) ||
-            titleLower.includes(allergyDrug) ||
-            passage.keyTerms.some((k) => k.includes(allergyDrug))
-          ) {
-            score += 25;
-          }
-        }
-      }
-
-      // 8. Known Conditions Context
+      // 6. Known Conditions & Comorbidity Context
+      // Boosts evidence matching chronic diseases (e.g. peptic ulcer, asthma, diabetes)
+      // Note: Allergy, pregnancy teratogenicity, and drug-drug interactions are strictly evaluated
+      // by evaluatePharmacologySafetyShield() in the Deterministic Safety Arbiter to prevent
+      // surfacing contraindication passages as treatment recommendations.
       if (patient?.knownConditions && patient.knownConditions.length > 0) {
         for (const cond of patient.knownConditions) {
           const cleanCond = cond.toLowerCase().replace(/_/g, " ");

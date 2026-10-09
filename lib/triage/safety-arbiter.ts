@@ -5,6 +5,13 @@ import {
   reconcileConflictingFacts,
   getProvenanceRank,
 } from './clinical-state';
+import { PatientProfile, ContraindicationAlert } from '../clinical-knowledge/types';
+import { evaluatePharmacologySafetyShield } from '../clinical-knowledge/safety-matrix';
+import {
+  evaluateUniversalRedFlags,
+  RedFlagResult,
+  UniversalScreenPatient,
+} from './universal-red-flags';
 
 /**
  * CLINICAL FEATURES SCHEMA
@@ -47,6 +54,7 @@ export const ClinicalFeaturesSchema = z.object({
   rigidAbdomen: z.boolean().default(false),
   rightLowerQuadrantPain: z.boolean().default(false),
   vomitingBloodOrMelena: z.boolean().default(false),
+  severeDehydrationWithOrthostasis: z.boolean().default(false),
 
   // Pediatric & Systemic Sepsis
   pediatricPatient: z.boolean().default(false),
@@ -63,10 +71,14 @@ export const ClinicalFeaturesSchema = z.object({
 
 export type ClinicalFeatures = z.infer<typeof ClinicalFeaturesSchema>;
 
+export type MedVoiceUrgencyTier = 1 | 2 | 3 | 4 | 5;
+
 export interface ArbiterResult {
   triageLevel: 'emergency' | 'priority' | 'routine';
-  esiScore: 1 | 2 | 3 | 4 | 5;
-  esiTitle: string;
+  urgencyTier: MedVoiceUrgencyTier;
+  tierTitle: string;
+  esiScore: MedVoiceUrgencyTier; // Maintained as backward-compatible alias for existing tests and APIs
+  esiTitle: string; // Maintained as backward-compatible alias for existing tests and APIs
   isEmergency: boolean;
   arbiterOverride: boolean; // True when deterministic arbiter overrode an unsafe suggestion
   redFlagsTriggered: string[];
@@ -77,6 +89,8 @@ export interface ArbiterResult {
   detectedSymptoms: string[];
   unresolvedRedFlags: string[];
   isScreeningComplete: boolean;
+  universalRedFlagResult?: RedFlagResult;
+  contraindicationAlerts?: ContraindicationAlert[];
   provenanceSummary?: {
     highestProvenance: string;
     contradictionsResolved: number;
@@ -101,6 +115,9 @@ export interface EvaluateSafetyArbiterOptions {
   rawText?: string;
   llmSuggestedLevel?: string;
   patientAge?: number;
+  patientProfile?: PatientProfile;
+  universalPatient?: UniversalScreenPatient;
+  candidateAdvice?: string;
   structuredState?: SafetyArbiterStructuredInput;
   facts?: ClinicalFact[];
   redFlags?: Record<string, RedFlagDomainAssessment | any>;
@@ -517,9 +534,10 @@ export function extractClinicalFeatures(text: string, patientAge?: number): Clin
 
     // Gastrointestinal
     severeAbdominalPain: matchesPattern(/severe stomach pain|excruciating abdominal|belly pain|stomach cramps/i),
-    rigidAbdomen: matchesPattern(/hard as a rock|board like|rigid belly|guarding/i),
+    rigidAbdomen: matchesPattern(/hard as a (?:rock|board)|board[- ]?like|(?:rigid|hard).*?(?:board|belly|abdomen|stomach)|rigid (?:belly|abdomen|stomach)|guarding/i),
     rightLowerQuadrantPain: matchesPattern(/right lower|appendix|right side of stomach|lower right belly/i),
-    vomitingBloodOrMelena: matchesPattern(/vomiting blood|coffee ground emesis|black tarry stool|blood in stool/i),
+    vomitingBloodOrMelena: matchesPattern(/vomit(?:ing)?\s+(?:.*?\s+)?blood|coffee[- ]?ground\s+(?:emesis|vomit|blood)|black\s+tarry\s+stool|blood\s+in\s+stool/i),
+    severeDehydrationWithOrthostasis: matchesPattern(/(?:loose\s+motions?|diarrhea|watery\s+stool|vomit\w*).*?(?:cannot\s+stand|barely\s+stand|unable\s+to\s+stand|collapse|pass(?:ed)?\s+out|faint)|(?:cannot\s+stand|barely\s+stand|unable\s+to\s+stand).*?(?:loose\s+motions?|diarrhea|watery\s+stool|vomit\w*)/i),
 
     // Pediatric
     pediatricPatient: isPediatric,
@@ -615,7 +633,23 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
     medSources.push(...structuredHist.currentMedications.map((m: any) => String(m).toLowerCase()));
   }
 
+  // Consume medications and allergies from structured patient profile if provided
+  if (input.patientProfile) {
+    if (input.patientProfile.currentMedications) {
+      for (const m of input.patientProfile.currentMedications) {
+        medSources.push(m.name.toLowerCase());
+        if (m.brandName) medSources.push(m.brandName.toLowerCase());
+      }
+    }
+  }
+
   const combinedMedText = medSources.join(' ');
+
+  // Evaluate deterministic pharmacology safety shield (Allergies, DDIs, Teratogens)
+  const pharmaShieldText = [combinedMedText, input.candidateAdvice || ''].join(' ').trim();
+  const pharmaShieldResult = input.patientProfile
+    ? evaluatePharmacologySafetyShield(input.patientProfile, pharmaShieldText)
+    : { isSafe: true, alerts: [] as ContraindicationAlert[] };
 
   const hasNitratePde5Contraindication =
     (/sildenafil|viagra|tadalafil|cialis|vardenafil|levitra/i.test(combinedMedText)) &&
@@ -626,6 +660,47 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
   let esiTitle = 'ESI LEVEL 4: LESS URGENT — Routine Ambulatory Evaluation';
   let protocol = 'Standard outpatient clinical evaluation recommended within 24-48 hours.';
   let action = 'Schedule outpatient consultation or visit general urgent care.';
+
+  // Build patient spec for presentation-independent universal red-flag screen
+  const screenPatient: UniversalScreenPatient = input.universalPatient || {
+    ageYears: input.patientAge ?? input.patientProfile?.age,
+    pregnancy: input.patientProfile?.pregnancy
+      ? {
+          status: input.patientProfile.pregnancy.isPregnant ? "pregnant" : "not_pregnant",
+          weeks: input.patientProfile.pregnancy.gestationalWeeks,
+        }
+      : undefined,
+    modifiers: input.patientProfile?.conditions || [],
+    drugAllergies: input.patientProfile?.allergies?.map(a => a.allergen) || [],
+  };
+
+  const universalRedFlagResult = evaluateUniversalRedFlags({
+    rawText: input.rawText || '',
+    cumulativeTranscript: (input.structuredState as any)?.cumulativeTranscript,
+    patient: screenPatient,
+    clinicalFacts: allFacts.map(f => (f as any).fact || f.normalizedText || f.label || f.name).filter(Boolean),
+    deniedSymptoms: [
+      ...Array.from(structuredEvidence.deniedFeatures).map(String),
+      ...(structuredEvidence.deniedFeatures.has('chestPain') ? ['chest pain', 'chest tightness', 'chest'] : []),
+    ],
+  });
+
+  if (universalRedFlagResult.level === "EMERGENCY_NOW") {
+    for (const fired of universalRedFlagResult.firedRules) {
+      if (!redFlags.includes(fired.ruleId)) redFlags.push(fired.ruleId);
+      rules.push(`UNIVERSAL-RED-FLAG: ${fired.ruleId}`);
+    }
+  }
+
+  // If a critical pharmacological contraindication or anaphylactic allergy is blocked by the shield
+  if (!pharmaShieldResult.isSafe && pharmaShieldResult.alerts.length > 0) {
+    for (const alert of pharmaShieldResult.alerts) {
+      if (alert.actionRequired === 'block') {
+        redFlags.push(`CRITICAL_CONTRAINDICATION_${alert.category.toUpperCase()}`);
+        rules.push(`PHARMA-BLOCK: ${alert.category} - ${alert.clinicalRationale}`);
+      }
+    }
+  }
 
   // =========================================================================
   // RULE 1: ESI TIER 1 - IMMEDIATE RESUSCITATION (Life-Threatening Collapse)
@@ -781,17 +856,26 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
   // =========================================================================
   // RULE 7: ESI TIER 3 - MODERATE ISOLATED SYSTEMIC SYMPTOMS
   // =========================================================================
-  else if (features.chestPain || features.highFever || features.palpitations) {
+  else if (features.chestPain || features.highFever || features.palpitations || features.severeDehydrationWithOrthostasis) {
     esiScore = 3;
     triageLevel = 'priority';
-    esiTitle = 'ESI LEVEL 3: URGENT — Cardiorespiratory / Febrile Diagnostic Workup';
-    rules.push('ESI-3.2: Significant clinical complaint requiring multiple diagnostic resources');
-    protocol = 'Baseline diagnostic workup (ECG, vitals monitoring, focused lab panel).';
-    action = 'Urgent clinical evaluation at an emergency clinic or urgent care facility today.';
+    esiTitle = features.severeDehydrationWithOrthostasis
+      ? 'ESI LEVEL 3: URGENT — Acute Dehydration & Postural Compromise Protocol'
+      : 'ESI LEVEL 3: URGENT — Cardiorespiratory / Febrile Diagnostic Workup';
+    rules.push(features.severeDehydrationWithOrthostasis
+      ? 'ESI-3.3: Acute volume depletion with functional orthostasis requiring urgent rehydration workup'
+      : 'ESI-3.2: Significant clinical complaint requiring multiple diagnostic resources');
+    protocol = features.severeDehydrationWithOrthostasis
+      ? 'Urgent clinical evaluation today. Initiate oral rehydration solution (ORS). Assess orthostatic vitals, electrolytes, and renal function.'
+      : 'Baseline diagnostic workup (ECG, vitals monitoring, focused lab panel).';
+    action = features.severeDehydrationWithOrthostasis
+      ? 'Urgent outpatient clinic or urgent care evaluation today for rehydration.'
+      : 'Urgent clinical evaluation at an emergency clinic or urgent care facility today.';
     if (features.chestPain) icd10.add('R07.9'); // Chest pain unspecified
     if (features.highFever) icd10.add('R50.9'); // Fever unspecified
     if (features.palpitations) icd10.add('R00.2'); // Palpitations
-    symptoms.add('Cardiorespiratory or febrile symptom without immediate red-flags');
+    if (features.severeDehydrationWithOrthostasis) icd10.add('E86.0'); // Dehydration
+    symptoms.add(features.severeDehydrationWithOrthostasis ? 'Acute gastroenteritis / diarrhea with severe postural weakness' : 'Cardiorespiratory or febrile symptom without immediate red-flags');
   }
 
   // =========================================================================
@@ -817,6 +901,36 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
     protocol += ` (Screening Note: Core red-flag domains [${structuredEvidence.unresolvedRedFlags.join(', ')}] remain pending/unassessed. Life-threats not definitively excluded until screening completes.)`;
   }
 
+  // Universal Red-Flag Screen Escalation Guarantee
+  const tier1UniversalRules = new Set([
+    "UNI-AIR-01", "UNI-AIR-02", "UNI-AIR-03", "UNI-AIR-04",
+    "UNI-CIR-01", "UNI-ALL-01", "UNI-PED-02", "UNI-TOX-01"
+  ]);
+
+  if (universalRedFlagResult.level === "EMERGENCY_NOW") {
+    const isTier1 = universalRedFlagResult.firedRules.some(r => tier1UniversalRules.has(r.ruleId));
+    if (isTier1) {
+      esiScore = 1;
+      triageLevel = 'emergency';
+      esiTitle = 'ESI LEVEL 1: IMMEDIATE RESUSCITATION REQUIRED — Critical Airway / Physiological Compromise';
+      protocol = 'CRITICAL: Call 112 / 108 immediately. Prepare bag-valve-mask, IM Epinephrine 0.3mg if anaphylaxis, continuous telemetry.';
+      action = 'Immediate emergency medical dispatch. Do NOT drive self. Call 112 / 108 now.';
+      symptoms.add('Universal airway / physiological collapse red flag');
+    } else if (esiScore > 2) {
+      esiScore = 2;
+      triageLevel = 'emergency';
+      esiTitle = 'ESI LEVEL 2: EMERGENT — Universal Red Flag Triggered';
+      protocol = 'URGENT: Emergency department evaluation required immediately. Call 112 / 108 or proceed to nearest ED.';
+      action = 'Proceed immediately to the nearest Emergency Department. Call 112 / 108.';
+      symptoms.add('Universal emergency red flag triggered: ' + universalRedFlagResult.firedRules.map(r => r.ruleId).join(', '));
+    }
+  } else if (universalRedFlagResult.level === "URGENT_SAME_DAY" && esiScore > 3) {
+    esiScore = 3;
+    triageLevel = 'priority';
+    esiTitle = 'ESI LEVEL 3: URGENT — Same-Day Outpatient or Urgent Care Evaluation';
+    action = 'Urgent outpatient consultation recommended today.';
+  }
+
   // =========================================================================
   // SAFETY ARBITER OVERRIDE GUARANTEE
   // If an upstream model suggested 'routine' or 'priority' when red flags were
@@ -827,9 +941,12 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
   const arbiterOverride = Boolean(isEmergency && llmSuggested && llmSuggested !== 'emergency');
 
   const latencyMs = Number((performance.now() - start).toFixed(2));
+  const tierTitle = esiTitle.replace(/^ESI LEVEL (\d+)/i, 'MEDVOICE TIER $1');
 
   return {
     triageLevel,
+    urgencyTier: esiScore,
+    tierTitle,
     esiScore,
     esiTitle,
     isEmergency,
@@ -842,6 +959,8 @@ export function evaluateSafetyArbiter(input: EvaluateSafetyArbiterOptions): Arbi
     detectedSymptoms: Array.from(symptoms),
     unresolvedRedFlags: structuredEvidence.unresolvedRedFlags,
     isScreeningComplete: structuredEvidence.isScreeningComplete,
+    universalRedFlagResult,
+    contraindicationAlerts: pharmaShieldResult.alerts,
     provenanceSummary: {
       highestProvenance: structuredEvidence.highestProvenance,
       contradictionsResolved: structuredEvidence.contradictionOverrides.length,

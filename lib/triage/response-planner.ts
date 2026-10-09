@@ -3,6 +3,8 @@ import { SemanticInterpretation } from "./conversation-interpreter";
 import { PreArbiterResult } from "./pre-arbiter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 import { extractSubfieldState, isAbdominalPresentation } from "./clinical-state";
+import { evaluatePresentationDimensions } from "../clinical-knowledge/presentation-registry";
+import { DimensionEvaluation } from "../clinical-knowledge/presentation-types";
 
 export type PlanGoal =
   | "CONFIRM_CORRECTION_AND_PROCEED"
@@ -27,6 +29,7 @@ export interface ResponsePlan {
   };
   bedsideTone: "empathic_and_calm" | "urgent_and_directive" | "attentive_and_methodical";
   suggestedSpokenReply: string;
+  evaluatedDimensions?: DimensionEvaluation[];
 }
 
 /**
@@ -40,6 +43,20 @@ export interface ResponsePlan {
  * 3. "What is the ONE most useful clinical thing needed next?" -> Ask at most ONE focused question.
  * 4. "Never ask for information already established or confirmed" -> Strictly enforce memory boundaries.
  */
+/**
+ * ANTI-DOSAGE VERBALIZATION GUARD:
+ * Invariant: The verbalization/response layer must NEVER state numerical drug dosages or
+ * prescribe specific drug amounts. DailyMed or drug reference text containing milligrams,
+ * tablet counts, or dosing schedules must be sanitized before spoken delivery.
+ */
+export function sanitizeDosageVerbalization(text: string): string {
+  if (!text) return text;
+  // Match patterns like "500 mg", "10mg", "2 tablets", "take 1 pill every 8 hours", "650mg TDS"
+  return text
+    .replace(/\b\d+(?:\.\d+)?\s*(?:mg|mcg|micrograms?|milligrams?|g|grams?|ml|milliliters?|units?|iu)\b/gi, "[prescribed amount]")
+    .replace(/\b(?:take|administer|consume)\s+\d+\s*(?:tablets?|capsules?|pills?|drops?)\b/gi, "take the doctor-prescribed amount");
+}
+
 export class ResponsePlanner {
   public plan(
     patientUtterance: string,
@@ -260,6 +277,15 @@ export class ResponsePlanner {
       const topLower = topic.toLowerCase();
       // Generic slot repetition guard: if asked 2 or more times without being filled, mark exhausted!
       if ((slotAskCount[topLower] || 0) >= 2) return true;
+      if (topLower === "onset_pattern") {
+        return subfields.onset.onsetPattern !== "unknown" || (slotAskCount[topLower] || 0) >= 2;
+      }
+      if (topLower === "onset_time") {
+        return Boolean(subfields.onset.duration) || (slotAskCount[topLower] || 0) >= 2;
+      }
+      if (topLower === "onset") {
+        return subfields.onset.isResolved || (slotAskCount[topLower] || 0) >= 2;
+      }
       if (askedQuestions.has(topLower)) return true;
       if (deniedSymptoms.has(topLower)) return true;
       if (topLower === "location" || topLower === "abdominal_location") {
@@ -305,7 +331,18 @@ export class ResponsePlanner {
 
     let nextInquiry: { topic: string; clinicalRationale: string; suggestedPhrasing: string } | undefined = undefined;
 
-    if (hasChest) {
+    if (preArbiterResult?.universal_red_flag_result?.discriminatorQuestion) {
+      const dq = preArbiterResult.universal_red_flag_result.discriminatorQuestion;
+      if (!isTopicAddressed(dq.intent) && !isTopicAddressed(dq.ruleId)) {
+        nextInquiry = {
+          topic: dq.intent,
+          clinicalRationale: `Universal red-flag screen discriminator for rule ${dq.ruleId}`,
+          suggestedPhrasing: dq.text,
+        };
+      }
+    }
+
+    if (!nextInquiry && hasChest) {
       if (!subfields.characterSeverity.character && !isTopicAddressed("character")) {
         nextInquiry = {
           topic: "character",
@@ -351,17 +388,35 @@ export class ResponsePlanner {
           suggestedPhrasing: "Are you feeling any shortness of breath, cold sweating, nausea, or lightheadedness alongside it?",
         };
       }
-    } else if (hasAbdomen) {
+    } else if (hasAbdomen || state.presentationContext?.primary === "ABDOMINAL_PAIN" || state.presentationContext?.active.some(a => a.id === "ABDOMINAL_PAIN")) {
       const hasGiFact = (name: string) =>
         state.slots.associated_symptoms.some(s => s.toLowerCase().includes(name)) ||
         state.slots.known_facts.some(f => f.toLowerCase().includes(name)) ||
         deniedSymptoms.has(name);
 
-      if (!isTopicAddressed("abdominal_location") && !isTopicAddressed("location")) {
+      // --- PRESENTATION CONTEXT & DIMENSION REGISTRY EVALUATION ---
+      // Invariant: PresentationContext describes what clinical presentation is active;
+      // ClinicalState remains the only source of truth for patient-reported findings.
+      const evaluatedAbdominalDims = evaluatePresentationDimensions(
+        "ABDOMINAL_PAIN",
+        state.slots,
+        state.slots.known_facts,
+        Array.from(deniedSymptoms)
+      );
+
+      const locDim = evaluatedAbdominalDims.find(d => d.dimension.id === "location");
+      const charDim = evaluatedAbdominalDims.find(d => d.dimension.id === "character");
+      const sevDim = evaluatedAbdominalDims.find(d => d.dimension.id === "severity");
+      const vomitDim = evaluatedAbdominalDims.find(d => d.dimension.id === "vomiting");
+      const feverDim = evaluatedAbdominalDims.find(d => d.dimension.id === "fever");
+      const bleedDim = evaluatedAbdominalDims.find(d => d.dimension.id === "gi_bleeding");
+      const diarrheaDim = evaluatedAbdominalDims.find(d => d.dimension.id === "diarrhea");
+
+      if (locDim?.status === "unresolved" && !isTopicAddressed("abdominal_location") && !isTopicAddressed("location")) {
         nextInquiry = {
           topic: "abdominal_location",
-          clinicalRationale: "Localize abdominal pain to a quadrant or region before broadening the history.",
-          suggestedPhrasing: "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?",
+          clinicalRationale: locDim.dimension.clinicalRationale,
+          suggestedPhrasing: locDim.dimension.suggestedPhrasing,
         };
       } else if (!subfields.onset.isResolved) {
         if (subfields.onset.duration && subfields.onset.onsetPattern === "unknown" && !isTopicAddressed("onset_pattern")) {
@@ -383,42 +438,94 @@ export class ResponsePlanner {
             suggestedPhrasing: "When did this abdominal pain first begin?",
           };
         }
-      } else if (!subfields.characterSeverity.character && !isTopicAddressed("character")) {
+      } else if (charDim?.status === "unresolved" && !subfields.characterSeverity.character && !isTopicAddressed("character")) {
         nextInquiry = {
           topic: "character",
-          clinicalRationale: "Characterize abdominal pain quality.",
-          suggestedPhrasing: "Does the pain feel more dull, cramping, burning, or sharp?",
+          clinicalRationale: charDim.dimension.clinicalRationale,
+          suggestedPhrasing: charDim.dimension.suggestedPhrasing,
         };
-      } else if (!subfields.characterSeverity.severity && !isTopicAddressed("severity")) {
+      } else if (sevDim?.status === "unresolved" && !subfields.characterSeverity.severity && !isTopicAddressed("severity")) {
         nextInquiry = {
           topic: "severity",
-          clinicalRationale: "Quantify usual versus peak abdominal pain.",
-          suggestedPhrasing: "On a scale from zero to ten, how bad is it usually, and how bad does it get at its worst?",
+          clinicalRationale: sevDim.dimension.clinicalRationale,
+          suggestedPhrasing: sevDim.dimension.suggestedPhrasing,
         };
-      } else if (!hasGiFact("vomiting") && !isTopicAddressed("vomiting")) {
+      } else if (vomitDim?.status === "unresolved" && !hasGiFact("vomiting") && !isTopicAddressed("vomiting")) {
         nextInquiry = {
           topic: "vomiting",
-          clinicalRationale: "Screen for vomiting as a high-yield GI associated symptom.",
-          suggestedPhrasing: "Have you had any vomiting with this?",
+          clinicalRationale: vomitDim.dimension.clinicalRationale,
+          suggestedPhrasing: vomitDim.dimension.suggestedPhrasing,
         };
-      } else if (!hasGiFact("fever") && !isTopicAddressed("fever")) {
+      } else if (feverDim?.status === "unresolved" && !hasGiFact("fever") && !isTopicAddressed("fever")) {
         nextInquiry = {
           topic: "fever",
-          clinicalRationale: "Screen for systemic infection alongside abdominal pain.",
-          suggestedPhrasing: "Have you had a fever or felt feverish?",
+          clinicalRationale: feverDim.dimension.clinicalRationale,
+          suggestedPhrasing: feverDim.dimension.suggestedPhrasing,
         };
-      } else if (!hasGiFact("blood_in_stool") && !hasGiFact("blood in stool") && !isTopicAddressed("blood_in_stool")) {
+      } else if (bleedDim?.status === "unresolved" && !hasGiFact("blood_in_stool") && !hasGiFact("blood in stool") && !isTopicAddressed("blood_in_stool")) {
         nextInquiry = {
           topic: "blood_in_stool",
-          clinicalRationale: "Screen for GI bleeding.",
-          suggestedPhrasing: "Have you noticed any blood in your stool?",
+          clinicalRationale: bleedDim.dimension.clinicalRationale,
+          suggestedPhrasing: bleedDim.dimension.suggestedPhrasing,
         };
-      } else if (!hasGiFact("diarrhea") && !isTopicAddressed("diarrhea")) {
+      } else if (diarrheaDim?.status === "unresolved" && !hasGiFact("diarrhea") && !isTopicAddressed("diarrhea")) {
         nextInquiry = {
           topic: "diarrhea",
-          clinicalRationale: "Establish whether bowel movements are loose or watery.",
-          suggestedPhrasing: "Have your stools been loose or watery?",
+          clinicalRationale: diarrheaDim.dimension.clinicalRationale,
+          suggestedPhrasing: diarrheaDim.dimension.suggestedPhrasing,
         };
+      }
+
+      // Check co-active supporting presentations (e.g. ACUTE_DIARRHEA for stool frequency & hydration risk)
+      if (!nextInquiry && state.presentationContext?.active.some(a => a.id === "ACUTE_DIARRHEA")) {
+        const diarrheaDims = evaluatePresentationDimensions(
+          "ACUTE_DIARRHEA",
+          state.slots,
+          state.slots.known_facts,
+          Array.from(deniedSymptoms)
+        );
+        const freqDim = diarrheaDims.find(d => d.dimension.id === "frequency");
+        const hydrationDim = diarrheaDims.find(d => d.dimension.id === "hydration_status");
+        const bloodDim = diarrheaDims.find(d => d.dimension.id === "blood_mucus");
+
+        if (freqDim?.status === "unresolved" && !isTopicAddressed("frequency") && !isTopicAddressed("stool_frequency") && !state.slots.known_facts.some(f => /frequency|times\s+(?:a\s+day|in\s+the\s+past\s+24)/i.test(f))) {
+          nextInquiry = {
+            topic: "stool_frequency",
+            clinicalRationale: freqDim.dimension.clinicalRationale,
+            suggestedPhrasing: freqDim.dimension.suggestedPhrasing,
+          };
+        } else if (hydrationDim?.status === "unresolved" && !isTopicAddressed("hydration") && !isTopicAddressed("hydration_status") && !state.slots.known_facts.some(f => /hydration|fluids|urinat/i.test(f))) {
+          nextInquiry = {
+            topic: "hydration",
+            clinicalRationale: hydrationDim.dimension.clinicalRationale,
+            suggestedPhrasing: hydrationDim.dimension.suggestedPhrasing,
+          };
+        } else if (bloodDim?.status === "unresolved" && !hasGiFact("blood_in_stool") && !isTopicAddressed("blood_in_stool")) {
+          nextInquiry = {
+            topic: "blood_in_stool",
+            clinicalRationale: bloodDim.dimension.clinicalRationale,
+            suggestedPhrasing: bloodDim.dimension.suggestedPhrasing,
+          };
+        }
+      }
+
+      // Check safety screens from ABDOMINAL_PAIN if other dimensions are addressed
+      if (!nextInquiry) {
+        const rigidDim = evaluatedAbdominalDims.find(d => d.dimension.id === "rigid_abdomen");
+        const syncopeDim = evaluatedAbdominalDims.find(d => d.dimension.id === "syncope_collapse");
+        if (rigidDim?.status === "unresolved" && !isTopicAddressed("rigid_abdomen") && !state.slots.known_facts.some(f => /rigid|guarding|hard\s+belly/i.test(f))) {
+          nextInquiry = {
+            topic: "rigid_abdomen",
+            clinicalRationale: rigidDim.dimension.clinicalRationale,
+            suggestedPhrasing: rigidDim.dimension.suggestedPhrasing,
+          };
+        } else if (syncopeDim?.status === "unresolved" && !isTopicAddressed("syncope") && !state.slots.known_facts.some(f => /faint|dizz|lightheaded|syncope/i.test(f))) {
+          nextInquiry = {
+            topic: "syncope",
+            clinicalRationale: syncopeDim.dimension.clinicalRationale,
+            suggestedPhrasing: syncopeDim.dimension.suggestedPhrasing,
+          };
+        }
       }
     } else if (hasNeuro) {
       const weaknessReported = state.slots.neurological_signs.some(s => /weak|numb/i.test(s));
@@ -586,6 +693,55 @@ export class ResponsePlanner {
       }
     }
 
+    // --- GENERIC PRESENTATION CONTEXT & DIMENSION REGISTRY INQUIRY ---
+    // If nextInquiry hasn't been set by specialized branches or if an active presentation has unresolved dimensions:
+    if (!nextInquiry && state.presentationContext?.active && state.presentationContext.active.length > 0) {
+      // Prioritize primary presentation, then supporting presentations
+      const presOrder = [
+        ...(state.presentationContext.primary ? [state.presentationContext.primary] : []),
+        ...state.presentationContext.supporting,
+        ...state.presentationContext.active.map(a => a.id),
+      ];
+      const seenPres = new Set<string>();
+
+      for (const presId of presOrder) {
+        if (seenPres.has(presId)) continue;
+        seenPres.add(presId);
+
+        const evaluated = evaluatePresentationDimensions(
+          presId,
+          state.slots,
+          state.slots.known_facts,
+          Array.from(deniedSymptoms)
+        );
+
+        // Sort dimensions: core_history -> associated -> safety_screen
+        const orderedDims = [
+          ...evaluated.filter(d => d.dimension.type === "core_history"),
+          ...evaluated.filter(d => d.dimension.type === "associated"),
+          ...evaluated.filter(d => d.dimension.type === "safety_screen"),
+        ];
+
+        const unresolved = orderedDims.find(d => {
+          if (d.status !== "unresolved") return false;
+          const dimSlot = d.dimension.evaluatorSlot;
+          const dimId = d.dimension.id;
+          if (isTopicAddressed(dimSlot) || isTopicAddressed(dimId)) return false;
+          if (state.slots.known_facts.some(f => f.toLowerCase().includes(dimId.toLowerCase()) || f.toLowerCase().includes(dimSlot.toLowerCase()))) return false;
+          return true;
+        });
+
+        if (unresolved) {
+          nextInquiry = {
+            topic: unresolved.dimension.evaluatorSlot || unresolved.dimension.id,
+            clinicalRationale: unresolved.dimension.clinicalRationale,
+            suggestedPhrasing: unresolved.dimension.suggestedPhrasing,
+          };
+          break;
+        }
+      }
+    }
+
     const defaultPhrasing = nextInquiry?.suggestedPhrasing ||
       (hasAbdomen
         ? "Where in your abdomen does the pain feel strongest — upper, lower, right, left, around the navel, or all over?"
@@ -617,13 +773,28 @@ export class ResponsePlanner {
       mustAvoid.push("associated_symptoms", "what else you've been noticing", "any other symptoms");
     }
 
+    const allEvaluatedDims: DimensionEvaluation[] = [];
+    if (state.presentationContext?.active) {
+      for (const activePres of state.presentationContext.active) {
+        allEvaluatedDims.push(
+          ...evaluatePresentationDimensions(
+            activePres.id,
+            state.slots,
+            state.slots.known_facts,
+            Array.from(deniedSymptoms)
+          )
+        );
+      }
+    }
+
     return {
       primaryGoal: "ADVANCE_CLINICAL_INTAKE",
       conversationalFocus: `Directly acknowledge what the patient just stated. If they shared a new finding, validate it naturally. Then ask ONE high-yield question: ${nextInquiry?.topic || "clarification"}.`,
       mustAvoidAsking: Array.from(new Set(mustAvoid)),
       nextHighValueInquiry: nextInquiry,
       bedsideTone: "attentive_and_methodical",
-      suggestedSpokenReply: defaultPhrasing,
+      suggestedSpokenReply: sanitizeDosageVerbalization(defaultPhrasing),
+      evaluatedDimensions: allEvaluatedDims.length > 0 ? allEvaluatedDims : undefined,
     };
   }
 }

@@ -602,12 +602,184 @@ export class ClinicalDecisionEngine {
       };
     }
 
-    // CASE 0F: Turn 1 / Acute Presentation of Chest Pressure -> Immediate Emergency Directive
+function parseSubjectAttribution(text: string): {
+  isThirdParty: boolean;
+  subjectNoun: string;
+  pronounSubject: string;
+  pronounObject: string;
+  possessive: string;
+} {
+  const lower = text.toLowerCase();
+  const motherMatch = /\b(?:mother|mom)\b/i.test(lower);
+  const fatherMatch = /\b(?:father|dad)\b/i.test(lower);
+  const spouseMatch = /\b(?:husband|wife|spouse|partner)\b/i.test(lower);
+  const childMatch = /\b(?:son|daughter|child|kid|baby)\b/i.test(lower);
+  const otherMatch = /\b(?:grandmother|grandfather|grandma|grandpa|brother|sister|friend|neighbor|relative)\b/i.test(lower);
+  const thirdPronounFemale = /\b(?:she|her)\b/i.test(lower);
+  const thirdPronounMale = /\b(?:he|his|him)\b/i.test(lower);
+
+  if (motherMatch) {
+    return { isThirdParty: true, subjectNoun: "your mother", pronounSubject: "she", pronounObject: "her", possessive: "her" };
+  }
+  if (fatherMatch) {
+    return { isThirdParty: true, subjectNoun: "your father", pronounSubject: "he", pronounObject: "him", possessive: "his" };
+  }
+  if (spouseMatch) {
+    const spMatch = lower.match(/\b(?:husband|wife|spouse|partner)\b/i);
+    const sp = spMatch ? spMatch[0].toLowerCase() : "spouse";
+    const isFemale = sp === "wife";
+    return { isThirdParty: true, subjectNoun: `your ${sp}`, pronounSubject: isFemale ? "she" : "he", pronounObject: isFemale ? "her" : "him", possessive: isFemale ? "her" : "his" };
+  }
+  if (childMatch) {
+    const chMatch = lower.match(/\b(?:son|daughter|child|kid|baby)\b/i);
+    const ch = chMatch ? chMatch[0].toLowerCase() : "child";
+    const isFemale = ch === "daughter";
+    return { isThirdParty: true, subjectNoun: `your ${ch}`, pronounSubject: isFemale ? "she" : "he", pronounObject: isFemale ? "her" : "him", possessive: isFemale ? "her" : "his" };
+  }
+  if (otherMatch) {
+    const relMatch = lower.match(/\b(?:grandmother|grandfather|grandma|grandpa|brother|sister|friend|neighbor|relative)\b/i);
+    const rel = relMatch ? relMatch[0].toLowerCase() : "relative";
+    const isFemale = /grandma|grandmother|sister/.test(rel);
+    return { isThirdParty: true, subjectNoun: `your ${rel}`, pronounSubject: isFemale ? "she" : "he", pronounObject: isFemale ? "her" : "him", possessive: isFemale ? "her" : "his" };
+  }
+  if (thirdPronounFemale && !/\b(?:i|my|me)\b/i.test(lower)) {
+    return { isThirdParty: true, subjectNoun: "she", pronounSubject: "she", pronounObject: "her", possessive: "her" };
+  }
+  if (thirdPronounMale && !/\b(?:i|my|me)\b/i.test(lower)) {
+    return { isThirdParty: true, subjectNoun: "he", pronounSubject: "he", pronounObject: "him", possessive: "his" };
+  }
+  return { isThirdParty: false, subjectNoun: "you", pronounSubject: "you", pronounObject: "you", possessive: "your" };
+}
+
+function extractVerbatimSymptomPhrase(text: string, defaultPhrase = "chest pain"): string {
+  const lower = text.toLowerCase();
+  if (/\b(?:crushing|tight)\s+pressure\b/i.test(lower)) return "tight pressure in the chest";
+  if (/\bchest\s+pressure\b/i.test(lower)) return "chest pressure";
+  if (/\bchest\s+tightness\b/i.test(lower)) return "chest tightness";
+  if (/\bsharp\s+(?:chest\s+)?pain\b/i.test(lower)) return "sharp chest pain";
+  if (/\bchest\s+pain\b/i.test(lower)) return "chest pain";
+  if (/\bstomach\s+pain\b/i.test(lower)) return "stomach pain";
+  if (/\bloose\s+motions?\b/i.test(lower)) return "loose motions";
+  if (/\bdizz(?:y|iness)\b/i.test(lower)) return "dizziness";
+  return defaultPhrase;
+}
+
+    // CASE 0F: Turn 1 / Acute Presentation of Chest Discomfort -> Immediate Emergency Directive
     if (isCardio && isEmergency && hist.turnCount <= 2 && !state.slots.radiation) {
-      const reply = "I am very concerned about the tight pressure in your chest. Because this could represent an acute heart attack or coronary syndrome, please sit down comfortably right now, stay completely still, and call 108 or 112 for an emergency ambulance immediately. Is there someone with you right now?";
+      const subj = parseSubjectAttribution(state.cumulativeTranscript);
+      const symptom = extractVerbatimSymptomPhrase(state.cumulativeTranscript, "chest pain");
+      let reply: string;
+      if (subj.isThirdParty) {
+        reply = `I am very concerned about the ${symptom} ${subj.subjectNoun} is experiencing right now. Because this could represent an acute heart attack or cardiac emergency, please have ${subj.pronounObject} sit down comfortably right now, stay completely still, and call 108 or 112 for an emergency ambulance immediately. Are you or someone else with ${subj.pronounObject} right now?`;
+      } else {
+        reply = `I am very concerned about the ${symptom} you are experiencing right now. Because this could represent an acute heart attack or cardiac emergency, please sit down comfortably right now, stay completely still, and call 108 or 112 for an emergency ambulance immediately. Is there someone with you right now?`;
+      }
       return {
         action: "PROVIDE_EMERGENCY_GUIDANCE",
         spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "acute cardio emergency initial"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0G: Resolved Historical Chest Discomfort (CHALLENGE-01)
+    const isHistoricalResolvedCardio = isCardio && (
+      state.slots.known_facts.some(f => /resolved|fine now|yesterday/i.test(f)) ||
+      (/\b(?:yesterday|days?\s+ago|last\s+night)\b/i.test(state.cumulativeTranscript) && /\b(?:fine\s+now|gone\s+now|better\s+now|well\s+now|resolved|no\s+longer)\b/i.test(state.cumulativeTranscript))
+    );
+    if (isHistoricalResolvedCardio) {
+      const subj = parseSubjectAttribution(state.cumulativeTranscript);
+      let reply: string;
+      if (subj.isThirdParty) {
+        reply = `I am glad ${subj.subjectNoun} is feeling better right now. However, any new chest pain needs an in-person medical evaluation to ensure ${subj.possessive} heart is safe. If ${subj.possessive} chest pain returns at any point, or if ${subj.pronounSubject} develops shortness of breath or cold sweats, call 108 or 112 immediately. Has ${subj.pronounSubject} ever had heart issues or seen a doctor for chest symptoms before?`;
+      } else {
+        reply = `I am glad you are feeling better right now. However, any new chest pain needs an in-person medical evaluation to ensure your heart is safe. If your chest pain returns at any point, or if you develop shortness of breath or cold sweats, call 108 or 112 immediately. Have you ever had heart issues or seen a doctor for chest symptoms before?`;
+      }
+      return {
+        action: "ASK_PATIENT",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "resolved cardio outpatient follow-up"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0H: Targeted Metabolic / Hypoglycemia Screening (CHALLENGE-05: Shaking + Sweating without fever)
+    const hasShaking = /\b(?:shaking|tremors?|shiver(?:ing)?)\b/i.test(state.cumulativeTranscript) || state.slots.associated_symptoms.some(s => /shaking/i.test(s));
+    const hasSweating = /\b(?:sweat|sweating|diaphoresis|clammy|cold\s+sweats)\b/i.test(state.cumulativeTranscript) || state.slots.associated_symptoms.some(s => /sweat/i.test(s));
+    const feverDenied = state.conversationMemory?.deniedSymptoms?.some(s => /fever/i.test(s)) ||
+      state.slots.known_facts.some(f => /denied:.*fever|no fever/i.test(f)) ||
+      /\b(?:no\s+fever|without\s+fever)\b/i.test(state.cumulativeTranscript);
+
+    if (hasShaking && hasSweating && feverDenied) {
+      if (isEmergency) {
+        const cannotSwallow = /\b(?:cannot\s+swallow|can't\s+swallow|hard\s+to\s+swallow|trouble\s+swallowing|difficulty\s+swallowing|choking|unable\s+to\s+swallow|too\s+drowsy|passing\s+out|unconscious|unalert)\b/i.test(state.cumulativeTranscript);
+        let reply: string;
+        if (cannotSwallow) {
+          reply = "I am extremely concerned about your severe confusion and inability to swallow safely while taking diabetes medication. Do NOT attempt to eat or drink anything, as this is a life-threatening choking hazard. Lie down on your side in a safe recovery position, and have someone call 108 or 112 for an immediate emergency ambulance right now.";
+        } else {
+          reply = "I am very concerned about your worsening confusion and shaking while taking diabetes medication. This could be severe hypoglycemia or a life-threatening metabolic emergency. If you are alert and able to swallow safely without choking, take fast-acting sugar or fruit juice right now. However, if you are drowsy or having trouble swallowing, do NOT eat or drink anything. Please call 108 or 112 for emergency help immediately and have someone stay right beside you.";
+        }
+        return {
+          action: "PROVIDE_EMERGENCY_GUIDANCE",
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, cannotSwallow ? "hypoglycemia choking hazard emergency" : "acute hypoglycemia emergency"),
+          doctorName: "Dr. Sarah Chen, MD",
+          specialty: "Internal Medicine & Critical Care Lead"
+        };
+      }
+      const reply = "Because you are shaking and sweating without a fever, this could be related to low blood sugar, medication side effects, or an autonomic reaction. Do you have diabetes or take medications like insulin, and when did you last eat? If you begin to feel confused, dizzy, or unable to stand, please seek emergency medical attention immediately.";
+      return {
+        action: "ASK_PATIENT",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "metabolic hypoglycemia screening"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0I: Acute Fluid Loss with Postural Collapse (CHALLENGE-06: Diarrhea / loose motions + cannot stand)
+    const hasFluidLoss = /\b(?:loose\s+motions?|diarrhea|vomiting|watery\s+stool)\b/i.test(state.cumulativeTranscript) ||
+      state.presentationContext?.active.some(a => a.id === "ACUTE_DIARRHEA");
+    const hasPosturalCollapse = /\b(?:barely\s+stand|cannot\s+stand|can't\s+stand|dizzy\s+when\s+standing|too\s+weak\s+to\s+stand|collapse)\b/i.test(state.cumulativeTranscript) ||
+      state.slots.known_facts.some(f => /barely stand|cannot stand|orthostasis/i.test(f));
+
+    if (hasFluidLoss && hasPosturalCollapse) {
+      const reply = "Being unable to stand after having loose motions can indicate severe dehydration or another serious problem. Please remain seated or lying down immediately to prevent falling. If you are alone or feel faint, call 108 or 112 for emergency help immediately. If someone is with you to help, have them assist you to the nearest urgent care center or clinic today. While getting help, try to sip water or ORS rehydration fluids if you can.";
+      return {
+        action: "ASK_PATIENT",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "severe dehydration fall prevention"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0J: Transient Resolved Dizziness Characterization (CHALLENGE-04: Vertigo vs lightheadedness, syncope screen)
+    const isDizzinessPresentation = state.presentationContext?.primary === "DIZZINESS_VERTIGO" ||
+      /\b(?:dizzy|dizziness|lightheaded|room\s+spinning)\b/i.test(state.cumulativeTranscript);
+    const isDizzinessResolved = /\b(?:now\s+it'?s\s+gone|gone\s+now|felt\s+dizzy\s+before|better\s+now|passed|resolved)\b/i.test(state.cumulativeTranscript);
+
+    const hasDizzinessCharacterScreened =
+      state.slots.character === "spinning" ||
+      state.slots.character === "vertigo" ||
+      state.slots.character === "lightheadedness" ||
+      /\b(?:spinning|vertigo|lightheadedness|true vertigo)\b/i.test(state.slots.character || "");
+
+    if (isDizzinessPresentation && isDizzinessResolved && !hasDizzinessCharacterScreened) {
+      const reply = "I am glad the dizziness has passed. To understand what happened, when you felt dizzy, did the room feel like it was spinning around you, or was it more of a faint, lightheaded feeling? Did you lose consciousness or black out at any point?";
+      return {
+        action: "ASK_PATIENT",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "dizziness characterization syncope screen"),
+        doctorName: "Dr. Sarah Chen, MD",
+        specialty: "Internal Medicine & Critical Care Lead"
+      };
+    }
+
+    // CASE 0K: Acute Abdominal Pain Initial Exploration (CHALLENGE-03)
+    const hasAbdominalPain = state.presentationContext?.primary === "ABDOMINAL_PAIN" ||
+      /\b(?:stomach|belly|abdomen)\s+pain\b/i.test(state.cumulativeTranscript);
+    if (hasAbdominalPain && !state.slots.location && !state.slots.onset) {
+      const reply = "I understand you are experiencing severe stomach pain. Where in your belly is the pain most severe, and did it start suddenly or build up gradually?";
+      return {
+        action: "ASK_PATIENT",
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "abdominal pain initial inquiry"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };
