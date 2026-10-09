@@ -715,9 +715,9 @@ function extractVerbatimSymptomPhrase(text: string, defaultPhrase = "chest pain"
         const cannotSwallow = /\b(?:cannot\s+swallow|can't\s+swallow|hard\s+to\s+swallow|trouble\s+swallowing|difficulty\s+swallowing|choking|unable\s+to\s+swallow|too\s+drowsy|passing\s+out|unconscious|unalert)\b/i.test(state.cumulativeTranscript);
         let reply: string;
         if (cannotSwallow) {
-          reply = "I am extremely concerned about your severe confusion and inability to swallow safely while taking diabetes medication. Do NOT attempt to eat or drink anything, as this is a life-threatening choking hazard. Lie down on your side in a safe recovery position, and have someone call 108 or 112 for an immediate emergency ambulance right now.";
+          reply = "I am extremely concerned about your confusion, drowsiness, and inability to swallow safely while taking diabetes medication. Do NOT attempt to eat or drink anything, as this is a life-threatening choking hazard. Lie down on your side in a safe recovery position, and have someone call 108 or 112 for emergency help immediately.";
         } else {
-          reply = "I am very concerned about your worsening confusion and shaking while taking diabetes medication. This could be severe hypoglycemia or a life-threatening metabolic emergency. If you are alert and able to swallow safely without choking, take fast-acting sugar or fruit juice right now. However, if you are drowsy or having trouble swallowing, do NOT eat or drink anything. Please call 108 or 112 for emergency help immediately and have someone stay right beside you.";
+          reply = "I am very concerned about your confusion and shaking while taking diabetes medication. This could be severe hypoglycemia or a life-threatening metabolic emergency. If you are alert and able to swallow safely without choking, take fast-acting sugar or fruit juice right now. However, if you are drowsy or having trouble swallowing, do NOT eat or drink anything. Please call 108 or 112 for emergency help immediately and have someone stay right beside you.";
         }
         return {
           action: "PROVIDE_EMERGENCY_GUIDANCE",
@@ -905,7 +905,7 @@ function extractVerbatimSymptomPhrase(text: string, defaultPhrase = "chest pain"
         if (hospitals.length > 0) {
           const topGov = hospitals.find((h: any) => h.ownership === "government") || hospitals[0];
           const distStr = topGov.distanceKm ? ` approximately ${Math.round(topGov.distanceKm)} kilometers away` : "";
-          const reply = `If you are on the outskirts, calling 108 for an emergency ambulance is safest because paramedics can start care on the road. The nearest verified emergency facility is ${topGov.name}${distStr}. Would you like me to guide you there or coordinate ambulance dispatch?`;
+          const reply = `If you are on the outskirts, calling 108 for an emergency ambulance is safest because paramedics can start care on the road. The nearest verified emergency facility is ${topGov.name}${distStr}. Would you like me to guide you there or help you connect with 108 emergency services?`;
           return {
             action: "PROVIDE_EMERGENCY_GUIDANCE",
             spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "outskirts hospital guidance"),
@@ -916,7 +916,7 @@ function extractVerbatimSymptomPhrase(text: string, defaultPhrase = "chest pain"
         const reply = "If you are on the outskirts, dialing 108 for an emergency ambulance is safest because trained paramedics can stabilize you during transport. What city or district are you near so we can verify the closest emergency department?";
         return {
           action: "PROVIDE_EMERGENCY_GUIDANCE",
-          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "outskirts 108 dispatch"),
+          spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "outskirts 108 emergency guidance"),
           doctorName: "Dr. Sarah Chen, MD",
           specialty: "Internal Medicine & Critical Care Lead"
         };

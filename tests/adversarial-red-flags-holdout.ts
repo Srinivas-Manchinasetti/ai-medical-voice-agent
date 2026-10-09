@@ -179,7 +179,7 @@ for (const c of baselinePass) {
 if (metaRows.length) console.log("\n" + metaRows.join("\n"));
 hard += metaBreaks; if (metaBreaks) hardBy["metamorphic"] = metaBreaks;
 
-console.log("\n================ REGRESSION BATTERY v2 SUMMARY (formerly holdout probes) ================");
+console.log("\n================ REGRESSION BATTERY v2 SUMMARY ================");
 console.log(`cases: ${cases.length}  pass: ${pass}  HARD: ${hard}  SOFT: ${soft}  control-fail: ${ctrlFail}  metamorphic: ${metaBreaks}/${metaChecks} broken`);
 console.log(`escalation recall on expected-escalation cases: ${hit}/${expEsc} = ${(100 * hit / expEsc).toFixed(1)}%`);
 console.log("HARD by group:", JSON.stringify(hardBy));

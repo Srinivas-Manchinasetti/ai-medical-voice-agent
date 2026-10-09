@@ -167,7 +167,7 @@ All 65 red-flag specifications implemented in `lib/triage/universal-red-flags.ts
 - **`UNI-PRG-04` [URGENT / Tier 3]**: Hyperemesis gravidarum or antenatal pyrexia without localized signs.
 
 ### Group I: Mental Health & Patient Safety
-- **`UNI-PSY-01` [EMERGENCY / Tier 1]**: Active suicidality with immediate intent, plan, access to lethal means, or intent to harm others/infant. Mandates immediate 112 dispatch and Tele-MANAS (14416) crisis transfer.
+- **`UNI-PSY-01` [EMERGENCY / Tier 1]**: Active suicidality with immediate intent, plan, access to lethal means, or intent to harm others/infant. Mandates instructing caller or caregiver to contact emergency services (112) immediately and routing to Tele-MANAS (14416).
 - **`UNI-PSY-02` [DISCRIMINATE / Tier 3]**: Passive suicidal ideation without active plan or intent. Provides empathetic support and immediate routing to Tele-MANAS (14416).
 - **`UNI-PSY-03` [URGENT / Tier 3]**: Acute psychosis, severe psychomotor agitation, or grave disability.
 
@@ -306,11 +306,11 @@ To prevent circular verification and establish audit-ready clinical release stan
 - **Status:** **PRE-REGISTERED VERIFICATION**.
 - **Requirements:**
   1. Complete validation of all exported clinical summaries against standard HL7 FHIR R4 schema validators (`Encounter`, `Observation`, `Condition`, `ServiceRequest`).
-  2. Provenance chain validation: Every turn must produce an append-only, SHA-256 cryptographic hash block (`audit_hash_chain`), ensuring tamper-evident tracking from raw patient transcript to emergency dispatch.
+  2. Provenance chain validation: Every turn must produce an append-only, SHA-256 cryptographic hash block (`audit_hash_chain`), ensuring tamper-evident tracking from raw patient transcript to emergency guidance instruction.
 
 ---
 
-## 7. Emergency Dispatch & Verbalization Protocols
+## 7. Emergency Contact Guidance & Verbalization Protocols
 
 When an emergency rule fires, MedVoice immediately halts non-essential history gathering, convenes the emergency board, and delivers clear, structured emergency instructions:
 
