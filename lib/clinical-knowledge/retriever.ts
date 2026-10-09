@@ -331,6 +331,50 @@ export class ClinicalKnowledgeRetriever {
       patientContextApplied: Boolean(patient || encounter),
     };
   }
+
+  /**
+   * Evaluates the open-world evidence situation across the three defined clinical modes:
+   * Situation A: Relevant Evidence Retrieved (RAG provides high-confidence guidance)
+   * Situation B: Weak or Irrelevant Evidence (Honest uncertainty, gather basic context)
+   * Situation C: Serious Concern Emerges Without Specific Rule (Preserve concern, no down-triage, route safely)
+   */
+  public evaluateEvidenceSituation(
+    query: string,
+    isSeriousCandidate = false
+  ): {
+    situation: "SITUATION_A_RELEVANT" | "SITUATION_B_WEAK" | "SITUATION_C_SERIOUS_UNCLASSIFIED";
+    passages: ClinicalPassage[];
+    conversationalGuidance: string;
+  } {
+    const res = this.retrieveKnowledge(query, undefined, { topK: 3, minScore: 10 });
+    const topPassage = res.passages[0];
+    const hasHighRelevance = Boolean(topPassage && (topPassage.relevanceScore || 0) >= 42);
+
+    // Situation C: Serious unclassified symptom without specific registry match
+    if (isSeriousCandidate || /\b(collapse|passed out|blacked out|severe sudden|unbearable|can barely stand|cannot breathe)\b/i.test(query)) {
+      return {
+        situation: "SITUATION_C_SERIOUS_UNCLASSIFIED",
+        passages: res.passages,
+        conversationalGuidance: "Preserve the serious concern in state. False reassurance and down-triage are strictly prohibited. Ask safe clarifying questions regarding functional stability and timeline, and direct to clinician-approved urgent medical evaluation or emergency care."
+      };
+    }
+
+    // Situation A: High-relevance evidence retrieved
+    if (hasHighRelevance) {
+      return {
+        situation: "SITUATION_A_RELEVANT",
+        passages: res.passages,
+        conversationalGuidance: `Incorporate retrieved clinical evidence from [${topPassage.title}]. Ask focused, proportionate follow-up questions to explore the differential without asserting a definitive diagnosis.`
+      };
+    }
+
+    // Situation B: Inconclusive / weak evidence retrieved
+    return {
+      situation: "SITUATION_B_WEAK",
+      passages: [],
+      conversationalGuidance: "Clinical evidence retrieval is inconclusive. Acknowledge uncertainty honestly: gather foundational clinical context (onset timeline, duration, constant vs intermittent, functional impact, and associated sensations) without pretending evidence supports any diagnosis."
+    };
+  }
 }
 
 export const clinicalKnowledgeRetriever = new ClinicalKnowledgeRetriever();

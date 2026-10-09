@@ -5,13 +5,13 @@
  * Patient utterance -> ASR transcript -> Clinical state update -> Safety arbiter -> Priority -> Protocol -> Routing -> SOAP / provenance
  * 
  * Tests the 10 critical end-to-end integration scenarios:
- *  1. Normal sore throat -> routine care (ESI-4, outpatient routing, clean SOAP)
- *  2. Sore throat -> sudden stridor -> immediate escalation (ESI-1, EMS dispatch, airway routing)
- *  3. Chest pain buried inside long benign history -> emergency (ESI-2, Cath Lab routing, no benign suppression)
- *  4. Patient says "no fever" but device says 39.8°C -> device evidence wins (ESI-3, contradiction resolved in provenance)
+ *  1. Normal sore throat -> routine care (MedVoice Tier 4, outpatient routing, clean SOAP)
+ *  2. Sore throat -> sudden stridor -> immediate escalation (MedVoice Tier 1, emergency guidance, airway routing)
+ *  3. Chest pain buried inside long benign history -> emergency (MedVoice Tier 2, Cath Lab routing, no benign suppression)
+ *  4. Patient says "no fever" but device says 39.8°C -> device evidence wins (MedVoice Tier 3, contradiction resolved in provenance)
  *  5. Red-flag question never answered -> remains unresolved (unresolvedRedFlags recorded, screening note in protocol)
  *  6. Red flag denied explicitly -> does not trigger (chest pain denial respected, stays routine)
- *  7. Earlier benign state -> later emergency state -> real-time escalation (Turn 1 ESI-4 -> Turn 2 ESI-2 Code Stroke)
+ *  7. Earlier benign state -> later emergency state -> real-time escalation (Turn 1 Tier 4 -> Turn 2 Tier 2 Code Stroke)
  *  8. Emergency state -> subsequent benign statement cannot downgrade it (Emergency disposition locked)
  *  9. Contradictory facts survive correctly into SOAP/provenance (Patient denial + device measurement both audited)
  * 10. Routing receives the exact priority/specialty/protocol the arbiter produced (Cardio -> Cath Lab, Neuro -> Stroke Center)
@@ -102,7 +102,7 @@ async function runSafetyIntegrationSuite() {
     // 3. Multi-agent board & safety arbiter evaluation
     const boardOutput = await clinicalBoard.evaluate(patientCase);
 
-    assert(boardOutput.post_arbiter.final_esi_level === 4, "Arbiter triaged case as ESI Level 4 (Routine)");
+    assert(boardOutput.post_arbiter.final_esi_level === 4, "Arbiter triaged case as MedVoice Tier 4 (Routine)");
     assert(boardOutput.post_arbiter.final_triage_level === "routine", "Final triage level is routine");
     assert(boardOutput.post_arbiter.final_disposition === "routine_outpatient", "Disposition is routine_outpatient");
 
@@ -118,7 +118,7 @@ async function runSafetyIntegrationSuite() {
     assert(boardOutput.soap_note.subjective.includes("[PATIENT-REPORTED]"), "SOAP Subjective has [PATIENT-REPORTED] header");
     assert(boardOutput.soap_note.subjective.includes("4/10"), "SOAP Subjective preserves pain severity 4/10");
     assert(boardOutput.soap_note.objective.includes("[NOT ASSESSED]"), "SOAP Objective itemizes unassessed vitals");
-    assert(boardOutput.soap_note.assessment.includes("ESI LEVEL 4"), "SOAP Assessment reflects ESI Level 4");
+    assert(boardOutput.soap_note.assessment.includes("ESI LEVEL 4") || boardOutput.soap_note.assessment.includes("TIER 4"), "SOAP Assessment reflects MedVoice Tier 4");
     assert(boardOutput.soap_note.plan.includes("ROUTINE_OUTPATIENT"), "SOAP Plan directs routine outpatient care");
   }
 
@@ -174,7 +174,7 @@ async function runSafetyIntegrationSuite() {
 
     const boardOutput = await clinicalBoard.evaluate(patientCase);
 
-    assert(boardOutput.post_arbiter.final_esi_level === 1, "Arbiter escalated immediately to ESI Level 1 (Resuscitation)");
+    assert(boardOutput.post_arbiter.final_esi_level === 1, "Arbiter escalated immediately to MedVoice Tier 1 (Resuscitation)");
     assert(boardOutput.post_arbiter.final_triage_level === "emergency", "Triage level is emergency");
     assert(boardOutput.post_arbiter.final_disposition === "emergency_evaluation", "Disposition is emergency_evaluation");
     assert(boardOutput.post_arbiter.red_flags.some(r => r.includes("AIRWAY") || r.includes("COLLAPSE")), "Airway collapse red flag recorded in audit chain");
@@ -224,7 +224,7 @@ async function runSafetyIntegrationSuite() {
 
     const boardOutput = await clinicalBoard.evaluate(patientCase);
 
-    assert(boardOutput.post_arbiter.final_esi_level === 2, "ESI Level 2 assigned despite extensive benign cold preamble");
+    assert(boardOutput.post_arbiter.final_esi_level === 2, "MedVoice Tier 2 assigned despite extensive benign cold preamble");
     assert(boardOutput.post_arbiter.final_triage_level === "emergency", "Triage level is emergency");
     assert(boardOutput.post_arbiter.red_flags.some(r => r.includes("ACS") || r.includes("CARDIAC")), "ACS red flag identified in audit chain");
 
@@ -271,7 +271,7 @@ async function runSafetyIntegrationSuite() {
       },
     });
 
-    assert(arbiterResult.esiScore === 3, "ESI Level 3 assigned because device high fever (39.8°C) superseded verbal denial");
+    assert(arbiterResult.esiScore === 3, "MedVoice Tier 3 assigned because device high fever (39.8°C) superseded verbal denial");
     assert(arbiterResult.provenanceSummary?.highestProvenance === "device_measured", "Provenance summary highlights device_measured as highest rank");
     assert((arbiterResult.provenanceSummary?.contradictionsResolved ?? 0) >= 1, "Contradiction was detected, resolved, and audited");
   }
@@ -367,7 +367,7 @@ async function runSafetyIntegrationSuite() {
       },
     });
 
-    assert(arbiterResult.esiScore >= 4, "ESI Level 4 assigned; valid denial did not trigger false emergency");
+    assert(arbiterResult.esiScore >= 4, "MedVoice Tier 4 assigned; valid denial did not trigger false emergency");
     assert(arbiterResult.isEmergency === false, "isEmergency remains false");
     assert(!arbiterResult.redFlagsTriggered.some(r => r.includes("AIRWAY") || r.includes("SWALLOWING")), "No airway/swallowing red flag triggered");
   }
@@ -383,7 +383,7 @@ async function runSafetyIntegrationSuite() {
     const eval1 = evaluateSafetyArbiter({
       rawText: turn1.state.cumulativeTranscript,
     });
-    assert(eval1.esiScore === 4, "Turn 1 triaged as ESI Level 4 routine");
+    assert(eval1.esiScore === 4, "Turn 1 triaged as MedVoice Tier 4 routine");
 
     // Turn 2: New neurological deficit arrives
     const turn2 = await conversationManager.processTurn(
@@ -425,7 +425,7 @@ async function runSafetyIntegrationSuite() {
       },
     });
 
-    assert(eval2.esiScore === 2, "Turn 2 escalated immediately to ESI Level 2 (Acute Stroke / BE-FAST)");
+    assert(eval2.esiScore === 2, "Turn 2 escalated immediately to MedVoice Tier 2 (Acute Stroke / BE-FAST)");
     assert(eval2.isEmergency === true, "isEmergency became true in real-time");
     assert(eval2.esiTitle.includes("Acute Neurological Deficit Protocol"), "Protocol updated to BE-FAST Code Stroke protocol");
   }
@@ -445,7 +445,7 @@ async function runSafetyIntegrationSuite() {
     const evalTurn1 = evaluateSafetyArbiter({
       rawText: turn1.state.cumulativeTranscript,
     });
-    assert(evalTurn1.esiScore === 2, "Turn 1 confirmed as ESI Level 2 emergency");
+    assert(evalTurn1.esiScore === 2, "Turn 1 confirmed as MedVoice Tier 2 emergency");
 
     // Turn 2: Patient adds a benign or reassuring comment
     const turn2 = await conversationManager.processTurn(
@@ -458,7 +458,7 @@ async function runSafetyIntegrationSuite() {
       llmSuggestedLevel: "routine", // Simulate an adversarial/flawed LLM suggestion
     });
 
-    assert(evalTurn2.esiScore === 2, "Turn 2 remains locked at ESI Level 2 emergency");
+    assert(evalTurn2.esiScore === 2, "Turn 2 remains locked at MedVoice Tier 2 emergency");
     assert(evalTurn2.isEmergency === true, "Emergency invariant holds; subsequent benign remark cannot downgrade it");
     assert(evalTurn2.arbiterOverride === true, "Arbiter override fired to neutralize unsafe routine suggestion");
   }
@@ -511,7 +511,7 @@ async function runSafetyIntegrationSuite() {
     const strokeArbiter = evaluateSafetyArbiter({
       rawText: "Sudden slurred speech, facial droop on left side, cannot raise left arm",
     });
-    assert(strokeArbiter.esiScore === 2, "Stroke arbiter produced ESI Level 2");
+    assert(strokeArbiter.esiScore === 2, "Stroke arbiter produced MedVoice Tier 2");
 
     let indicatedSpecialty: string | undefined = undefined;
     if (strokeArbiter.redFlagsTriggered.some(r => r.includes("STROKE") || r.includes("BE_FAST"))) {

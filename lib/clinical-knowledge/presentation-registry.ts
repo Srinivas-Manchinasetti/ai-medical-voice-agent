@@ -363,6 +363,17 @@ export const ALL_PRESENTATION_DEFINITIONS: Record<PresentationId, PresentationDe
       { id: "respiratory_distress", name: "Chest Indrawing / Grunting", type: "safety_screen", clinicalRationale: "Severe pediatric lower respiratory distress.", suggestedPhrasing: "Is your child breathing unusually fast, with chest sucking in or grunting sounds?", evaluatorSlot: "grunting" },
     ],
   },
+  UNCLASSIFIED: {
+    id: "UNCLASSIFIED",
+    name: "Open-World / Unclassified Presentation",
+    category: "general",
+    screeningConcepts: [],
+    dimensions: [
+      { id: "onset", name: "Timeline of Symptoms", type: "core_history", clinicalRationale: "Establish onset and duration of presenting concern.", suggestedPhrasing: "When did you first notice this, and did it start suddenly or build up gradually?", evaluatorSlot: "onset" },
+      { id: "severity", name: "Severity & Functional Impact", type: "core_history", clinicalRationale: "Assess functional impact.", suggestedPhrasing: "How severe is this right now, and does it interfere with normal activities?", evaluatorSlot: "severity" },
+      { id: "associated_symptoms", name: "Associated Symptoms", type: "associated", clinicalRationale: "Screen for red flags or related symptoms.", suggestedPhrasing: "Are you noticing any other symptoms alongside this?", evaluatorSlot: "associated_symptoms" },
+    ],
+  },
 };
 
 /**

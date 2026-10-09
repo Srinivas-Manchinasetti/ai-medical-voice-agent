@@ -124,7 +124,10 @@ export const CHALLENGE_SUITE: ChallengeCaseSpec[] = [
       forbiddenSubject: /\b(?:mother|father|child|he|she)\b/i,
       requiredSymptomProvenance: /\b(?:stomach|belly|abdomin)\s*pain\b/i,
       forbiddenSymptomHallucinations: [/\bheart attack\b/i, /\bangina\b/i],
-      requiredClinicalElements: [/\b(?:belly|stomach|abdomin)\b/i],
+      requiredClinicalElements: [
+        /\b(?:belly|stomach|abdomin)\b/i,
+        /\b(?:hard|rigid|board|faint|dizz|lightheaded|syncope)\b/i,
+      ],
       forbiddenQuestionPattern: /\b(?:left arm|jaw|coronary|heart attack|radiation to arm)\b/i,
     },
   },

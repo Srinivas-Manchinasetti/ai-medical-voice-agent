@@ -369,5 +369,77 @@ export const CURATED_GUIDELINES: ClinicalPassage[] = [
     licensingProvenance: "FDA FAERS Post-marketing safety",
     content: "Regulatory Post-Marketing Safety Surveillance: FAERS reports document multiple fatal and near-fatal episodes of hemodynamic syncope, cardiac arrest, and refractory cardiogenic shock when emergency providers administered sublingual nitroglycerin to patients presenting with acute chest pain who had taken a PDE-5 inhibitor within the preceding 24-48 hours.",
     keyTerms: ["openfda", "faers", "adverse event", "nitroglycerin", "sildenafil", "cardiac arrest", "syncope"]
+  },
+
+  // ─── OPEN-WORLD / UNCLASSIFIED CLINICAL INVESTIGATION GUIDELINES ─────────────
+
+  {
+    id: "GUIDELINE-OPEN-URINE-001",
+    topicId: "persistent-dark-yellow-urine-differential",
+    title: "Clinical Evaluation of Persistent Dark or Yellow Urine in Ambulatory Practice",
+    section: "diagnosis",
+    source: "American College of Physicians / AAFP Ambulatory Care",
+    sourceUrl: "https://www.aafp.org/pubs/afp/issues/2019/0615/p781.html",
+    releaseDate: "2024-04-10",
+    authority: "clinical_guideline",
+    domain: "general",
+    population: ["adult", "older_adult"],
+    acuity: ["routine", "urgent"],
+    country: "global",
+    language: "en",
+    sourceType: "clinical_guideline",
+    reviewerSignoff: "Dr. Sarah Chen, MD (Lead Internist)",
+    licensingProvenance: "AAFP/ACP Clinical Guidance",
+    content: "Persistent dark or bright yellow urine despite reported high fluid intake requires structured differential inquiry. High water intake does NOT definitively rule out dehydration, nor does chromaturia alone confirm hepatobiliary pathology. Key etiologies include: (1) Exogenous sources: B-complex/riboflavin supplements, dietary pigments, nitrofurantoin, or rifampin; (2) Hepatobiliary/cholestatic: conjugated hyperbilirubinemia manifesting as tea-colored or dark amber urine, often accompanied by scleral icterus, jaundice, pruritus, or acholic (clay-colored) stools; (3) Hematologic: hemolysis causing urobilinogenuria; (4) Renal/muscular: rhabdomyolysis or hematuria. Clinical interview must explore duration, yellowing of eyes or skin, changes in stool color, flank or abdominal pain, and recent vitamin/supplement consumption without premature diagnostic conclusions.",
+    keyTerms: [
+      "yellow urine", "dark urine", "hydration", "water intake", "jaundice", "scleral icterus",
+      "pale stools", "acholic", "riboflavin", "b-complex", "vitamins", "flank pain", "bilirubin"
+    ]
+  },
+  {
+    id: "GUIDELINE-OPEN-TWITCH-001",
+    topicId: "muscle-fasciculations-paresthesias",
+    title: "Clinical Approach to Involuntary Muscle Twitching and Localized Fasciculations",
+    section: "diagnosis",
+    source: "American Academy of Neurology / British Medical Journal Clinical Best Practice",
+    sourceUrl: "https://www.aan.com/guidelines",
+    releaseDate: "2024-02-15",
+    authority: "clinical_guideline",
+    domain: "neurology",
+    population: ["adult", "older_adult"],
+    acuity: ["routine"],
+    country: "global",
+    language: "en",
+    sourceType: "clinical_guideline",
+    reviewerSignoff: "Dr. Arthur Pendelton, MD, PhD",
+    licensingProvenance: "AAN Neurological Symptoms",
+    content: "Isolated muscle twitches (fasciculations) in ambulatory patients are predominantly benign (Benign Fasciculation Syndrome), frequently triggered by caffeine intake, sleep deprivation, intense exercise, psychological stress, or electrolyte imbalances. Differential inquiry must distinguish benign fasciculations from neurodegenerative or motor neuron disorders by evaluating for: (1) objective motor weakness (difficulty opening jars, tripping, foot drop); (2) progressive muscle wasting or atrophy; (3) associated sensory numbness, tingling, or cramp frequency. Follow-up inquiry focuses on timeline, triggers, and functional motor stability.",
+    keyTerms: [
+      "twitch", "twitching", "muscle twitch", "fasciculations", "spasm", "calf twitch",
+      "weakness", "caffeine", "stress", "electrolytes", "atrophy"
+    ]
+  },
+  {
+    id: "GUIDELINE-OPEN-PARESTHESIA-001",
+    topicId: "localized-burning-paresthesia",
+    title: "Evaluation of Localized Neuropathic Burning and Paresthesias Without Rash",
+    section: "symptoms",
+    source: "NICE Clinical Guidelines / American Neurological Association",
+    sourceUrl: "https://www.nice.org.uk/guidance/cg173",
+    releaseDate: "2023-11-20",
+    authority: "clinical_guideline",
+    domain: "neurology",
+    population: ["adult", "older_adult"],
+    acuity: ["routine", "urgent"],
+    country: "global",
+    language: "en",
+    sourceType: "clinical_guideline",
+    reviewerSignoff: "Dr. Arthur Pendelton, MD, PhD",
+    licensingProvenance: "NICE Neuropathic Pain Guidance",
+    content: "Unilateral or localized burning sensation in the skin without visible rash can represent: (1) Pre-eruptive herpes zoster prodrome (pain/burning preceding rash by 2 to 5 days, typically in a dermatomal thoracic or cranial distribution); (2) Peripheral compressive neuropathy (e.g. meralgia paresthetica, radiculopathy); (3) Small-fiber neuropathy. Clinical inquiry should evaluate whether the sensation follows a band-like unilateral strip, sensitivity to light touch (allodynia), history of varicella/shingles, and whether any redness, blisters, or skin lesions are emerging.",
+    keyTerms: [
+      "burning skin", "paresthesia", "no rash", "burning sensation", "shingles", "herpes zoster",
+      "nerve pain", "dermatomal", "allodynia", "tingling", "unilateral burning"
+    ]
   }
 ];

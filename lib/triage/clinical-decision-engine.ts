@@ -38,7 +38,7 @@ export interface TurnClassification {
 }
 
 export interface NextTurnDecision {
-  action: "EXPLAIN_AND_INQUIRE" | "CLARIFY_TIMELINE" | "ACKNOWLEDGE_CORRECTION" | "REASSURE_AND_FOCUS" | "PROVIDE_EMERGENCY_GUIDANCE" | "EXPLORE_NEW_SYMPTOM" | "ADVANCE_INTERVIEW" | "CONVENE_BOARD";
+  action: "EXPLAIN_AND_INQUIRE" | "CLARIFY_TIMELINE" | "ACKNOWLEDGE_CORRECTION" | "REASSURE_AND_FOCUS" | "PROVIDE_EMERGENCY_GUIDANCE" | "EXPLORE_NEW_SYMPTOM" | "ADVANCE_INTERVIEW" | "CONVENE_BOARD" | "ASK_PATIENT";
   spokenDoctorReply: string;
   doctorName: string;
   specialty: string;
@@ -772,14 +772,14 @@ function extractVerbatimSymptomPhrase(text: string, defaultPhrase = "chest pain"
       };
     }
 
-    // CASE 0K: Acute Abdominal Pain Initial Exploration (CHALLENGE-03)
+    // CASE 0K: Acute Severe Abdominal Pain Initial Exploration & Red-Flag Screen (CHALLENGE-03)
     const hasAbdominalPain = state.presentationContext?.primary === "ABDOMINAL_PAIN" ||
       /\b(?:stomach|belly|abdomen)\s+pain\b/i.test(state.cumulativeTranscript);
     if (hasAbdominalPain && !state.slots.location && !state.slots.onset) {
-      const reply = "I understand you are experiencing severe stomach pain. Where in your belly is the pain most severe, and did it start suddenly or build up gradually?";
+      const reply = "I understand you are experiencing severe stomach pain. Where in your belly is the pain most severe, and does your belly feel unusually hard or rigid to the touch, or have you felt faint or dizzy?";
       return {
         action: "ASK_PATIENT",
-        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "abdominal pain initial inquiry"),
+        spokenDoctorReply: this.guardAgainstRepetition(reply, recentReplies, "severe abdominal pain red-flag screen"),
         doctorName: "Dr. Sarah Chen, MD",
         specialty: "Internal Medicine & Critical Care Lead"
       };

@@ -8,10 +8,12 @@ import { ConversationInterpreter } from "./conversation-interpreter";
 import { LocaleConfig, DEFAULT_LOCALE_CONFIG, getEmergencyDispatchInstructions } from "../config/locale";
 import { clinicalDecisionEngine } from "./clinical-decision-engine";
 import { responsePlanner, ResponsePlan } from "./response-planner";
-import { extractSubfieldState, extractNumericSeverity, extractEpisodicSeverity, extractGiAssociatedSymptoms, parseAbdominalLocations, ABDOMINAL_LOCATION_LABELS, NON_DENIABLE_SLOTS, parseOnsetDimensions, isAbdominalPresentation } from "./clinical-state";
-import { PatientProfile } from "../clinical-knowledge/types";
+import { extractSubfieldState, extractNumericSeverity, extractEpisodicSeverity, extractGiAssociatedSymptoms, parseAbdominalLocations, ABDOMINAL_LOCATION_LABELS, NON_DENIABLE_SLOTS, parseOnsetDimensions, isAbdominalPresentation, controlledFactReconciliationEngine } from "./clinical-state";
+import { PatientProfile, CallerProfile, ConversationalAction, ServerTurnTelemetry, CandidateFactProposal } from "../clinical-knowledge/types";
 import { PresentationContext } from "../clinical-knowledge/presentation-types";
 import { presentationClassifier } from "../clinical-knowledge/presentation-classifier";
+import { generateDoctorTurnResponse } from "../ai/clinical-llm";
+import { DOCTOR_PROFILES } from "../../config/doctors";
 
 export interface ConversationMemory {
   confirmedFacts: string[];
@@ -125,6 +127,17 @@ export interface ConversationTurnResult {
   activeAgentRequest?: AgentRequest;
   state: ClinicalInterviewState;
   preArbiterResult: any;
+  telemetry?: ServerTurnTelemetry;
+  conversationalAction?: ConversationalAction;
+  understoodContext?: string;
+  candidateFacts?: CandidateFactProposal[];
+}
+
+export interface ProcessTurnOptions {
+  enableLiveGeneration?: boolean;
+  callerProfile?: CallerProfile;
+  patientProfile?: PatientProfile;
+  conversationHistory?: Array<{ role: "patient" | "doctor" | "assistant"; text?: string; content?: string }>;
 }
 
 /**
@@ -666,10 +679,16 @@ export class ConversationManager {
     patientUtterance: string,
     existingState?: ClinicalInterviewState,
     demographics: { age?: number | null; age_group?: any; age_source?: string } = { age: null, age_group: "adult", age_source: "unknown" },
-    localeConfig: LocaleConfig = DEFAULT_LOCALE_CONFIG
+    localeConfig: LocaleConfig = DEFAULT_LOCALE_CONFIG,
+    options?: ProcessTurnOptions
   ): Promise<ConversationTurnResult> {
     const state: ClinicalInterviewState = existingState || this.createInitialState();
     const cleanMsg = patientUtterance.trim();
+
+    if (options?.patientProfile) {
+      this.patientProfile = options.patientProfile;
+      state.patientProfile = options.patientProfile;
+    }
 
     // Update cumulative transcript
     state.cumulativeTranscript = state.cumulativeTranscript
@@ -699,7 +718,7 @@ export class ConversationManager {
       transcript: state.cumulativeTranscript,
       demographics: {
         age: pAge ?? undefined,
-        age_group: profile ? (profile.age < 1 ? "infant" : profile.age < 16 ? "pediatric" : "adult") : (demographics.age_group || "adult"),
+        age_group: profile && typeof profile.age === "number" ? (profile.age < 1 ? "infant" : profile.age < 16 ? "pediatric" : "adult") : (demographics.age_group || "adult"),
       },
       patientSpec,
     } as any);
@@ -716,7 +735,7 @@ export class ConversationManager {
           id: "caller-" + Date.now(),
           name: "Caller",
           age: extAge ?? 0,
-          gender: extDemo.sexAtBirth || "other",
+          gender: (extDemo.sexAtBirth === "male" || extDemo.sexAtBirth === "female" ? extDemo.sexAtBirth : "other"),
           language: "en",
           conditions: [...extDemo.modifiers],
           medications: [],
@@ -736,6 +755,7 @@ export class ConversationManager {
             gestationalWeeks: undefined,
           };
         }
+        state.patientProfile.conditions = state.patientProfile.conditions || [];
         for (const m of extDemo.modifiers) {
           if (!state.patientProfile.conditions.includes(m)) {
             state.patientProfile.conditions.push(m);
@@ -1033,6 +1053,149 @@ export class ConversationManager {
     // --- STEP 1.5: RESPONSE PLANNER EXECUTION ---
     const plan = responsePlanner.plan(cleanMsg, semantic, state, preArbiterResult, [], localeConfig);
     state.responsePlan = plan;
+
+    // --- STEP 1.6: LIVE LLM GENERATION BRANCH ---
+    if (options?.enableLiveGeneration === true) {
+      // Evaluate specialists & domain sufficiency for rich LLM context
+      const patientCase: PatientCase = {
+        patient_id: "ACTIVE-PT",
+        patient_name: "Patient",
+        transcript: state.cumulativeTranscript,
+        conversation_history: [],
+        demographics: {
+          age: demographics.age ?? undefined,
+          age_group: demographics.age_group
+        },
+        detected_symptoms: state.slots.known_facts,
+        vitals: {},
+        speech_features: undefined as any,
+        pre_safety_flags: preArbiterResult.pre_safety_flags,
+        immediate_danger_detected: preArbiterResult.immediate_danger,
+        provenance_evidence: [],
+        case_version: state.caseVersion
+      };
+
+      const cardioRequests = this.cardiology.assessEvidenceNeeds(patientCase);
+      const neuroRequests = this.neurology.assessEvidenceNeeds(patientCase);
+      const pedsRequests = this.pediatrics.assessEvidenceNeeds(patientCase);
+      const entRequests = this.ent.assessEvidenceNeeds(patientCase);
+
+      const allSpecialistRequests = [...cardioRequests, ...neuroRequests, ...pedsRequests, ...entRequests];
+      allSpecialistRequests.forEach(newReq => {
+        const alreadyResolved = state.resolvedQuestions.some(q => q.resolvedSlot === newReq.targetSlot);
+        const alreadyPending = state.agentRequests.some(r => r.targetSlot === newReq.targetSlot && r.status === "pending");
+        const slotAlreadyHasValue = Boolean((state.slots as any)[newReq.targetSlot]);
+        if (!alreadyResolved && !alreadyPending && !slotAlreadyHasValue) {
+          state.agentRequests.push(newReq);
+        }
+      });
+
+      const doctorProfile = DOCTOR_PROFILES[0];
+
+      const fallbackReply = plan.suggestedSpokenReply ||
+        "Could you tell me when these symptoms began, and whether they started suddenly or built up gradually?";
+
+      const callerProfile = options.callerProfile;
+      const patientProfile = options.patientProfile || state.patientProfile || this.patientProfile || undefined;
+      const turnNum = (state.structuredHistory?.turnCount || 0) + 1;
+
+      const liveResult = await generateDoctorTurnResponse({
+        patientUtterance: cleanMsg,
+        conversationHistory: options.conversationHistory || [
+          { role: "patient", text: cleanMsg }
+        ],
+        interviewState: state,
+        preArbiterResult,
+        demographics: {
+          age: pAge ?? null,
+          age_group: demographics?.age_group || "adult",
+          age_source: demographics?.age_source
+        },
+        doctor: doctorProfile,
+        missingDimensions: state.structuredHistory?.unansweredDimensions,
+        fallbackReply,
+        localeConfig,
+        callerProfile,
+        patientProfile,
+        targetSubject: options.callerProfile?.relationshipToPatient === "child" ? "mother" :
+                       options.callerProfile?.relationshipToPatient === "parent" ? "child" :
+                       options.callerProfile?.relationshipToPatient === "self" ? "self" : "self",
+        turnId: turnNum,
+      });
+
+      // Controlled fact reconciliation
+      if (liveResult.candidateFacts && liveResult.candidateFacts.length > 0) {
+        const callerForRecon: CallerProfile = callerProfile || {
+          id: "caller-session",
+          name: "Caller",
+          relationshipToPatient: "self",
+          authorizedPatientIds: [patientProfile?.id || "pt-session"]
+        };
+        const patientForRecon: PatientProfile = patientProfile || {
+          id: "pt-session",
+          name: "Patient",
+          age: pAge ?? 35,
+          gender: "other",
+          language: "en",
+          conditions: [],
+          medications: [],
+          allergies: []
+        };
+
+        const recon = controlledFactReconciliationEngine.reconcileCandidateFacts(
+          [],
+          liveResult.candidateFacts,
+          callerForRecon,
+          patientForRecon,
+          state.caseVersion
+        );
+
+        for (const fact of recon.acceptedFacts) {
+          const factText = `${fact.concept}: ${fact.assertionStatus}`;
+          if (!state.slots.known_facts.includes(factText)) {
+            state.slots.known_facts.push(factText);
+          }
+          if (state.conversationMemory && !state.conversationMemory.confirmedFacts.includes(factText)) {
+            state.conversationMemory.confirmedFacts.push(factText);
+          }
+        }
+      }
+
+      if (liveResult.conversationalAction === "CONVENE_BOARD") {
+        state.phase = "decided";
+        state.informationState = "sufficient_for_decision";
+      } else {
+        state.phase = "active_inquiring";
+      }
+
+      if (!state.structuredHistory) {
+        state.structuredHistory = {
+          timeline: {},
+          unansweredDimensions: [],
+          patientCorrections: [],
+          patientQuestions: [],
+          recentDoctorReplies: [],
+          turnCount: 0
+        };
+      }
+      state.structuredHistory.recentDoctorReplies = state.structuredHistory.recentDoctorReplies || [];
+      state.structuredHistory.recentDoctorReplies.push(liveResult.reply);
+      state.structuredHistory.turnCount = turnNum;
+
+      return {
+        action: liveResult.conversationalAction === "CONVENE_BOARD" ? "CONVENE_BOARD" : "ASK_PATIENT",
+        doctorReply: liveResult.reply,
+        doctorName: doctorProfile.name,
+        specialty: doctorProfile.specialty,
+        doctorAvatar: doctorProfile.avatarUrl,
+        state,
+        preArbiterResult,
+        telemetry: liveResult.telemetry,
+        conversationalAction: liveResult.conversationalAction,
+        understoodContext: liveResult.understoodContext,
+        candidateFacts: liveResult.candidateFacts
+      };
+    }
 
     // Handle high-priority non-intake conversational goals:
     if (plan.primaryGoal === "CONFIRM_CORRECTION_AND_PROCEED") {

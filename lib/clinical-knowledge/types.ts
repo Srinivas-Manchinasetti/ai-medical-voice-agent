@@ -123,24 +123,34 @@ export interface DrugAllergy {
 
 export interface PatientProfile {
   id: string;
+  name?: string;
   userId?: string;
   relationshipToUser?: "self" | "child" | "parent" | "spouse" | "other";
+  language?: string;
 
   // Demographics
   yearOfBirth?: number;
   dateOfBirth?: string;
   age?: number;
   ageMonths?: number;
-  ageGroup: PopulationTag;
+  ageGroup?: PopulationTag;
   sexAssignedAtBirth?: "male" | "female" | "intersex";
+  gender?: "male" | "female" | "other";
   pregnancyStatus?: "pregnant" | "not_pregnant" | "unknown" | "not_applicable";
+  pregnancy?: {
+    isPregnant: boolean;
+    gestationalWeeks?: number;
+  };
 
   // Medical history
-  knownConditions: string[];
-  currentMedications: PatientMedication[];
+  knownConditions?: string[];
+  conditions?: string[];
+  currentMedications?: PatientMedication[];
+  medications?: any[];
   allergyStatus?: AllergyStatus;
-  drugAllergies: DrugAllergy[];
-  surgicalHistory: string[];
+  drugAllergies?: DrugAllergy[];
+  allergies?: any[];
+  surgicalHistory?: string[];
 
   // Lifestyle
   smokingStatus?: "current" | "former" | "never" | "unknown";
@@ -151,8 +161,8 @@ export interface PatientProfile {
   isDeleted?: boolean;
 
   // Metadata
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ContraindicationAlert {
@@ -189,3 +199,111 @@ export interface ContextAwareQuery {
   topK?: number;
   minScore?: number;
 }
+
+// ─── 3-TIER CONTEXT: CALLER PROFILE & ATTRIBUTED FACTS ───────────────────────
+
+export interface CallerProfile {
+  id: string;
+  name?: string;
+  relationshipToPatient: "self" | "child" | "parent" | "spouse" | "caregiver" | "third_party";
+  authorizedPatientIds?: string[];
+  preferredLanguage?: string;
+  telephonyMetadata?: {
+    callerId?: string;
+    channel?: string;
+  };
+  consentGiven?: boolean;
+  consentTimestamp?: string;
+}
+
+export type FactAssertionStatus = "present" | "absent" | "uncertain";
+export type FactVerificationStatus = "unverified" | "clinician_confirmed" | "device_verified";
+export type FactTemporalScope = "current" | "historical" | "unknown";
+export type FactSource = "patient_reported" | "caregiver_reported" | "device_measured" | "clinician" | "ai_inferred";
+
+export interface CandidateFactProposal {
+  concept: string;
+  assertionStatus: FactAssertionStatus;
+  subjectReference: "self" | "mother" | "father" | "child" | "spouse" | "caregiver" | "other";
+  temporalScope?: FactTemporalScope;
+  notes?: string;
+}
+
+export interface AttributedClinicalFact {
+  id: string;
+  targetPatientId: string;       // Assigned strictly by server after resolving subjectReference
+  reporterId: string;            // Assigned strictly by server from caller session
+  concept: string;               // Clinical concept (e.g. "diabetes", "dark_urine")
+  assertionStatus: FactAssertionStatus;
+  verificationStatus: FactVerificationStatus;
+  temporalScope: FactTemporalScope;
+  source: FactSource;
+  turnId: number;
+  timestamp: string;
+  provenanceDetails?: {
+    reliability: "high" | "moderate" | "low";
+    clinicalType: "objective_vital" | "subjective_symptom" | "observed_behavior" | "historical_record";
+    resolutionRationale?: string;
+  };
+  value?: any;
+  normalizedText?: string;
+  confidence?: number;
+  requiresReconfirmation?: boolean;
+  notes?: string;
+}
+
+export type ConversationalAction =
+  | "INQUIRE"
+  | "ANSWER_QUESTION"
+  | "ACKNOWLEDGE_CORRECTION"
+  | "EXPLAIN_CLINICAL_RATIONALE"
+  | "SUMMARIZE_AND_CHECK"
+  | "EMERGENCY_DIRECTIVE"
+  | "PROVIDE_SUPPORT"
+  | "CONVENE_BOARD";
+
+export interface ServerTurnTelemetry {
+  provider: "groq" | "nvidia" | "fallback";
+  model: string;
+  liveGenerated: boolean;
+  latencyMs: number;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  telemetryIntegrityHash: string;
+  timestamp: string;
+}
+
+/**
+ * Calculates patient age dynamically from Date of Birth (DOB) at turn execution.
+ * Prevents stale age drift across encounters.
+ */
+export function calculateAgeFromDOB(
+  dobString: string,
+  referenceDate: Date = new Date()
+): { years: number; months: number; totalMonths: number } {
+  const birthDate = new Date(dobString);
+  if (isNaN(birthDate.getTime())) {
+    return { years: 0, months: 0, totalMonths: 0 };
+  }
+
+  let years = referenceDate.getFullYear() - birthDate.getFullYear();
+  let months = referenceDate.getMonth() - birthDate.getMonth();
+  const days = referenceDate.getDate() - birthDate.getDate();
+
+  if (days < 0) {
+    months--;
+  }
+
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+
+  const totalMonths = Math.max(0, years * 12 + months);
+  return {
+    years: Math.max(0, years),
+    months: Math.max(0, months),
+    totalMonths,
+  };
+}
+

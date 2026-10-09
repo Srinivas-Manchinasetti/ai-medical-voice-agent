@@ -13,6 +13,27 @@
  *    - Layer 2: Structured clinical state (present / absent / unknown).
  *    - Layer 3: Interview memory (asked, answered, denied, do-not-repeat, next-target).
  */
+import {
+  CallerProfile,
+  PatientProfile,
+  AttributedClinicalFact,
+  FactAssertionStatus,
+  FactVerificationStatus,
+  FactTemporalScope,
+  FactSource,
+  calculateAgeFromDOB,
+} from "../clinical-knowledge/types";
+
+export type {
+  CallerProfile,
+  PatientProfile,
+  AttributedClinicalFact,
+  FactAssertionStatus,
+  FactVerificationStatus,
+  FactTemporalScope,
+  FactSource,
+};
+export { calculateAgeFromDOB };
 
 export type ClinicalFactStatus = "present" | "absent" | "unknown";
 export type ClinicalFactSource =
@@ -112,6 +133,264 @@ export function reconcileConflictingFacts(existingFact: ClinicalFact, newFact: C
   }
 }
 
+// ─── CONTROLLED FACT RECONCILIATION LAYER ───────────────────────────────────
+
+import { CandidateFactProposal } from "../clinical-knowledge/types";
+export type { CandidateFactProposal };
+
+export interface CandidateFactInput extends CandidateFactProposal {
+  targetPatientId?: string;
+  reporterId?: string;
+  source?: FactSource;
+  verificationStatus?: FactVerificationStatus;
+  value?: any;
+  normalizedText?: string;
+}
+
+export interface FactReconciliationResult {
+  acceptedFacts: AttributedClinicalFact[];
+  rejectedOrDiscrepant: Array<{
+    candidate: CandidateFactInput;
+    reason: string;
+    actionTaken: "isolated_to_patient" | "flagged_uncertain" | "contradiction_flagged" | "unresolved_attribution" | "rejected";
+  }>;
+  profileUpdatesProposed: {
+    targetPatientId: string;
+    newUnverifiedConditions: string[];
+    newUnverifiedMedications: string[];
+    contradictionsDetected: string[];
+  };
+}
+
+/**
+ * Resolves a natural person reference from the LLM ("mother", "self", "child")
+ * against the session's authorized caller-patient relationships.
+ * The model NEVER assigns database IDs directly.
+ */
+export function resolveSubjectReference(
+  subjectRef: string,
+  caller: CallerProfile,
+  targetPatient: PatientProfile
+): { targetPatientId?: string; isAuthorized: boolean; resolution: "patient" | "caller" | "unresolved" } {
+  const ref = (subjectRef || "self").toLowerCase().trim();
+
+  // If reference is "self"
+  if (ref === "self" || ref === "caller" || ref === "me") {
+    if (caller.relationshipToPatient === "self") {
+      return { targetPatientId: targetPatient.id, isAuthorized: true, resolution: "patient" };
+    } else {
+      // Caller speaking about their own symptoms while managing a family member
+      return { targetPatientId: caller.id, isAuthorized: true, resolution: "caller" };
+    }
+  }
+
+  // If reference is "mother", "mom", "parent"
+  if (ref === "mother" || ref === "mom" || ref === "parent") {
+    if (caller.relationshipToPatient === "child" || targetPatient.relationshipToUser === "parent" || /mother|mom/i.test(targetPatient.name || "")) {
+      return { targetPatientId: targetPatient.id, isAuthorized: true, resolution: "patient" };
+    }
+  }
+
+  // If reference is "child", "baby", "infant", "son", "daughter"
+  if (ref === "child" || ref === "baby" || ref === "infant" || ref === "son" || ref === "daughter") {
+    if (caller.relationshipToPatient === "parent" || targetPatient.relationshipToUser === "child" || (targetPatient.age != null && targetPatient.age < 18)) {
+      return { targetPatientId: targetPatient.id, isAuthorized: true, resolution: "patient" };
+    }
+  }
+
+  // If reference matches the target patient name
+  if (targetPatient.name && ref.includes(targetPatient.name.toLowerCase())) {
+    return { targetPatientId: targetPatient.id, isAuthorized: true, resolution: "patient" };
+  }
+
+  // Fallback if session is single-patient evaluation
+  if (targetPatient.id && (caller.relationshipToPatient === "self" || ref === "patient")) {
+    return { targetPatientId: targetPatient.id, isAuthorized: true, resolution: "patient" };
+  }
+
+  return { isAuthorized: false, resolution: "unresolved" };
+}
+
+/**
+ * Fact-Specific Reconciliation (P0 Correction #2):
+ * Applies clinically calibrated rules based on concept type, source, and time,
+ * eliminating the simplistic global numeric scalar.
+ */
+export function reconcileFactSpecific(
+  existingFact: AttributedClinicalFact,
+  newStatus: FactAssertionStatus,
+  newSource: FactSource,
+  concept: string,
+  turnId: number
+): { winnerStatus: FactAssertionStatus; winnerSource: FactSource; isContradiction: boolean; rationale: string } {
+  const lowerConcept = concept.toLowerCase();
+  const isObjectiveVital = /\b(spo2|oxygen|saturation|heart_rate|pulse|blood_pressure|bp|temp|temperature)\b/.test(lowerConcept);
+  const isSubjectiveSymptom = /\b(pain|ache|nausea|fatigue|tired|dizzy|dizziness|anxiety|fear|discomfort)\b/.test(lowerConcept);
+
+  if (existingFact.assertionStatus === newStatus) {
+    return { winnerStatus: newStatus, winnerSource: newSource, isContradiction: false, rationale: "Status agreement" };
+  }
+
+  // 1. Objective Physiological Measurements: Device reading outranks verbal estimate of that same vital
+  if (isObjectiveVital) {
+    if (newSource === "device_measured" && existingFact.source !== "device_measured") {
+      return {
+        winnerStatus: newStatus,
+        winnerSource: newSource,
+        isContradiction: true,
+        rationale: `Objective biometric measurement (${newSource}) supersedes verbal estimate (${existingFact.source}) for ${concept}`
+      };
+    }
+    if (existingFact.source === "device_measured" && newSource !== "device_measured") {
+      return {
+        winnerStatus: existingFact.assertionStatus,
+        winnerSource: existingFact.source,
+        isContradiction: true,
+        rationale: `Prior objective measurement (${existingFact.source}) preserved over verbal estimate (${newSource}) for ${concept}`
+      };
+    }
+  }
+
+  // 2. Subjective Clinical Symptoms: Patient self-report is primary
+  if (isSubjectiveSymptom) {
+    if (newSource === "patient_reported") {
+      return {
+        winnerStatus: newStatus,
+        winnerSource: newSource,
+        isContradiction: true,
+        rationale: `Patient subjective self-report is primary for ${concept}; cannot be overridden by external device/inference`
+      };
+    }
+  }
+
+  // 3. Temporal Precedence for other clinical claims
+  const isNewer = turnId >= existingFact.turnId;
+  return {
+    winnerStatus: isNewer ? newStatus : existingFact.assertionStatus,
+    winnerSource: isNewer ? newSource : existingFact.source,
+    isContradiction: true,
+    rationale: `Temporal precedence on ${concept}: turn ${isNewer ? turnId : existingFact.turnId} supersedes prior turn`
+  };
+}
+
+export class ControlledFactReconciliationEngine {
+  public reconcileCandidateFacts(
+    existingFacts: AttributedClinicalFact[],
+    candidates: CandidateFactInput[],
+    caller: CallerProfile,
+    targetPatient: PatientProfile,
+    turnId: number
+  ): FactReconciliationResult {
+    const acceptedFacts: AttributedClinicalFact[] = [...existingFacts];
+    const rejectedOrDiscrepant: FactReconciliationResult["rejectedOrDiscrepant"] = [];
+    const newUnverifiedConditions: string[] = [];
+    const newUnverifiedMedications: string[] = [];
+    const contradictionsDetected: string[] = [];
+
+    const nowIso = new Date().toISOString();
+
+    for (const cand of candidates) {
+      // Server-Side Person Reference Resolution:
+      // The model provides subjectReference ("mother", "self", "child");
+      // The server validates and assigns targetPatientId and reporterId.
+      const resolution = resolveSubjectReference(cand.subjectReference || "self", caller, targetPatient);
+      if (!resolution.isAuthorized || !resolution.targetPatientId) {
+        rejectedOrDiscrepant.push({
+          candidate: cand,
+          reason: `Unresolved subjectReference '${cand.subjectReference}': caller is not authorized for target patient in this session`,
+          actionTaken: "unresolved_attribution"
+        });
+        continue;
+      }
+
+      const targetId = resolution.targetPatientId;
+      const reporterId = caller.id;
+      const conceptKey = cand.concept.trim().toLowerCase();
+
+      const isCallerReportingThirdParty = caller.relationshipToPatient !== "self" && targetId !== caller.id;
+      const factSource: FactSource = cand.source || (isCallerReportingThirdParty ? "caregiver_reported" : "patient_reported");
+
+      // Uncertainty Guard: Speculative statements remain flagged as uncertain & unverified
+      const isUncertain = cand.assertionStatus === "uncertain" || /\b(think|might|maybe|not\s*sure|possible|guess)\b/i.test(cand.notes || "");
+      const assertionStatus: FactAssertionStatus = isUncertain ? "uncertain" : cand.assertionStatus;
+      const verificationStatus: FactVerificationStatus = cand.verificationStatus || "unverified";
+
+      // Fact-Specific Reconciliation with existing facts
+      const existingMatch = acceptedFacts.find(f => f.targetPatientId === targetId && f.concept.toLowerCase() === conceptKey);
+      if (existingMatch) {
+        const specRecon = reconcileFactSpecific(existingMatch, assertionStatus, factSource, cand.concept, turnId);
+        if (specRecon.isContradiction) {
+          contradictionsDetected.push(specRecon.rationale);
+          rejectedOrDiscrepant.push({
+            candidate: cand,
+            reason: specRecon.rationale,
+            actionTaken: "contradiction_flagged"
+          });
+
+          existingMatch.assertionStatus = specRecon.winnerStatus;
+          existingMatch.source = specRecon.winnerSource;
+          existingMatch.turnId = turnId;
+          existingMatch.notes = specRecon.rationale;
+          continue;
+        }
+      }
+
+      const newFact: AttributedClinicalFact = {
+        id: `fact-${targetId}-${conceptKey.replace(/[^a-z0-9]/g, "_")}-${turnId}-${Date.now().toString(36)}`,
+        targetPatientId: targetId,
+        reporterId,
+        concept: cand.concept,
+        assertionStatus,
+        verificationStatus,
+        temporalScope: cand.temporalScope || "current",
+        source: factSource,
+        turnId,
+        timestamp: nowIso,
+        provenanceDetails: {
+          reliability: isUncertain ? "low" : factSource === "device_measured" ? "high" : "moderate",
+          clinicalType: /\b(spo2|temp|pulse|bp)\b/i.test(conceptKey) ? "objective_vital" :
+                        /\b(pain|nausea|fatigue)\b/i.test(conceptKey) ? "subjective_symptom" : "observed_behavior",
+        },
+        value: cand.value,
+        normalizedText: cand.normalizedText || `${cand.concept}: ${assertionStatus}`,
+        confidence: isUncertain ? 0.6 : 0.95,
+        requiresReconfirmation: isUncertain,
+        notes: cand.notes,
+      };
+
+      acceptedFacts.push(newFact);
+
+      // Controlled Patient Profile Persistence:
+      // Only confirmed, certain assertions are proposed for profile persistence
+      if (assertionStatus === "present" && !isUncertain && targetId === targetPatient.id) {
+        if (conceptKey.includes("diabet") || conceptKey.includes("hypertens") || conceptKey.includes("asthma") || conceptKey.includes("heart")) {
+          newUnverifiedConditions.push(cand.concept);
+        } else if (conceptKey.includes("pill") || conceptKey.includes("insulin") || conceptKey.includes("medication") || conceptKey.includes("metformin")) {
+          newUnverifiedMedications.push(cand.concept);
+        }
+      } else if (isUncertain) {
+        rejectedOrDiscrepant.push({
+          candidate: cand,
+          reason: `Uncertain fact retained in encounter state; barred from auto-updating verified patient profile`,
+          actionTaken: "flagged_uncertain"
+        });
+      }
+    }
+
+    return {
+      acceptedFacts,
+      rejectedOrDiscrepant,
+      profileUpdatesProposed: {
+        targetPatientId: targetPatient.id,
+        newUnverifiedConditions,
+        newUnverifiedMedications,
+        contradictionsDetected
+      }
+    };
+  }
+}
+
+export const controlledFactReconciliationEngine = new ControlledFactReconciliationEngine();
 
 export interface ClinicalFact {
   id: string;

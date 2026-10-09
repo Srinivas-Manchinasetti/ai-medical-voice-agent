@@ -2,10 +2,10 @@
  * CLINICAL SAFETY ARBITER & DECISION ENGINE VERIFICATION SUITE
  * 
  * Tests the 6 clinical safety requirements across 12 scenario categories:
- *  1. Clear emergency (ESI-1 / ESI-2 immediate escalation)
- *  2. Clear non-emergency (ESI-4 / ESI-5 routine outpatient)
+ *  1. Clear emergency (MedVoice Tier 1 / Tier 2 immediate escalation)
+ *  2. Clear non-emergency (MedVoice Tier 4 / Tier 5 routine outpatient)
  *  3. Red flag buried in otherwise benign history (stroke/airway not suppressed by cold symptoms)
- *  4. Multiple competing findings (safety precedence: ESI-2 strictly overrides ESI-4)
+ *  4. Multiple competing findings (safety precedence: Tier 2 strictly overrides Tier 4)
  *  5. Missing information != negative information (unresolved is never treated as benign)
  *  6. Contradictory findings (device measurement supersedes verbal denial)
  *  7. Patient denial (respected when validly denied and not contradicted)
@@ -41,11 +41,11 @@ async function runSafetyArbiterSuite() {
   console.log('='.repeat(80) + '\n');
 
   // =========================================================================
-  // SCENARIO 1: Clear Emergency (ESI 1 / ESI 2)
+  // SCENARIO 1: Clear Emergency (MedVoice Tier 1 / Tier 2)
   // =========================================================================
-  console.log('--- [SCENARIO 1] Clear Emergency (ESI 1 / ESI 2) ---');
+  console.log('--- [SCENARIO 1] Clear Emergency (MedVoice Tier 1 / Tier 2) ---');
   {
-    // ESI 1: Stridor & severe airway compromise
+    // MedVoice Tier 1: Stridor & severe airway compromise
     const stridorFact: ClinicalFact = {
       id: 'f-1',
       name: 'stridor',
@@ -65,12 +65,12 @@ async function runSafetyArbiterSuite() {
       rawText: 'Patient is making high pitched choking sounds when breathing in',
     });
 
-    assert(res1.esiScore === 1, 'ESI 1 assigned for critical airway compromise / stridor');
-    assert(res1.isEmergency === true, 'isEmergency is true for ESI 1');
+    assert(res1.esiScore === 1, 'MedVoice Tier 1 assigned for critical airway compromise / stridor');
+    assert(res1.isEmergency === true, 'isEmergency is true for MedVoice Tier 1');
     assert(res1.triageLevel === 'emergency', 'triageLevel is emergency');
     assert(res1.redFlagsTriggered.some(r => r.includes('AIRWAY') || r.includes('COLLAPSE')), 'Airway collapse red flag triggered');
 
-    // ESI 2: Crushing chest pressure + left arm radiation
+    // MedVoice Tier 2: Crushing chest pressure + left arm radiation
     const chestPressureFact: ClinicalFact = {
       id: 'f-2',
       name: 'chest_pressure',
@@ -102,17 +102,17 @@ async function runSafetyArbiterSuite() {
       facts: [chestPressureFact, armRadFact],
     });
 
-    assert(res2.esiScore === 2, 'ESI 2 assigned for acute coronary syndrome symptoms');
-    assert(res2.isEmergency === true, 'isEmergency is true for ESI 2');
+    assert(res2.esiScore === 2, 'MedVoice Tier 2 assigned for acute coronary syndrome symptoms');
+    assert(res2.isEmergency === true, 'isEmergency is true for MedVoice Tier 2');
     assert(res2.triageLevel === 'emergency', 'triageLevel is emergency for ACS');
   }
 
   // =========================================================================
-  // SCENARIO 2: Clear Non-Emergency (ESI 4 / ESI 5)
+  // SCENARIO 2: Clear Non-Emergency (MedVoice Tier 4 / Tier 5)
   // =========================================================================
-  console.log('\n--- [SCENARIO 2] Clear Non-Emergency (ESI 4 / ESI 5) ---');
+  console.log('\n--- [SCENARIO 2] Clear Non-Emergency (MedVoice Tier 4 / Tier 5) ---');
   {
-    // ESI 5: Prescription refill
+    // MedVoice Tier 5: Prescription refill
     const refillFact: ClinicalFact = {
       id: 'f-refill',
       name: 'prescription_refill',
@@ -132,16 +132,16 @@ async function runSafetyArbiterSuite() {
       rawText: 'I just need a refill on my blood pressure medications',
     });
 
-    assert(resRefill.esiScore === 5, 'ESI 5 assigned for prescription refill');
-    assert(resRefill.triageLevel === 'routine', 'triageLevel is routine for ESI 5');
+    assert(resRefill.esiScore === 5, 'MedVoice Tier 5 assigned for prescription refill');
+    assert(resRefill.triageLevel === 'routine', 'triageLevel is routine for MedVoice Tier 5');
     assert(resRefill.isEmergency === false, 'isEmergency is false for prescription refill');
 
-    // ESI 4: Mild cold with runny nose
+    // MedVoice Tier 4: Mild cold with runny nose
     const resCold = evaluateSafetyArbiter({
       rawText: 'I have a mild runny nose and scratchy throat since yesterday',
     });
 
-    assert(resCold.esiScore === 4, 'ESI 4 assigned for mild URI symptoms');
+    assert(resCold.esiScore === 4, 'MedVoice Tier 4 assigned for mild URI symptoms');
     assert(resCold.triageLevel === 'routine', 'triageLevel is routine for mild URI');
     assert(resCold.isEmergency === false, 'isEmergency is false for mild URI');
   }
@@ -176,7 +176,7 @@ async function runSafetyArbiterSuite() {
       rawText: benignTranscript,
     });
 
-    assert(resBuried.esiScore === 2, 'ESI 2 assigned despite extensive benign cold history');
+    assert(resBuried.esiScore === 2, 'MedVoice Tier 2 assigned despite extensive benign cold history');
     assert(resBuried.isEmergency === true, 'Buried red flag forces isEmergency = true');
     assert(resBuried.triageLevel === 'emergency', 'triageLevel escalated to emergency');
     assert(resBuried.redFlagsTriggered.some(r => r.includes('STROKE') || r.includes('BE_FAST')), 'BE-FAST acute stroke red flag triggered');
@@ -185,9 +185,9 @@ async function runSafetyArbiterSuite() {
   // =========================================================================
   // SCENARIO 4: Multiple Competing Findings (Safety Precedence)
   // =========================================================================
-  console.log('\n--- [SCENARIO 4] Multiple Competing Findings (Safety Precedence) ---');
+  console.log('\n--- [SCENARIO 4] Multiple Competing Findings (Safety Precedence: Tier 2 strictly overrides Tier 4) ---');
   {
-    // Patient has mild ankle sprain (routine ESI 4) AND acute crushing chest pressure (ESI 2)
+    // Patient has mild ankle sprain (routine Tier 4) AND acute crushing chest pressure (Tier 2)
     const sprainFact: ClinicalFact = {
       id: 'f-sprain',
       name: 'minor_sprain',
@@ -220,7 +220,7 @@ async function runSafetyArbiterSuite() {
       rawText: 'I twisted my ankle earlier, and now I have heavy crushing chest pressure',
     });
 
-    assert(resCompeting.esiScore === 2, 'ESI 2 strictly overrides ESI 4 when competing findings exist');
+    assert(resCompeting.esiScore === 2, 'MedVoice Tier 2 strictly overrides MedVoice Tier 4 when competing findings exist');
     assert(resCompeting.isEmergency === true, 'Safety precedence forces emergency disposition');
   }
 
@@ -287,7 +287,7 @@ async function runSafetyArbiterSuite() {
       facts: [patientDenial, deviceMeasurement],
     });
 
-    assert(resContradiction.esiScore === 3, 'ESI 3 assigned because device measurement overrode verbal denial');
+    assert(resContradiction.esiScore === 3, 'MedVoice Tier 3 assigned because device measurement overrode verbal denial');
     assert(resContradiction.provenanceSummary?.contradictionsResolved === 1, 'Contradiction was successfully tracked and resolved');
     assert(resContradiction.provenanceSummary?.highestProvenance === 'device_measured', 'Highest provenance recorded as device_measured');
   }
@@ -317,7 +317,7 @@ async function runSafetyArbiterSuite() {
       rawText: 'My uncle had sudden chest pain and died last year. But I have no chest pain whatsoever, just an ankle twist.',
     });
 
-    assert(resDenial.esiScore >= 4, 'ESI 4 or 5 assigned because structured patient denial prevented false chest pain escalation');
+    assert(resDenial.esiScore >= 4, 'MedVoice Tier 4 or 5 assigned because structured patient denial prevented false chest pain escalation');
     assert(resDenial.isEmergency === false, 'isEmergency remains false when symptom is validly denied');
   }
 
@@ -389,7 +389,7 @@ async function runSafetyArbiterSuite() {
       facts: [turn1Fact],
       rawText: 'Just a scratchy throat for 2 days',
     });
-    assert(evalTurn1.esiScore === 4, 'Turn 1: Correctly triaged as ESI 4 routine');
+    assert(evalTurn1.esiScore === 4, 'Turn 1: Correctly triaged as MedVoice Tier 4 routine');
 
     // Turn 2: Stridor develops / is observed
     const turn2Fact: ClinicalFact = {
@@ -411,7 +411,7 @@ async function runSafetyArbiterSuite() {
       rawText: 'Just a scratchy throat for 2 days, but now making high pitched whistling sounds when inhaling',
     });
 
-    assert(evalTurn2.esiScore === 1, 'Turn 2: Escalates immediately to ESI 1');
+    assert(evalTurn2.esiScore === 1, 'Turn 2: Escalates immediately to MedVoice Tier 1');
     assert(evalTurn2.isEmergency === true, 'Turn 2: isEmergency becomes true');
     assert(evalTurn2.triageLevel === 'emergency', 'Turn 2: triageLevel becomes emergency');
   }
@@ -428,7 +428,7 @@ async function runSafetyArbiterSuite() {
     });
 
     // Arbiter should not invent fictitious vitals or trigger highFever/hypoxia without evidence
-    assert(resNoVitals.esiScore === 4, 'Baseline headache without vitals stays ESI 4');
+    assert(resNoVitals.esiScore === 4, 'Baseline headache without vitals stays MedVoice Tier 4');
     assert(!resNoVitals.detectedSymptoms.some(s => /SpO2|High fever measured/i.test(s)), 'No fabricated vitals detected in symptoms');
   }
 
@@ -469,8 +469,8 @@ async function runSafetyArbiterSuite() {
       facts: [acsFact1, acsFact2],
     });
 
-    // Title should emphasize ESI level, emergent protocol, and rule-out / suspected syndrome
-    assert(resAcs.esiTitle.startsWith('ESI LEVEL 2: EMERGENT'), 'esiTitle specifies ESI level and urgency');
+    // Title should emphasize urgency tier protocol and operational pathway
+    assert(resAcs.esiTitle.startsWith('ESI LEVEL 2: EMERGENT') || resAcs.tierTitle.startsWith('MEDVOICE TIER 2'), 'esiTitle specifies urgency tier protocol and operational pathway');
     assert(resAcs.esiTitle.includes('Protocol') || resAcs.esiTitle.includes('Suspected'), 'esiTitle designates a triage protocol, not a definitive diagnosis');
     // Must NOT state "Diagnosis: Acute Anterior Myocardial Infarction"
     assert(!resAcs.esiTitle.includes('Confirmed Acute Anterior Myocardial Infarction'), 'No uncertified definitive diagnosis claim');
@@ -505,8 +505,8 @@ async function runSafetyArbiterSuite() {
     const run1 = evaluateSafetyArbiter(testInput);
     for (let i = 2; i <= 25; i++) {
       const runN = evaluateSafetyArbiter(testInput);
-      assert(runN.esiScore === run1.esiScore, `Run ${i} matches ESI score (${run1.esiScore})`);
-      assert(runN.esiTitle === run1.esiTitle, `Run ${i} matches ESI title`);
+      assert(runN.esiScore === run1.esiScore, `Run ${i} matches MedVoice Urgency Tier (${run1.esiScore})`);
+      assert(runN.tierTitle === run1.tierTitle, `Run ${i} matches tier protocol title`);
       assert(runN.triageLevel === run1.triageLevel, `Run ${i} matches triage level`);
       assert(runN.isEmergency === run1.isEmergency, `Run ${i} matches emergency boolean`);
       assert(runN.arbiterOverride === run1.arbiterOverride, `Run ${i} matches arbiter override`);
