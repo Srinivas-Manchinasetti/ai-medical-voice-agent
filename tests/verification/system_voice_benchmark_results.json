@@ -1,5 +1,5 @@
 {
-  "benchmarkDate": "2026-10-10T11:44:59.856Z",
+  "benchmarkDate": "2026-10-10T12:12:04.669Z",
   "hostPlatform": "win32",
   "hostArch": "x64",
   "voiceUsed": "Microsoft David Desktop",
@@ -29,19 +29,19 @@
   "latencyMetrics": {
     "hardwarePlaybackStartMs": {
       "min": 1,
-      "max": 16.58,
-      "mean": 12.84,
-      "p50": 15.63,
-      "p90": 16.14,
-      "p95": 16.35
+      "max": 38.12,
+      "mean": 16.4,
+      "p50": 16.11,
+      "p90": 17.79,
+      "p95": 32.03
     },
     "modeledTurnTtfaSystemVoiceMs": {
       "min": 559,
-      "max": 574.58,
-      "mean": 570.84,
-      "p50": 573.63,
-      "p90": 574.14,
-      "p95": 574.35
+      "max": 596.12,
+      "mean": 574.4,
+      "p50": 574.11,
+      "p90": 575.79,
+      "p95": 590.03
     },
     "modeledTurnTtfaKokoroCpuMs": {
       "min": 1966,
@@ -55,7 +55,7 @@
   "targets": {
     "ttfaTargetMs": 1200,
     "hardwarePlaybackStartVerified": true,
-    "modeledTurnTtfaProjectedP95Ms": 574.35,
+    "modeledTurnTtfaProjectedP95Ms": 590.03,
     "fullPipelineConversationalTtfaVerified": false,
     "fullPipelineLatencyGate": "OPEN (UNPROVEN / MISSED — Live streaming benchmark reports TTFA P95 6.52s, Full-turn P95 10.01s with Kokoro CPU)"
   },
@@ -66,9 +66,9 @@
       "category": "triage_question",
       "wordCount": 11,
       "text": "Where in your abdomen does the pain feel strongest right now?",
-      "dispatchToSpeakStartedMs": 15.21,
+      "dispatchToSpeakStartedMs": 38.12,
       "speakDurationSec": 4.71,
-      "turnTtfaEstimateMs": 573.21,
+      "turnTtfaEstimateMs": 596.12,
       "kokoroCpuBaselineTtfaMs": 1966
     },
     {
@@ -77,9 +77,9 @@
       "category": "clarification",
       "wordCount": 14,
       "text": "I see your mother is feeling dizzy. Has the room been spinning since noon?",
-      "dispatchToSpeakStartedMs": 15.52,
+      "dispatchToSpeakStartedMs": 16.24,
       "speakDurationSec": 6,
-      "turnTtfaEstimateMs": 573.52,
+      "turnTtfaEstimateMs": 574.24,
       "kokoroCpuBaselineTtfaMs": 2050
     },
     {
@@ -88,9 +88,9 @@
       "category": "triage_question",
       "wordCount": 12,
       "text": "Have you noticed any shortness of breath or sweating with this discomfort?",
-      "dispatchToSpeakStartedMs": 15.17,
+      "dispatchToSpeakStartedMs": 16.12,
       "speakDurationSec": 5.14,
-      "turnTtfaEstimateMs": 573.17,
+      "turnTtfaEstimateMs": 574.12,
       "kokoroCpuBaselineTtfaMs": 1994
     },
     {
@@ -99,9 +99,9 @@
       "category": "complex_clause",
       "wordCount": 24,
       "text": "Because you are shaking and sweating without a fever, this could be related to low blood sugar. Are you able to drink juice safely?",
-      "dispatchToSpeakStartedMs": 15.57,
+      "dispatchToSpeakStartedMs": 16.22,
       "speakDurationSec": 10.29,
-      "turnTtfaEstimateMs": 573.57,
+      "turnTtfaEstimateMs": 574.22,
       "kokoroCpuBaselineTtfaMs": 2330
     },
     {
@@ -110,9 +110,9 @@
       "category": "emergency_directive",
       "wordCount": 19,
       "text": "This is a life-threatening medical emergency. Please call 112 or 108 immediately or proceed to the nearest emergency room.",
-      "dispatchToSpeakStartedMs": 16.09,
+      "dispatchToSpeakStartedMs": 15.61,
       "speakDurationSec": 8.14,
-      "turnTtfaEstimateMs": 574.09,
+      "turnTtfaEstimateMs": 573.61,
       "kokoroCpuBaselineTtfaMs": 2190
     },
     {
@@ -121,9 +121,9 @@
       "category": "triage_question",
       "wordCount": 13,
       "text": "Have you been able to keep any fluids down since the vomiting started?",
-      "dispatchToSpeakStartedMs": 15.26,
+      "dispatchToSpeakStartedMs": 1.24,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 573.26,
+      "turnTtfaEstimateMs": 559.24,
       "kokoroCpuBaselineTtfaMs": 2022
     },
     {
@@ -132,9 +132,9 @@
       "category": "acknowledgment",
       "wordCount": 15,
       "text": "I see the tea worsened the burning. Have you noticed any nausea with this pain?",
-      "dispatchToSpeakStartedMs": 15.69,
+      "dispatchToSpeakStartedMs": 16.01,
       "speakDurationSec": 6.43,
-      "turnTtfaEstimateMs": 573.69,
+      "turnTtfaEstimateMs": 574.01,
       "kokoroCpuBaselineTtfaMs": 2078
     },
     {
@@ -143,9 +143,9 @@
       "category": "triage_question",
       "wordCount": 15,
       "text": "Did this headache come on suddenly like a thunderclap, or did it build up gradually?",
-      "dispatchToSpeakStartedMs": 15.68,
+      "dispatchToSpeakStartedMs": 15.46,
       "speakDurationSec": 6.43,
-      "turnTtfaEstimateMs": 573.68,
+      "turnTtfaEstimateMs": 573.46,
       "kokoroCpuBaselineTtfaMs": 2078
     },
     {
@@ -154,9 +154,9 @@
       "category": "emergency_directive",
       "wordCount": 13,
       "text": "What exact time was your father last seen completely normal without arm weakness?",
-      "dispatchToSpeakStartedMs": 16.01,
+      "dispatchToSpeakStartedMs": 15.8,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 574.01,
+      "turnTtfaEstimateMs": 573.8,
       "kokoroCpuBaselineTtfaMs": 2022
     },
     {
@@ -165,9 +165,9 @@
       "category": "triage_question",
       "wordCount": 13,
       "text": "How many wet diapers has your baby had in the last twelve hours?",
-      "dispatchToSpeakStartedMs": 16.34,
+      "dispatchToSpeakStartedMs": 16.15,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 574.34,
+      "turnTtfaEstimateMs": 574.15,
       "kokoroCpuBaselineTtfaMs": 2022
     },
     {
@@ -176,9 +176,9 @@
       "category": "triage_question",
       "wordCount": 12,
       "text": "Is she having any swelling of her lips, tongue, or difficulty swallowing?",
-      "dispatchToSpeakStartedMs": 16.58,
+      "dispatchToSpeakStartedMs": 16.23,
       "speakDurationSec": 5.14,
-      "turnTtfaEstimateMs": 574.58,
+      "turnTtfaEstimateMs": 574.23,
       "kokoroCpuBaselineTtfaMs": 1994
     },
     {
@@ -187,9 +187,9 @@
       "category": "clarification",
       "wordCount": 14,
       "text": "Does the chest pressure spread to your left arm, jaw, neck, or upper back?",
-      "dispatchToSpeakStartedMs": 1.1,
+      "dispatchToSpeakStartedMs": 31.71,
       "speakDurationSec": 6,
-      "turnTtfaEstimateMs": 559.1,
+      "turnTtfaEstimateMs": 589.71,
       "kokoroCpuBaselineTtfaMs": 2050
     },
     {
@@ -198,9 +198,9 @@
       "category": "clarification",
       "wordCount": 13,
       "text": "Have you taken any fever reducers like paracetamol in the last six hours?",
-      "dispatchToSpeakStartedMs": 1.39,
+      "dispatchToSpeakStartedMs": 15.72,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 559.39,
+      "turnTtfaEstimateMs": 573.72,
       "kokoroCpuBaselineTtfaMs": 2022
     },
     {
@@ -209,9 +209,9 @@
       "category": "clarification",
       "wordCount": 13,
       "text": "Did using the rescue inhaler provide any relief, or is breathing still tight?",
-      "dispatchToSpeakStartedMs": 15.27,
+      "dispatchToSpeakStartedMs": 16.13,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 573.27,
+      "turnTtfaEstimateMs": 574.13,
       "kokoroCpuBaselineTtfaMs": 2022
     },
     {
@@ -220,9 +220,9 @@
       "category": "triage_question",
       "wordCount": 12,
       "text": "Did he lose consciousness at any point after falling from the stairs?",
-      "dispatchToSpeakStartedMs": 15.99,
+      "dispatchToSpeakStartedMs": 15.98,
       "speakDurationSec": 5.14,
-      "turnTtfaEstimateMs": 573.99,
+      "turnTtfaEstimateMs": 573.98,
       "kokoroCpuBaselineTtfaMs": 1994
     },
     {
@@ -231,9 +231,9 @@
       "category": "triage_question",
       "wordCount": 14,
       "text": "Have the bowel movements been completely liquid, or have you seen any dark blood?",
-      "dispatchToSpeakStartedMs": 15.82,
+      "dispatchToSpeakStartedMs": 1,
       "speakDurationSec": 6,
-      "turnTtfaEstimateMs": 573.82,
+      "turnTtfaEstimateMs": 559,
       "kokoroCpuBaselineTtfaMs": 2050
     },
     {
@@ -242,9 +242,9 @@
       "category": "emergency_directive",
       "wordCount": 13,
       "text": "Are you also experiencing any visual changes like spots, flashes, or blurry vision?",
-      "dispatchToSpeakStartedMs": 1.22,
+      "dispatchToSpeakStartedMs": 15.91,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 559.22,
+      "turnTtfaEstimateMs": 573.91,
       "kokoroCpuBaselineTtfaMs": 2022
     },
     {
@@ -253,9 +253,9 @@
       "category": "clarification",
       "wordCount": 14,
       "text": "Is she waking up easily when you speak, or does she seem abnormally drowsy?",
-      "dispatchToSpeakStartedMs": 15.77,
+      "dispatchToSpeakStartedMs": 16.12,
       "speakDurationSec": 6,
-      "turnTtfaEstimateMs": 573.77,
+      "turnTtfaEstimateMs": 574.12,
       "kokoroCpuBaselineTtfaMs": 2050
     },
     {
@@ -264,9 +264,9 @@
       "category": "triage_question",
       "wordCount": 15,
       "text": "When you press a clear glass firmly against the rash, does the redness fade away?",
-      "dispatchToSpeakStartedMs": 1,
+      "dispatchToSpeakStartedMs": 16.1,
       "speakDurationSec": 6.43,
-      "turnTtfaEstimateMs": 559,
+      "turnTtfaEstimateMs": 574.1,
       "kokoroCpuBaselineTtfaMs": 2078
     },
     {
@@ -275,9 +275,9 @@
       "category": "acknowledgment",
       "wordCount": 13,
       "text": "That is an unusual symptom. How long has this buzzing sensation been occurring?",
-      "dispatchToSpeakStartedMs": 16.12,
+      "dispatchToSpeakStartedMs": 16.21,
       "speakDurationSec": 5.57,
-      "turnTtfaEstimateMs": 574.12,
+      "turnTtfaEstimateMs": 574.21,
       "kokoroCpuBaselineTtfaMs": 2022
     }
   ]
