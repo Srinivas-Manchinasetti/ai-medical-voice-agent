@@ -4,8 +4,8 @@
   "activeProvider": "groq",
   "activeModel": "qwen/qwen3.8-27b",
   "endpoint": "https://api.groq.com/openai/v1",
-  "startTime": "2026-10-10T10:10:20.946Z",
-  "endTime": "2026-10-10T10:14:30.841Z",
+  "startTime": "2026-10-10T10:32:46.165Z",
+  "endTime": "2026-10-10T10:36:54.857Z",
   "totalChecks": 48,
   "passedChecks": 48,
   "failedChecks": 0,
@@ -19,71 +19,71 @@
         {
           "turnNumber": 1,
           "utterance": "My fingers turn white and numb in cold air, then throb when warming up.",
-          "doctorReply": "Thank you for sharing that. Do you notice any color changes in your toes or other parts of your body when exposed to cold?",
+          "doctorReply": "Thank you for sharing that. Do you notice any color changes in your toes or hands besides the fingers?",
           "conversationalAction": "INQUIRE",
           "understoodContext": "Patient reports fingers turning white and numb in cold, followed by throbbing upon warming.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 926,
+            "latencyMs": 700,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "575081d5aaa690a76106a2908a86fdaa9a3981fb042bfad173b128b2f2d59816",
-            "timestamp": "2026-10-10T10:10:42.112Z"
+            "telemetryIntegrityHash": "38e22b97802f5c626678c93305e6505a541d374872202ec06b8398f4ba9aad35",
+            "timestamp": "2026-10-10T10:33:06.993Z"
           },
           "hmacVerified": true,
           "knownFacts": [
             "Patient Age: 31 years",
             "Reported: transient weakness and numbness",
-            "Fingers turn white in cold: present",
+            "Fingers turning white in cold: present",
             "Numbness in fingers in cold: present",
             "Throbbing pain upon warming: present"
           ],
           "confirmedFacts": [
-            "Fingers turn white in cold: present",
+            "Fingers turning white in cold: present",
             "Numbness in fingers in cold: present",
             "Throbbing pain upon warming: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:10:42.112Z",
-          "latencyMs": 926
+          "timestamp": "2026-10-10T10:33:06.993Z",
+          "latencyMs": 700
         },
         {
           "turnNumber": 2,
           "utterance": "It lasts twenty minutes, and my toes also turn blue.",
-          "doctorReply": "Thank you. Do you experience these color changes in both feet, or just one?",
+          "doctorReply": "Thank you. Do you experience any skin changes, such as ulcers or color changes, in these areas?",
           "conversationalAction": "INQUIRE",
-          "understoodContext": "Patient reports symptoms last 20 minutes and toes turn blue.",
+          "understoodContext": "Symptoms last 20 minutes and involve toes turning blue.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 542,
+            "latencyMs": 658,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "8ab035a6298ea186e960466cb87d8a19f8902f2db18c43b161e5457bbc4816c5",
-            "timestamp": "2026-10-10T10:11:02.775Z"
+            "telemetryIntegrityHash": "29b9ef537072d0f55a0029ade321f50c5872448d02719eb56e6fdf62c1ab926e",
+            "timestamp": "2026-10-10T10:33:27.704Z"
           },
           "hmacVerified": true,
           "knownFacts": [
             "Patient Age: 31 years",
             "Reported: transient weakness and numbness",
-            "Fingers turn white in cold: present",
+            "Fingers turning white in cold: present",
             "Numbness in fingers in cold: present",
             "Throbbing pain upon warming: present",
             "ONSET: twenty minutes",
             "symptom_duration: present",
-            "toes_turn_blue: present"
+            "toes_turning_blue: present"
           ],
           "confirmedFacts": [
-            "Fingers turn white in cold: present",
+            "Fingers turning white in cold: present",
             "Numbness in fingers in cold: present",
             "Throbbing pain upon warming: present",
             "symptom_duration: present",
-            "toes_turn_blue: present"
+            "toes_turning_blue: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:11:02.775Z",
-          "latencyMs": 542
+          "timestamp": "2026-10-10T10:33:27.704Z",
+          "latencyMs": 658
         }
       ],
       "checks": [
@@ -152,17 +152,17 @@
         {
           "turnNumber": 1,
           "utterance": "I have burning stomach pain since yesterday, blurry vision, and my right ankle is swollen.",
-          "doctorReply": "I'm concerned about the blurry vision. Do you have any eye pain, redness, or nausea?",
+          "doctorReply": "I'm concerned about the blurry vision. Do you have any eye pain or nausea right now?",
           "conversationalAction": "INQUIRE",
           "understoodContext": "Patient reports burning stomach pain since yesterday, blurry vision, and right ankle swelling.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 706,
+            "latencyMs": 737,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "4dbf18fe186289c540c53bd29c7dd089618fa7a92a7bc9588e4edc987dce0363",
-            "timestamp": "2026-10-10T10:11:23.590Z"
+            "telemetryIntegrityHash": "4701ea51702f9c501f71bce3b5aacedc4f747ef7825fc511bc51e4980b390a75",
+            "timestamp": "2026-10-10T10:33:48.488Z"
           },
           "hmacVerified": true,
           "knownFacts": [
@@ -179,23 +179,23 @@
             "right ankle swelling: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:11:23.590Z",
-          "latencyMs": 706
+          "timestamp": "2026-10-10T10:33:48.488Z",
+          "latencyMs": 737
         },
         {
           "turnNumber": 2,
           "utterance": "The stomach burning got sharper after tea, while my eyes and ankle feel the same.",
-          "doctorReply": "I see the tea worsened the burning. Do you have any nausea or vomiting with this pain?",
+          "doctorReply": "I see the tea worsened the burning. Do you experience any nausea or vomiting along with this stomach pain?",
           "conversationalAction": "INQUIRE",
-          "understoodContext": "Patient reports intensified stomach burning after tea, with stable blurry vision and right ankle swelling.",
+          "understoodContext": "Patient reports increased sharpness of stomach burning after tea consumption, with stable blurry vision and right ankle swelling.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 946,
+            "latencyMs": 846,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "6d0a6897efb46959f5a0439206f2156d96dd32893db2205b1c8443aa9fea5e2c",
-            "timestamp": "2026-10-10T10:11:44.649Z"
+            "telemetryIntegrityHash": "797d24ee76105d42c13d1e37e7dc38e7b3aa812ff0da5e8dede34482f8bdeffb",
+            "timestamp": "2026-10-10T10:34:09.377Z"
           },
           "hmacVerified": true,
           "knownFacts": [
@@ -204,16 +204,18 @@
             "ONSET: yesterday",
             "burning stomach pain: present",
             "blurry vision: present",
-            "right ankle swelling: present"
+            "right ankle swelling: present",
+            "stomach pain exacerbation after tea: present"
           ],
           "confirmedFacts": [
             "burning stomach pain: present",
             "blurry vision: present",
-            "right ankle swelling: present"
+            "right ankle swelling: present",
+            "stomach pain exacerbation after tea: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:11:44.649Z",
-          "latencyMs": 946
+          "timestamp": "2026-10-10T10:34:09.377Z",
+          "latencyMs": 846
         }
       ],
       "checks": [
@@ -270,62 +272,62 @@
         {
           "turnNumber": 1,
           "utterance": "I have a headache that started 2 hours ago.",
-          "doctorReply": "I'm sorry to hear that. Is the pain throbbing, or does it feel more like a steady pressure?",
+          "doctorReply": "I'm sorry to hear that. Can you describe the pain's location and intensity?",
           "conversationalAction": "INQUIRE",
-          "understoodContext": "Patient reports a headache starting 2 hours ago.",
+          "understoodContext": "Patient reports a headache that began approximately 2 hours ago.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 516,
+            "latencyMs": 548,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "851b04150a194e00474a097a9a9c5d4879f998ce6882e5c7a9957881dfd3e7d8",
-            "timestamp": "2026-10-10T10:12:05.236Z"
+            "telemetryIntegrityHash": "171d8f304e397b832dde6567f2600db32addff15da1cf11ec5c8b095aaa5a2aa",
+            "timestamp": "2026-10-10T10:34:29.960Z"
           },
           "hmacVerified": true,
           "knownFacts": [
             "Patient Age: 52 years",
             "Duration: approx. 2 hours",
             "ONSET: 2 hours",
-            "headache: present"
+            "Headache: present"
           ],
           "confirmedFacts": [
-            "headache: present"
+            "Headache: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:12:05.236Z",
-          "latencyMs": 516
+          "timestamp": "2026-10-10T10:34:29.960Z",
+          "latencyMs": 548
         },
         {
           "turnNumber": 2,
           "utterance": "Actually it started yesterday, not 2 hours ago, and it built up gradually.",
-          "doctorReply": "Thank you for clarifying that it started yesterday and built up gradually. Is the pain constant now, or does it come and go?",
-          "conversationalAction": "INQUIRE",
-          "understoodContext": "Patient clarifies headache onset was yesterday, not 2 hours ago, and describes a gradual build-up.",
+          "doctorReply": "Thank you for clarifying. Is the pain constant now, or does it come and go?",
+          "conversationalAction": "ACKNOWLEDGE_CORRECTION",
+          "understoodContext": "Patient corrects onset to yesterday, with gradual build-up of headache.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 552,
+            "latencyMs": 529,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "49e0ba3f9a4a431e6518ed661809a82f0cdc71ac4b30b94fe03228095cd50cf5",
-            "timestamp": "2026-10-10T10:12:25.849Z"
+            "telemetryIntegrityHash": "7c82bd83c34b9e5dc406b22de1b4afd76d939b7140fc61f0e36463915f33b4f6",
+            "timestamp": "2026-10-10T10:34:50.535Z"
           },
           "hmacVerified": true,
           "knownFacts": [
             "Patient Age: 52 years",
             "Duration: approx. 2 hours",
-            "headache: present",
+            "Headache: present",
             "ONSET: yesterday",
             "COURSE: gradually worsening",
             "ONSET_TYPE: gradual",
-            "headache_onset: present",
-            "headache_progression: present"
+            "Headache onset: present",
+            "Gradual progression: present"
           ],
           "confirmedFacts": [
-            "headache: present",
-            "headache_onset: present",
-            "headache_progression: present"
+            "Headache: present",
+            "Headache onset: present",
+            "Gradual progression: present"
           ],
           "deniedSymptoms": [],
           "patientCorrections": [
@@ -334,8 +336,8 @@
               "value": "yesterday"
             }
           ],
-          "timestamp": "2026-10-10T10:12:25.849Z",
-          "latencyMs": 552
+          "timestamp": "2026-10-10T10:34:50.535Z",
+          "latencyMs": 529
         }
       ],
       "checks": [
@@ -392,17 +394,17 @@
         {
           "turnNumber": 1,
           "utterance": "My 74-year-old mother is dizzy since noon, and says the room is spinning.",
-          "doctorReply": "I'm sorry to hear that. Has she had any trouble walking or standing up safely since this started?",
+          "doctorReply": "I'm sorry to hear that. Has she experienced any nausea, vomiting, or difficulty walking since the spinning started?",
           "conversationalAction": "INQUIRE",
           "understoodContext": "Caller reports mother has experienced dizziness with a spinning sensation (vertigo) since noon.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 639,
+            "latencyMs": 641,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "45cdaaaeae5556f943acbe2ca37746815da56cfad9e4d0c10ca198c083ed66e8",
-            "timestamp": "2026-10-10T10:12:46.601Z"
+            "telemetryIntegrityHash": "6357dc7420d2bcfbabce2f5b2dcee5984b09884763973bdbebce0175f77f89bc",
+            "timestamp": "2026-10-10T10:35:11.224Z"
           },
           "hmacVerified": true,
           "knownFacts": [
@@ -410,30 +412,30 @@
             "Comorbidity: hypertension",
             "CHARACTER: dizziness",
             "vertigo: present",
-            "onset time: present"
+            "dizziness: present"
           ],
           "confirmedFacts": [
             "vertigo: present",
-            "onset time: present"
+            "dizziness: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:12:46.601Z",
-          "latencyMs": 639
+          "timestamp": "2026-10-10T10:35:11.224Z",
+          "latencyMs": 641
         },
         {
           "turnNumber": 2,
           "utterance": "She took her morning amlodipine blood pressure pill, but vomited when trying to sip water.",
-          "doctorReply": "I see. Has she vomited more than once since taking the pill?",
+          "doctorReply": "I see. Has she vomited more than once today, or is this the first time?",
           "conversationalAction": "INQUIRE",
           "understoodContext": "Mother took amlodipine but vomited while sipping water.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 587,
+            "latencyMs": 655,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "98df5023ac356c8653d3c856953dfd2828037dc27154cacefdbdeb9e1efa686c",
-            "timestamp": "2026-10-10T10:13:07.286Z"
+            "telemetryIntegrityHash": "4d2e4d38211e0a003fb2a8adf59980866571af32bc7f8f73c7958ff42bb28000",
+            "timestamp": "2026-10-10T10:35:31.911Z"
           },
           "hmacVerified": true,
           "knownFacts": [
@@ -441,20 +443,20 @@
             "Comorbidity: hypertension",
             "CHARACTER: dizziness",
             "vertigo: present",
-            "onset time: present",
+            "dizziness: present",
             "Associated: Vomiting",
-            "medication_taken: present",
+            "medication_amlodipine: present",
             "vomiting: present"
           ],
           "confirmedFacts": [
             "vertigo: present",
-            "onset time: present",
-            "medication_taken: present",
+            "dizziness: present",
+            "medication_amlodipine: present",
             "vomiting: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:13:07.286Z",
-          "latencyMs": 587
+          "timestamp": "2026-10-10T10:35:31.911Z",
+          "latencyMs": 655
         }
       ],
       "checks": [
@@ -517,17 +519,17 @@
         {
           "turnNumber": 1,
           "utterance": "Doctor saab, subah se pet mein severe cramps hai, loose motions 5 times watery, aur standing up pe chakkar aa raha hai.",
-          "doctorReply": "I understand the cramps and dizziness are concerning. Have you been able to drink any fluids since this started?",
+          "doctorReply": "I'm sorry to hear that. Have you been able to keep any fluids down since the cramps started?",
           "conversationalAction": "INQUIRE",
           "understoodContext": "Patient reports severe abdominal cramps, five watery loose stools since morning, and dizziness upon standing.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 706,
+            "latencyMs": 676,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "6954d484877bd365f8b437dbac571db9e5bb810088d2db937ad609c1686d5e53",
-            "timestamp": "2026-10-10T10:13:28.129Z"
+            "telemetryIntegrityHash": "81f6e37ef31b0669cf3520592ffece3873354ea971fee5ca7619048f33ff7d5f",
+            "timestamp": "2026-10-10T10:35:52.648Z"
           },
           "hmacVerified": true,
           "knownFacts": [
@@ -535,32 +537,32 @@
             "ONSET: intermittent upon standing after sitting",
             "Associated: Diarrhea / loose stools",
             "Abdominal cramps: present",
-            "Loose watery stools: present",
+            "Watery loose stools (5x): present",
             "Dizziness upon standing: present"
           ],
           "confirmedFacts": [
             "Abdominal cramps: present",
-            "Loose watery stools: present",
+            "Watery loose stools (5x): present",
             "Dizziness upon standing: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:13:28.129Z",
-          "latencyMs": 706
+          "timestamp": "2026-10-10T10:35:52.648Z",
+          "latencyMs": 676
         },
         {
           "turnNumber": 2,
           "utterance": "Paani try kiya but vomit ho gaya, aur subah se peshab bilkul nahi hua.",
-          "doctorReply": "No urine since morning with vomiting suggests significant dehydration. Have you felt any severe abdominal pain or noticed any bleeding?",
+          "doctorReply": "No urine since morning is a serious sign of dehydration. Have you felt any confusion or extreme weakness today?",
           "conversationalAction": "INQUIRE",
           "understoodContext": "Patient reports vomiting after attempting to drink water and no urine output since morning.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 1100,
+            "latencyMs": 691,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "e0c49509f1bc3034c40ce4f8d81833a6e36b52b2b2758042538305e5df3c4535",
-            "timestamp": "2026-10-10T10:13:49.334Z"
+            "telemetryIntegrityHash": "3c23c5797f9f4a98f4888bc8ee85cdc1f954f84e1654bd21f3e9200c18bef29f",
+            "timestamp": "2026-10-10T10:36:13.392Z"
           },
           "hmacVerified": true,
           "knownFacts": [
@@ -568,7 +570,7 @@
             "ONSET: intermittent upon standing after sitting",
             "Associated: Diarrhea / loose stools",
             "Abdominal cramps: present",
-            "Loose watery stools: present",
+            "Watery loose stools (5x): present",
             "Dizziness upon standing: present",
             "Associated: Vomiting",
             "Vomiting: present",
@@ -576,14 +578,14 @@
           ],
           "confirmedFacts": [
             "Abdominal cramps: present",
-            "Loose watery stools: present",
+            "Watery loose stools (5x): present",
             "Dizziness upon standing: present",
             "Vomiting: present",
             "Anuria: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:13:49.334Z",
-          "latencyMs": 1100
+          "timestamp": "2026-10-10T10:36:13.392Z",
+          "latencyMs": 691
         }
       ],
       "checks": [
@@ -640,65 +642,61 @@
         {
           "turnNumber": 1,
           "utterance": "I have an odd phantom buzzing vibration in my hip like a cell phone even when I have no phone on me.",
-          "doctorReply": "That is a very specific sensation. How long has this buzzing in your hip been happening?",
+          "doctorReply": "That’s a distinct sensation. How long has this buzzing been happening?",
           "conversationalAction": "INQUIRE",
-          "understoodContext": "Patient reports a phantom buzzing or vibration sensation in the hip, similar to a cell phone, without an actual device present.",
+          "understoodContext": "Patient reports a phantom buzzing vibration sensation in the hip, similar to a cell phone, without an actual phone present.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 662,
+            "latencyMs": 673,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "a266d119babd756499f0903ce6b76825ad4114ac8910fd0547ea25442a2071a8",
-            "timestamp": "2026-10-10T10:14:10.158Z"
+            "telemetryIntegrityHash": "f340a6302521e739cf376e132780ab551ba5dc6754340da0264cd8d5254804d5",
+            "timestamp": "2026-10-10T10:36:34.173Z"
           },
           "hmacVerified": true,
           "knownFacts": [
             "Patient Age: 28 years",
-            "Phantom buzzing/vibration sensation in hip: present",
-            "Presence of actual phone/device: absent"
+            "Phantom buzzing/vibration sensation in hip: present"
           ],
           "confirmedFacts": [
-            "Phantom buzzing/vibration sensation in hip: present",
-            "Presence of actual phone/device: absent"
+            "Phantom buzzing/vibration sensation in hip: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:14:10.158Z",
-          "latencyMs": 662
+          "timestamp": "2026-10-10T10:36:34.173Z",
+          "latencyMs": 673
         },
         {
           "turnNumber": 2,
           "utterance": "It happens when sitting at my desk, lasting a few minutes.",
-          "doctorReply": "Does the sensation stop immediately when you stand up or shift your position?",
+          "doctorReply": "Does the sensation stop completely when you stand up and move around?",
           "conversationalAction": "INQUIRE",
-          "understoodContext": "The phantom buzzing in the hip occurs specifically while sitting at a desk and lasts for a few minutes.",
+          "understoodContext": "Phantom buzzing/vibration in hip occurs while sitting at desk, lasting a few minutes.",
           "telemetry": {
             "provider": "groq",
             "model": "qwen/qwen3.8-27b",
             "liveGenerated": true,
-            "latencyMs": 623,
+            "latencyMs": 648,
             "fallbackUsed": false,
-            "telemetryIntegrityHash": "c93a3d7d8cddf0b47d6b9150945bcce127b65c6e562010fd229a69fd21bec6b9",
-            "timestamp": "2026-10-10T10:14:30.840Z"
+            "telemetryIntegrityHash": "6940b177b611512fb62969caf6c3aa7624f2f2516aefa97da338f2d5819b8c9f",
+            "timestamp": "2026-10-10T10:36:54.857Z"
           },
           "hmacVerified": true,
           "knownFacts": [
             "Patient Age: 28 years",
             "Phantom buzzing/vibration sensation in hip: present",
-            "Presence of actual phone/device: absent",
             "Duration: approx. few minutes",
-            "Trigger: Sitting at desk: present",
-            "Duration: Few minutes: present"
+            "Trigger: sitting at desk: present",
+            "Duration: a few minutes: present"
           ],
           "confirmedFacts": [
             "Phantom buzzing/vibration sensation in hip: present",
-            "Presence of actual phone/device: absent",
-            "Trigger: Sitting at desk: present",
-            "Duration: Few minutes: present"
+            "Trigger: sitting at desk: present",
+            "Duration: a few minutes: present"
           ],
           "deniedSymptoms": [],
-          "timestamp": "2026-10-10T10:14:30.840Z",
-          "latencyMs": 623
+          "timestamp": "2026-10-10T10:36:54.857Z",
+          "latencyMs": 648
         }
       ],
       "checks": [

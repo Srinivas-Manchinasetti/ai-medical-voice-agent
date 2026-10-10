@@ -1,29 +1,63 @@
 {
-  "benchmarkDate": "2026-10-10T10:08:21.568Z",
-  "evaluationMode": "Dedicated Emergency Path Empirical Latency Disentanglement",
+  "benchmarkDate": "2026-10-10T10:30:32.813Z",
+  "evaluationMode": "Dedicated Emergency Path Empirical Latency Disentanglement (3-Stage Taxonomy)",
   "sampleSize": 25,
+  "taxonomy": {
+    "stageA_cacheReady": "Detection to cached audio ready (in-memory retrieval)",
+    "stageB_audioQueued": "Detection to audio queued for playback (buffer ready & callback)",
+    "stageC_playbackStart": "Detection to playback-start event dispatched to client audio device",
+    "physicalAcousticAudible": "Physical speaker acoustic wave emission (NOT INDEPENDENTLY DEMONSTRATED without hardware loopback fixture)"
+  },
   "latencyMetrics": {
-    "detectionToAudio": {
+    "stageA_detectionToCacheReady": {
       "min": 0,
-      "max": 0,
-      "mean": 0,
+      "max": 2,
+      "mean": 0.08,
+      "p50": 0,
+      "p90": 0,
+      "p95": 0
+    },
+    "stageB_detectionToQueued": {
+      "min": 0,
+      "max": 2,
+      "mean": 0.08,
+      "p50": 0,
+      "p90": 0,
+      "p95": 0
+    },
+    "stageC_detectionToPlaybackStart": {
+      "min": 0,
+      "max": 2,
+      "mean": 0.08,
       "p50": 0,
       "p90": 0,
       "p95": 0
     },
     "speechEndToAudio": {
       "min": 0,
-      "max": 0,
-      "mean": 0,
+      "max": 2,
+      "mean": 0.08,
+      "p50": 0,
+      "p90": 0,
+      "p95": 0
+    },
+    "detectionToAudio": {
+      "min": 0,
+      "max": 2,
+      "mean": 0.08,
       "p50": 0,
       "p90": 0,
       "p95": 0
     }
   },
+  "physicalAcousticAudibleStatus": "NOT INDEPENDENTLY DEMONSTRATED — Pending external acoustic loopback hardware measurement fixture",
   "targets": {
-    "emergencyTargetP95Ms": 400,
-    "detectionToAudioP95AchievedMs": 0,
-    "targetMet": true,
+    "emergencySoftwareBudgetP95Ms": 400,
+    "detectionToCacheReadyP95Ms": 0,
+    "detectionToQueuedP95Ms": 0,
+    "detectionToPlaybackStartP95Ms": 0,
+    "softwareLatencyTargetMet": true,
+    "physicalAudibleTargetDemonstrated": false,
     "zeroFalseAmbulanceClaimsVerified": true,
     "audioBufferIntegrityVerified": true
   },
@@ -34,15 +68,19 @@
       "category": "Cardiovascular",
       "firedRule": "chest_pain_with_red_flags",
       "targetSubject": "self",
-      "detectionToAudioMs": 0,
-      "speechEndToAudioMs": 0,
-      "totalTurnMs": 3,
+      "detectionToCacheReadyMs": 2,
+      "detectionToQueuedMs": 2,
+      "detectionToPlaybackStartMs": 2,
+      "detectionToAudioMs": 2,
+      "speechEndToAudioMs": 2,
+      "totalTurnMs": 2,
       "emergencyPreempted": true,
       "emergencyDirectivePlayed": true,
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-002",
@@ -50,15 +88,19 @@
       "category": "Immunology / Airway",
       "firedRule": "anaphylaxis",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
-      "totalTurnMs": 3,
+      "totalTurnMs": 2,
       "emergencyPreempted": true,
       "emergencyDirectivePlayed": true,
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-003",
@@ -66,6 +108,9 @@
       "category": "Neurology",
       "firedRule": "stroke_symptoms",
       "targetSubject": "mother",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -74,7 +119,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-004",
@@ -82,6 +128,9 @@
       "category": "Trauma / Vascular",
       "firedRule": "severe_hemorrhage",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -90,7 +139,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-005",
@@ -98,15 +148,19 @@
       "category": "Pulmonology",
       "firedRule": "severe_respiratory_distress",
       "targetSubject": "third_party",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
-      "totalTurnMs": 0,
+      "totalTurnMs": 1,
       "emergencyPreempted": true,
       "emergencyDirectivePlayed": true,
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-006",
@@ -114,6 +168,9 @@
       "category": "Resuscitation",
       "firedRule": "unresponsive_patient",
       "targetSubject": "third_party",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -122,7 +179,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-007",
@@ -130,6 +188,9 @@
       "category": "Pediatric Emergency",
       "firedRule": "neonatal_fever",
       "targetSubject": "child",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -138,7 +199,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-008",
@@ -146,6 +208,9 @@
       "category": "Neurology",
       "firedRule": "continuous_seizure",
       "targetSubject": "third_party",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 0,
@@ -154,7 +219,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-009",
@@ -162,6 +228,9 @@
       "category": "Cardiovascular",
       "firedRule": "chest_pain_severe",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -170,7 +239,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-010",
@@ -178,6 +248,9 @@
       "category": "Gastroenterology",
       "firedRule": "hematemesis",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 2,
@@ -186,7 +259,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-011",
@@ -194,6 +268,9 @@
       "category": "Toxicology / Envenomation",
       "firedRule": "envenomation",
       "targetSubject": "child",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -202,7 +279,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-012",
@@ -210,6 +288,9 @@
       "category": "Toxicology",
       "firedRule": "toxic_ingestion",
       "targetSubject": "third_party",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -218,7 +299,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-013",
@@ -226,6 +308,9 @@
       "category": "Obstetrics",
       "firedRule": "preeclampsia",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 2,
@@ -234,7 +319,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-014",
@@ -242,6 +328,9 @@
       "category": "Cardiovascular (US)",
       "firedRule": "chest_pain_with_red_flags",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -250,7 +339,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-015",
@@ -258,6 +348,9 @@
       "category": "Pulmonology",
       "firedRule": "refractory_bronchospasm",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -266,7 +359,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-016",
@@ -274,6 +368,9 @@
       "category": "Neurology",
       "firedRule": "slurred_speech_stroke",
       "targetSubject": "third_party",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 0,
@@ -282,7 +379,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-017",
@@ -290,6 +388,9 @@
       "category": "Cardiovascular",
       "firedRule": "persistent_chest_pressure",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -298,7 +399,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-018",
@@ -306,15 +408,19 @@
       "category": "Cardiovascular / Endocrine",
       "firedRule": "diabetic_atypical_acs",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
-      "totalTurnMs": 2,
+      "totalTurnMs": 1,
       "emergencyPreempted": true,
       "emergencyDirectivePlayed": true,
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-019",
@@ -322,6 +428,9 @@
       "category": "Pediatric Emergency",
       "firedRule": "infant_fever",
       "targetSubject": "child",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -330,7 +439,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-020",
@@ -338,6 +448,9 @@
       "category": "Cardiovascular",
       "firedRule": "syncope_cardiac",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -346,7 +459,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-021",
@@ -354,6 +468,9 @@
       "category": "Neurology",
       "firedRule": "facial_droop",
       "targetSubject": "third_party",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -362,7 +479,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-022",
@@ -370,6 +488,9 @@
       "category": "Multilingual Respiratory",
       "firedRule": "code_mixed_respiratory",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -378,7 +499,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-023",
@@ -386,6 +508,9 @@
       "category": "Multilingual Respiratory",
       "firedRule": "telugu_respiratory",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 0,
@@ -394,7 +519,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-024",
@@ -402,6 +528,9 @@
       "category": "Psychiatric Emergency",
       "firedRule": "suicide_crisis",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 1,
@@ -410,7 +539,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     },
     {
       "scenarioId": "EM-025",
@@ -418,6 +548,9 @@
       "category": "Cardiovascular",
       "firedRule": "acute_coronary_respiratory",
       "targetSubject": "self",
+      "detectionToCacheReadyMs": 0,
+      "detectionToQueuedMs": 0,
+      "detectionToPlaybackStartMs": 0,
       "detectionToAudioMs": 0,
       "speechEndToAudioMs": 0,
       "totalTurnMs": 0,
@@ -426,7 +559,8 @@
       "hasEmergencyNumbers": true,
       "claimsAmbulanceDispatched": false,
       "cachedPromptUsed": true,
-      "audioBufferValid": true
+      "audioBufferValid": true,
+      "acousticAudibleStatus": "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT"
     }
   ]
 }

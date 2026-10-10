@@ -38,6 +38,9 @@ export interface StageTimestamps {
   t_emergency_screen_start?: number;
   t_emergency_screen_end?: number;
   t_emergency_triggered?: number;
+  t_emergency_cache_ready?: number;     // Checkpoint A: Pre-compiled WAV retrieved from in-memory cache
+  t_emergency_queued?: number;          // Checkpoint B: Non-urgent audio purged & emergency buffer enqueued
+  t_emergency_playback_start?: number;  // Checkpoint C: Playback-start event dispatched to client audio device
   t_llm_start?: number;
   t_llm_first_token?: number;
   t_chunk0_buffered?: number;
@@ -51,8 +54,12 @@ export interface PipelineStageLatencies {
   vadSpeechDurationMs: number;
   asrDurationMs: number;
   emergencyScreenMs: number;
-  emergencyDetectionToAudioMs?: number; // Dedicated empirical measurement: red flag detection to audible prompt delivery
-  speechEndToEmergencyAudioMs?: number; // Dedicated empirical measurement: speech offset to audible prompt delivery
+  emergencyDetectionToCacheReadyMs?: number;   // Stage A: Detection to cached audio buffer ready
+  emergencyDetectionToQueuedMs?: number;       // Stage B: Detection to queue dispatch & chunk-ready callback
+  emergencyDetectionToPlaybackStartMs?: number;// Stage C: Detection to audio device playback-start dispatch
+  emergencyDetectionToAudioMs?: number;        // Backward compatible alias (matches Stage B queue dispatch)
+  speechEndToEmergencyAudioMs?: number;        // Speech offset to queue dispatch
+  emergencyAcousticAudibleStatus?: string;     // Explicit status of physical acoustic playback measurement
   llmFirstTokenMs: number;
   chunk0BufferingMs: number;
   chunk0ValidationMs: number;
@@ -99,17 +106,29 @@ export interface StreamPipelineOptions {
   ttsSynthesizer?: (text: string, doctorId?: string) => Promise<SynthesisResult>;
 }
 
+export interface AudioPlayItem {
+  id: string;
+  buffer: Buffer;
+  durationSec: number;
+  text: string;
+}
+
 /**
  * Interruptible Audio Playback Queue
  */
 export class AudioPlaybackQueue {
-  private queue: Array<{ id: string; buffer: Buffer; durationSec: number; text: string }> = [];
+  private queue: AudioPlayItem[] = [];
   private isInterrupted: boolean = false;
   private interruptReason: string | null = null;
   private playedBuffers: Buffer[] = [];
   private totalPlayedDurationSec: number = 0;
+  private onPlaybackStartCallback?: (item: AudioPlayItem, timestamp: number) => void;
 
-  public enqueue(item: { id: string; buffer: Buffer; durationSec: number; text: string }): boolean {
+  public setOnPlaybackStart(callback: (item: AudioPlayItem, timestamp: number) => void): void {
+    this.onPlaybackStartCallback = callback;
+  }
+
+  public enqueue(item: AudioPlayItem): boolean {
     if (this.isInterrupted) {
       return false; // Reject new audio if already interrupted
     }
@@ -145,15 +164,23 @@ export class AudioPlaybackQueue {
     };
   }
 
-  public simulatePlayAll(): { totalDurationSec: number; playedCount: number } {
+  public simulatePlayAll(): { totalDurationSec: number; playedCount: number; firstPlaybackStartMs?: number } {
     let played = 0;
+    let firstPlaybackStartMs: number | undefined;
     while (this.queue.length > 0 && !this.isInterrupted) {
       const item = this.queue.shift()!;
+      const now = performance.now();
+      if (played === 0) {
+        firstPlaybackStartMs = now;
+        if (this.onPlaybackStartCallback) {
+          this.onPlaybackStartCallback(item, now);
+        }
+      }
       this.playedBuffers.push(item.buffer);
       this.totalPlayedDurationSec += item.durationSec;
       played++;
     }
-    return { totalDurationSec: this.totalPlayedDurationSec, playedCount: played };
+    return { totalDurationSec: this.totalPlayedDurationSec, playedCount: played, firstPlaybackStartMs };
   }
 }
 
@@ -349,10 +376,10 @@ export class StreamingVoicePipeline {
         };
       }
 
-      const tEmergencyTtsEnd = performance.now();
-      timestamps.t_chunk0_tts_end = tEmergencyTtsEnd;
-      timestamps.t_turn_complete = tEmergencyTtsEnd;
+      // Checkpoint A: Pre-compiled WAV retrieved from in-memory cache
+      timestamps.t_emergency_cache_ready = performance.now();
 
+      // Checkpoint B: Non-urgent audio purged & emergency buffer enqueued
       this.playbackQueue.reset();
       this.playbackQueue.enqueue({
         id: "emergency-directive-0",
@@ -369,28 +396,42 @@ export class StreamingVoicePipeline {
           isFirst: true,
         });
       }
+      timestamps.t_emergency_queued = performance.now();
 
-      const totalPlayback = this.playbackQueue.simulatePlayAll();
+      // Checkpoint C: Playback-start event dispatched to client audio device
+      const playResult = this.playbackQueue.simulatePlayAll();
+      timestamps.t_emergency_playback_start = playResult.firstPlaybackStartMs ?? performance.now();
+
+      const tEmergencyTtsEnd = timestamps.t_emergency_cache_ready;
+      timestamps.t_chunk0_tts_end = tEmergencyTtsEnd;
+      timestamps.t_turn_complete = timestamps.t_emergency_playback_start;
 
       const emDetectionTime = timestamps.t_emergency_triggered || timestamps.t_emergency_screen_end || t0;
       const speechEndTime = timestamps.t_vad_speech_end || t0;
-      const detectionToAudioMs = Math.round(tEmergencyTtsEnd - emDetectionTime);
-      const speechEndToAudioMs = Math.round(tEmergencyTtsEnd - speechEndTime);
+
+      const detectionToCacheReadyMs = Math.round(timestamps.t_emergency_cache_ready - emDetectionTime);
+      const detectionToQueuedMs = Math.round(timestamps.t_emergency_queued - emDetectionTime);
+      const detectionToPlaybackStartMs = Math.round(timestamps.t_emergency_playback_start - emDetectionTime);
+      const speechEndToAudioMs = Math.round(timestamps.t_emergency_queued - speechEndTime);
 
       const latencies: PipelineStageLatencies = {
         vadSpeechDurationMs: Math.round((timestamps.t_vad_speech_end || t0) - (timestamps.t_vad_speech_start || t0)),
         asrDurationMs: Math.round((timestamps.t_asr_final || t0) - (timestamps.t_vad_speech_start || t0)),
         emergencyScreenMs: Math.round(emDetectionTime - (timestamps.t_vad_speech_start || t0)),
-        emergencyDetectionToAudioMs: Math.max(0, detectionToAudioMs),
+        emergencyDetectionToCacheReadyMs: Math.max(0, detectionToCacheReadyMs),
+        emergencyDetectionToQueuedMs: Math.max(0, detectionToQueuedMs),
+        emergencyDetectionToPlaybackStartMs: Math.max(0, detectionToPlaybackStartMs),
+        emergencyDetectionToAudioMs: Math.max(0, detectionToQueuedMs),
         speechEndToEmergencyAudioMs: Math.max(0, speechEndToAudioMs),
+        emergencyAcousticAudibleStatus: "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT",
         llmFirstTokenMs: 0, // Bypassed
         chunk0BufferingMs: 0,
         chunk0ValidationMs: 0,
-        chunk0TtsMs: Math.round(tEmergencyTtsEnd - tEmergencyTtsStart),
-        totalTtsMs: Math.round(tEmergencyTtsEnd - tEmergencyTtsStart),
-        ttfaMs: Math.round(tEmergencyTtsEnd - t0),
-        fullTurnMs: Math.round(tEmergencyTtsEnd - t0),
-        audioPlaybackDurationSec: totalPlayback.totalDurationSec,
+        chunk0TtsMs: Math.round(timestamps.t_emergency_cache_ready - tEmergencyTtsStart),
+        totalTtsMs: Math.round(timestamps.t_emergency_cache_ready - tEmergencyTtsStart),
+        ttfaMs: Math.round(timestamps.t_emergency_playback_start - t0),
+        fullTurnMs: Math.round(timestamps.t_emergency_playback_start - t0),
+        audioPlaybackDurationSec: playResult.totalDurationSec,
       };
 
       return {
