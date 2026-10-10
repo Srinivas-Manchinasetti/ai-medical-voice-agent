@@ -353,20 +353,28 @@ $synth.Dispose()
   };
 
   console.log("\n==============================================================================");
-  console.log(`  SYSTEM VOICE HARDWARE & COMPLETE TURN LATENCY SUMMARY (N = ${n})`);
+  console.log(`  SYSTEM VOICE HARDWARE & MODELED TURN TIMING SUMMARY (N = ${n})`);
   console.log("==============================================================================");
   console.log("  Hardware Audio Device Playback-Start (SpeakStarted Event):");
   console.log(`    Min: ${speechStartedStats.min} ms | P50: ${speechStartedStats.p50} ms | P90: ${speechStartedStats.p90} ms | P95: ${speechStartedStats.p95} ms | Max: ${speechStartedStats.max} ms | Mean: ${speechStartedStats.mean} ms`);
-  console.log("    Status: VERIFIED ON HOST (Actual Windows audio subsystem start event)");
+  console.log("    Status: VERIFIED ON HOST (Actual Windows SAPI audio subsystem start event)");
 
-  console.log("\n  End-to-End Time to First Audio (TTFA): Tier 1 (System Voice) vs Tier 2 (Kokoro CPU):");
-  console.log(`    Tier 1 (System Voice) P50: ${systemVoiceTtfaStats.p50} ms | P95: ${systemVoiceTtfaStats.p95} ms [Target < 1,200ms: MET ✓]`);
-  console.log(`    Tier 2 (Kokoro CPU)   P50: ${kokoroCpuTtfaStats.p50} ms | P95: ${kokoroCpuTtfaStats.p95} ms [Target < 1,200ms: MISSED ✗]`);
+  console.log("\n  Modeled Time to First Audio (TTFA Projection): Tier 1 (System Voice) vs Tier 2 (Kokoro CPU):");
+  console.log(`    Tier 1 (System Voice Modeled Projection) P50: ${systemVoiceTtfaStats.p50} ms | P95: ${systemVoiceTtfaStats.p95} ms [Modeled Projection < 1,200ms: YES]`);
+  console.log(`    Tier 2 (Kokoro CPU Baseline Projection)  P50: ${kokoroCpuTtfaStats.p50} ms | P95: ${kokoroCpuTtfaStats.p95} ms [Modeled Projection < 1,200ms: NO]`);
+
+  console.log("\n  CRITICAL LATENCY BOUNDARY NOTICE:");
+  console.log("    The 575.21ms P95 figure is a MODELED PROJECTION combining an assumed 558ms upstream");
+  console.log("    budget with the measured 17.21ms Windows SpeakStarted event. It is NOT empirical proof");
+  console.log("    that the full live audio conversation meets the 1.2s target. The actual full streaming");
+  console.log("    audio benchmark (tests/verification/latency_benchmark.ts) measured live TTFA P95 of 6.52s");
+  console.log("    and Full-Turn P95 of 10.01s (with Kokoro CPU). The full-pipeline conversational latency");
+  console.log("    gate remains OPEN until end-to-end live testing with the system-voice path is completed.");
 
   console.log("\n  Key Empirical Insights:");
-  console.log(`    1. Host OS / Browser System Voice starts physical acoustic playback in ~30–45ms.`);
-  console.log(`    2. With System Voice, complete turn TTFA P95 is ~${systemVoiceTtfaStats.p95}ms, hitting the < 1.2s target without a GPU.`);
-  console.log(`    3. Kokoro on CPU adds ~1,200–2,100ms of neural synthesis, pushing TTFA P95 to ~${kokoroCpuTtfaStats.p95}ms.`);
+  console.log(`    1. Host OS speech synthesis dispatch overhead is minimal (P95: ${speechStartedStats.p95}ms, Mean: ${speechStartedStats.mean}ms).`);
+  console.log(`    2. Modeled projection indicates Tier 1 could enable conversational latency (<1.2s) if upstream ASR+LLM stays within budget.`);
+  console.log(`    3. Kokoro on CPU adds substantial neural synthesis time (~1.2s–2.1s), driving measured live TTFA to 6.52s.`);
   console.log(`    4. Host machine lacks native 'en-IN' SAPI voice by default (has en-US, en-GB, de-DE), confirming browser-dependent voice variation.`);
 
   // Write out artifact
@@ -380,15 +388,15 @@ $synth.Dispose()
     sampleSize: n,
     latencyMetrics: {
       hardwarePlaybackStartMs: speechStartedStats,
-      turnTtfaSystemVoiceMs: systemVoiceTtfaStats,
-      turnTtfaKokoroCpuMs: kokoroCpuTtfaStats,
+      modeledTurnTtfaSystemVoiceMs: systemVoiceTtfaStats,
+      modeledTurnTtfaKokoroCpuMs: kokoroCpuTtfaStats,
     },
     targets: {
       ttfaTargetMs: 1200,
-      systemVoiceP95Ms: systemVoiceTtfaStats.p95,
-      systemVoiceTargetMet: systemVoiceTtfaStats.p95 < 1200,
-      kokoroCpuP95Ms: kokoroCpuTtfaStats.p95,
-      kokoroCpuTargetMet: kokoroCpuTtfaStats.p95 < 1200,
+      hardwarePlaybackStartVerified: true,
+      modeledTurnTtfaProjectedP95Ms: systemVoiceTtfaStats.p95,
+      fullPipelineConversationalTtfaVerified: false,
+      fullPipelineLatencyGate: "OPEN (UNPROVEN / MISSED — Live streaming benchmark reports TTFA P95 6.52s, Full-turn P95 10.01s with Kokoro CPU)",
     },
     results,
   };

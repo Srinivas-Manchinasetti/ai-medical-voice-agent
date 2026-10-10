@@ -445,21 +445,22 @@ Phase 2 resolves the safety hazard of streaming unvalidated LLM output to the pa
 - **Artifact:** `tests/verification/system_voice_benchmark_results.json` from `tests/verification/system_voice_benchmark.ts` (`npm run test:system-voice`).
 - **Installed Host Voices:** `Microsoft David Desktop` (en-US Male), `Microsoft Hazel Desktop` (en-GB Female), `Microsoft Hedda Desktop` (de-DE Female), `Microsoft Zira Desktop` (en-US Female). Note: Host OS lacks native `en-IN` voice by default.
 - **Hardware Device Playback-Start (`SpeakStarted` Event):**
-  - Min: $1.00\text{ ms}$ | P50: $2.52\text{ ms}$ | P90: $16.41\text{ ms}$ | P95: $17.21\text{ ms}$ | Max: $31.37\text{ ms}$ | Mean: $8.57\text{ ms}$.
+  - Min: $2.19\text{ ms}$ | P50: $15.82\text{ ms}$ | P90: $16.18\text{ ms}$ | P95: $16.21\text{ ms}$ | Max: $16.34\text{ ms}$ | Mean: $15.11\text{ ms}$.
   - Verified on host Windows audio subsystem.
-- **End-to-End Time to First Audio (TTFA) Comparison:**
-  - **Tier 1 (System Voice on Windows):** P50: **$560.52\text{ ms}$** | P95: **$575.21\text{ ms}$** (**Target $< 1,200\text{ ms}$ MET ✓**).
-  - **Tier 2 (Kokoro on CPU):** P50: **$2,022.0\text{ ms}$** | P95: **$2,197.0\text{ ms}$** (**Target $< 1,200\text{ ms}$ MISSED ✗**).
+- **Modeled Time to First Audio (TTFA) Projection vs. Live Full-Pipeline Reality:**
+  - **Tier 1 (System Voice Modeled Projection):** P50: **$573.83\text{ ms}$** | P95: **$574.21\text{ ms}$**.
+  - **CRITICAL LATENCY BOUNDARY NOTICE:** The $\sim 574\text{ ms}$ figure is a *modeled projection* combining an assumed $558\text{ ms}$ upstream budget with the measured $16.21\text{ ms}$ Windows `SpeakStarted` event. It is **NOT** empirical proof that the live end-to-end audio conversation meets the $1.2\text{ s}$ target.
+  - **Live Full-Pipeline Conversational Benchmark:** From `tests/verification/latency_benchmark.ts`, live audio-to-audio TTFA P95 remains **$6.52\text{ s}$** and Full-Turn completion P95 remains **$10.01\text{ s}$** (with Kokoro CPU). The full-pipeline conversational latency gate remains **OPEN** until live end-to-end testing with the system-voice path is completed.
 
 ---
 
 ## 10. Phase 2 Master Verification Summary
 - **Master Harness:** `tests/verification/verify_phase2_milestones.ts` (`npm run test:phase2`)
 - **Milestone 1 (Streaming PoC):** **PASSED (100%)** — All 6 pipeline stages profile monotonic timestamps live.
-- **Milestone 2 (Benchmark Artifact):** **PASSED (100% verified)** — $N = 20$ runs measured; TTFA P50 $1.61\text{s}$ / P95 $6.52\text{s}$; Full Turn P50 $2.79\text{s}$ / P95 $10.01\text{s}$; CPU bottleneck documented.
+- **Milestone 2 (Benchmark Artifact):** **PASSED (100% verified)** — $N = 20$ runs measured; live TTFA P50 $1.61\text{s}$ / P95 $6.52\text{s}$; Full Turn P50 $2.79\text{s}$ / P95 $10.01\text{s}$; CPU bottleneck documented.
 - **Milestone 3 (Resilience & Interruption):** **PASSED (30/30, 100%)** — Incomplete transcripts, rate limits, TTS errors, aborts, adversarial chunk gating, and mid-stream emergency preemption all pass.
 - **Milestone 4 (Dedicated Emergency Benchmark):** **PASSED (25/25, 100%)** — High-resolution 3-stage software latency verified ($\le 2.95\text{ms}$); acoustic playback status documented honestly.
-- **Dedicated Windows System Voice Benchmark:** **PASSED (20/20, 100%)** — Host OS `SpeakStarted` event verified ($P95 = 17.21\text{ms}$); Tier 1 TTFA ($575.21\text{ms}$) satisfies $< 1.2\text{s}$ target on CPU host.
+- **Dedicated Windows System Voice Benchmark:** **PASSED (20/20, 100%)** — Host OS `SpeakStarted` event verified ($P95 = 16.21\text{ms}$); Tier 1 modeled TTFA projection ($574.21\text{ms}$) demonstrates minimal TTS dispatch overhead, but live conversational latency gate remains open.
 
 ---
 
