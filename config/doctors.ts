@@ -1,4 +1,4 @@
-export type TTSProviderType = "kokoro" | "azure-speech" | "google-tts" | "browser-fallback";
+export type TTSProviderType = "kokoro" | "azure-speech" | "google-tts" | "browser-fallback" | "system-voice";
 
 export interface DoctorVoiceProfile {
   doctorId: string;

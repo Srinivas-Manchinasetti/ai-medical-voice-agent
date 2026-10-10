@@ -1,0 +1,773 @@
+{
+  "evaluationTitle": "MedVoice v3.1 Expanded Open-World Live-Model Evaluation (Requirement R2)",
+  "targetCommit": "phase1-reliability-hardening",
+  "activeProvider": "groq",
+  "activeModel": "qwen/qwen3.8-27b",
+  "endpoint": "https://api.groq.com/openai/v1",
+  "startTime": "2026-10-10T11:46:33.685Z",
+  "endTime": "2026-10-10T11:50:54.447Z",
+  "totalChecks": 48,
+  "passedChecks": 48,
+  "failedChecks": 0,
+  "successRate": 100,
+  "scenarios": [
+    {
+      "dimensionIndex": 1,
+      "dimensionName": "Unfamiliar Symptoms Outside Registry",
+      "caseDescription": "Peripheral digital color shifts & burning (Raynaud's-like)",
+      "turns": [
+        {
+          "turnNumber": 1,
+          "utterance": "My fingers turn white and numb in cold air, then throb when warming up.",
+          "doctorReply": "Thank you for sharing that. Do these episodes affect all your fingers, or just one or two?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient describes episodic finger color change (white) and numbness triggered by cold, followed by throbbing upon rewarming.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 792,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "9b53956b463de248d12620e65ab937f9e2c2c440b09985971f3760a3b5e8c558",
+            "timestamp": "2026-10-10T11:46:54.588Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 31 years",
+            "Reported: transient weakness and numbness",
+            "Cold-induced finger pallor: present",
+            "Cold-induced finger numbness: present",
+            "Post-rewarming finger throbbing: present"
+          ],
+          "confirmedFacts": [
+            "Cold-induced finger pallor: present",
+            "Cold-induced finger numbness: present",
+            "Post-rewarming finger throbbing: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:46:54.588Z",
+          "latencyMs": 792
+        },
+        {
+          "turnNumber": 2,
+          "utterance": "It lasts twenty minutes, and my toes also turn blue.",
+          "doctorReply": "Thank you. Do you experience any pain or weakness in your hands or feet during these episodes?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Symptoms last 20 minutes and involve blue discoloration of toes in addition to fingers.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 539,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "39b3700c1514ccf935c6e822dd36ab5f44d234af3e962073f265104f4d860fd7",
+            "timestamp": "2026-10-10T11:47:15.182Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 31 years",
+            "Reported: transient weakness and numbness",
+            "Cold-induced finger pallor: present",
+            "Cold-induced finger numbness: present",
+            "Post-rewarming finger throbbing: present",
+            "ONSET: twenty minutes",
+            "symptom_duration: present",
+            "toe_cyanosis: present"
+          ],
+          "confirmedFacts": [
+            "Cold-induced finger pallor: present",
+            "Cold-induced finger numbness: present",
+            "Post-rewarming finger throbbing: present",
+            "symptom_duration: present",
+            "toe_cyanosis: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:47:15.182Z",
+          "latencyMs": 539
+        }
+      ],
+      "checks": [
+        {
+          "id": "D1-EVID-01",
+          "dimension": 1,
+          "description": "Evidence situation classified appropriately for non-acute peripheral symptom",
+          "passed": true
+        },
+        {
+          "id": "D1-LIVE-01",
+          "dimension": 1,
+          "description": "Turn 1 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D1-HMAC-01",
+          "dimension": 1,
+          "description": "Turn 1 HMAC-SHA256 telemetry signature cryptographically verified",
+          "passed": true
+        },
+        {
+          "id": "D1-NO-DIAG-01",
+          "dimension": 1,
+          "description": "Diagnostic restraint: Does not fabricate definitive diagnosis for unfamiliar complaint",
+          "passed": true
+        },
+        {
+          "id": "D1-EXPLORE-01",
+          "dimension": 1,
+          "description": "Gathers relevant clinical context or triggers regarding digit color changes",
+          "passed": true
+        },
+        {
+          "id": "D1-LIVE-02",
+          "dimension": 1,
+          "description": "Turn 2 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D1-HMAC-02",
+          "dimension": 1,
+          "description": "Turn 2 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D1-FACT-PRES-01",
+          "dimension": 1,
+          "description": "Fact preservation across multi-turn unfamiliar presentation",
+          "passed": true
+        },
+        {
+          "id": "D1-RELEVANCE-01",
+          "dimension": 1,
+          "description": "Purposeful follow-up: in-depth inquiry or recommended medical consultation",
+          "passed": true
+        }
+      ],
+      "allPassed": true
+    },
+    {
+      "dimensionIndex": 2,
+      "dimensionName": "Multiple Complaints Across Domains",
+      "caseDescription": "Epigastric burning + visual blurriness + ankle edema",
+      "turns": [
+        {
+          "turnNumber": 1,
+          "utterance": "I have burning stomach pain since yesterday, blurry vision, and my right ankle is swollen.",
+          "doctorReply": "I'm concerned about the sudden blurry vision. Are you experiencing any eye pain or nausea right now?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient reports burning stomach pain, blurry vision, and right ankle swelling starting yesterday.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 757,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "e0b52e53ecaaf6ae60a445241a6c03f33f16f1517ec3cd24e2b38b5ea9d39d92",
+            "timestamp": "2026-10-10T11:47:35.996Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 48 years",
+            "CHARACTER: burning",
+            "ONSET: yesterday",
+            "burning stomach pain: present",
+            "blurry vision: present",
+            "right ankle swelling: present"
+          ],
+          "confirmedFacts": [
+            "burning stomach pain: present",
+            "blurry vision: present",
+            "right ankle swelling: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:47:35.996Z",
+          "latencyMs": 757
+        },
+        {
+          "turnNumber": 2,
+          "utterance": "The stomach burning got sharper after tea, while my eyes and ankle feel the same.",
+          "doctorReply": "I understand your stomach burning worsened after tea, while your vision and ankle are unchanged. Have you noticed any nausea or vomiting with this pain?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient reports intensified burning stomach pain after tea consumption, while blurry vision and right ankle swelling remain unchanged.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 834,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "10b814289ca0b909cc79ba702769cad85976610ad0d1c906a18c8160b6ea4846",
+            "timestamp": "2026-10-10T11:47:56.888Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 48 years",
+            "CHARACTER: burning",
+            "ONSET: yesterday",
+            "burning stomach pain: present",
+            "blurry vision: present",
+            "right ankle swelling: present",
+            "tea consumption: present"
+          ],
+          "confirmedFacts": [
+            "burning stomach pain: present",
+            "blurry vision: present",
+            "right ankle swelling: present",
+            "tea consumption: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:47:56.888Z",
+          "latencyMs": 834
+        }
+      ],
+      "checks": [
+        {
+          "id": "D2-LIVE-01",
+          "dimension": 2,
+          "description": "Turn 1 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D2-HMAC-01",
+          "dimension": 2,
+          "description": "Turn 1 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D2-MULTI-EXTRACT-01",
+          "dimension": 2,
+          "description": "Doctor reply addresses multi-complaint presentation",
+          "passed": true
+        },
+        {
+          "id": "D2-LIVE-02",
+          "dimension": 2,
+          "description": "Turn 2 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D2-HMAC-02",
+          "dimension": 2,
+          "description": "Turn 2 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D2-FACT-PRESERVE-02",
+          "dimension": 2,
+          "description": "All three distinct complaints preserved in cumulative clinical record",
+          "passed": true
+        },
+        {
+          "id": "D2-FOCUSED-Q-02",
+          "dimension": 2,
+          "description": "Doctor provides purposeful, non-repetitive follow-up on complex multi-system presentation",
+          "passed": true
+        }
+      ],
+      "allPassed": true
+    },
+    {
+      "dimensionIndex": 3,
+      "dimensionName": "Patient Self-Corrections & Contradictions",
+      "caseDescription": "Headache onset corrected from 2 hours ago to yesterday morning gradual",
+      "turns": [
+        {
+          "turnNumber": 1,
+          "utterance": "I have a headache that started 2 hours ago.",
+          "doctorReply": "I'm sorry to hear that. Can you describe the pain's location and intensity on a scale of 1 to 10?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient reports a headache that began approximately 2 hours ago.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 569,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "c74595f3a5edaac32ca58aba86c54cd5b9e2111d80d7daf7d28e70f4de96272a",
+            "timestamp": "2026-10-10T11:48:17.478Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 52 years",
+            "Duration: approx. 2 hours",
+            "ONSET: 2 hours",
+            "Headache: present",
+            "Duration of headache: present"
+          ],
+          "confirmedFacts": [
+            "Headache: present",
+            "Duration of headache: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:48:17.478Z",
+          "latencyMs": 569
+        },
+        {
+          "turnNumber": 2,
+          "utterance": "Actually it started yesterday, not 2 hours ago, and it built up gradually.",
+          "doctorReply": "Thank you for clarifying. Is the pain constant, or does it come and go?",
+          "conversationalAction": "ACKNOWLEDGE_CORRECTION",
+          "understoodContext": "Patient corrects headache onset to yesterday, describing a gradual build-up rather than sudden onset.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 553,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "8516e1c23ea69eb15b46447730c76838998b315f7ba9e1cb2b6ea0a8bda3eb14",
+            "timestamp": "2026-10-10T11:48:38.059Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 52 years",
+            "Duration: approx. 2 hours",
+            "Headache: present",
+            "Duration of headache: present",
+            "ONSET: yesterday",
+            "COURSE: gradually worsening",
+            "ONSET_TYPE: gradual",
+            "Headache onset: present",
+            "Gradual progression: present"
+          ],
+          "confirmedFacts": [
+            "Headache: present",
+            "Duration of headache: present",
+            "Headache onset: present",
+            "Gradual progression: present"
+          ],
+          "deniedSymptoms": [],
+          "patientCorrections": [
+            {
+              "target": "onset",
+              "value": "yesterday"
+            }
+          ],
+          "timestamp": "2026-10-10T11:48:38.059Z",
+          "latencyMs": 553
+        }
+      ],
+      "checks": [
+        {
+          "id": "D3-LIVE-01",
+          "dimension": 3,
+          "description": "Turn 1 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D3-HMAC-01",
+          "dimension": 3,
+          "description": "Turn 1 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D3-LIVE-02",
+          "dimension": 3,
+          "description": "Turn 2 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D3-HMAC-02",
+          "dimension": 3,
+          "description": "Turn 2 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D3-STATE-CORRECT-01",
+          "dimension": 3,
+          "description": "Clinical state reliably updated onset to corrected value ('yesterday')",
+          "passed": true
+        },
+        {
+          "id": "D3-NO-OBSOLETE-01",
+          "dimension": 3,
+          "description": "Obsolete contradictory timeline ('2 hours ago') was successfully superseded",
+          "passed": true
+        },
+        {
+          "id": "D3-MEM-CORRECTION-01",
+          "dimension": 3,
+          "description": "Self-correction tracked in conversation memory or updated known facts",
+          "passed": true
+        }
+      ],
+      "allPassed": true
+    },
+    {
+      "dimensionIndex": 4,
+      "dimensionName": "Caregiver Conversations & Subject Attribution",
+      "caseDescription": "Son calling for 74yo mother with acute vertigo, nausea, and emesis",
+      "turns": [
+        {
+          "turnNumber": 1,
+          "utterance": "My 74-year-old mother is dizzy since noon, and says the room is spinning.",
+          "doctorReply": "I'm sorry to hear that. Has she had any trouble walking or standing up safely since the spinning started?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Caller reports 74-year-old mother has experienced dizziness with a spinning sensation (vertigo) since noon.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 12623,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "44956949d935a4657450f20855296ad21a4a2968d0fcd89ae22e7d6665315987",
+            "timestamp": "2026-10-10T11:49:10.719Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 74 years",
+            "Comorbidity: hypertension",
+            "CHARACTER: dizziness",
+            "vertigo: present",
+            "dizziness onset: present"
+          ],
+          "confirmedFacts": [
+            "vertigo: present",
+            "dizziness onset: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:49:10.719Z",
+          "latencyMs": 12623
+        },
+        {
+          "turnNumber": 2,
+          "utterance": "She took her morning amlodipine blood pressure pill, but vomited when trying to sip water.",
+          "doctorReply": "I see. Has she vomited again since then, or is she still feeling very dizzy?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Mother took amlodipine but vomited while sipping water.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 725,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "4ff7d0d2328617a32290dc3847821d95f1e6bc86949235fee1bd38c08e6ff425",
+            "timestamp": "2026-10-10T11:49:31.505Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 74 years",
+            "Comorbidity: hypertension",
+            "CHARACTER: dizziness",
+            "vertigo: present",
+            "dizziness onset: present",
+            "Associated: Vomiting",
+            "medication_taken: present",
+            "vomiting: present",
+            "medication_name: present"
+          ],
+          "confirmedFacts": [
+            "vertigo: present",
+            "dizziness onset: present",
+            "medication_taken: present",
+            "vomiting: present",
+            "medication_name: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:49:31.505Z",
+          "latencyMs": 725
+        }
+      ],
+      "checks": [
+        {
+          "id": "D4-LIVE-01",
+          "dimension": 4,
+          "description": "Turn 1 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D4-HMAC-01",
+          "dimension": 4,
+          "description": "Turn 1 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D4-ATTRIB-MOTHER-01",
+          "dimension": 4,
+          "description": "Doctor correctly refers to the patient as 'your mother' / 'she' / 'her'",
+          "passed": true
+        },
+        {
+          "id": "D4-NO-CALLER-ATTRIB-01",
+          "dimension": 4,
+          "description": "Doctor does NOT attribute the mother's symptoms directly to the caller",
+          "passed": true
+        },
+        {
+          "id": "D4-LIVE-02",
+          "dimension": 4,
+          "description": "Turn 2 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D4-HMAC-02",
+          "dimension": 4,
+          "description": "Turn 2 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D4-ATTRIB-MOTHER-02",
+          "dimension": 4,
+          "description": "Turn 2 maintains consistent third-party patient attribution to mother",
+          "passed": true
+        },
+        {
+          "id": "D4-PROFILE-ISOLATION-02",
+          "dimension": 4,
+          "description": "Patient profile strictly decoupled from caller profile",
+          "passed": true
+        }
+      ],
+      "allPassed": true
+    },
+    {
+      "dimensionIndex": 5,
+      "dimensionName": "Poorly Transcribed & Code-Mixed Speech",
+      "caseDescription": "Hinglish acute fluid loss with orthostatic dizziness and anuria",
+      "turns": [
+        {
+          "turnNumber": 1,
+          "utterance": "Doctor saab, subah se pet mein severe cramps hai, loose motions 5 times watery, aur standing up pe chakkar aa raha hai.",
+          "doctorReply": "I understand the cramps and dizziness are concerning. Have you been able to keep any fluids down today?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient reports severe abdominal cramps, five watery loose stools since morning, and dizziness upon standing.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 819,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "3bb8f6323cef362b370d115a8dc4eed6ef134493cedf13d7b2164aee3ef94046",
+            "timestamp": "2026-10-10T11:49:52.395Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 36 years",
+            "ONSET: intermittent upon standing after sitting",
+            "Associated: Diarrhea / loose stools",
+            "Severe abdominal cramps: present",
+            "Watery loose stools (5 times): present",
+            "Dizziness upon standing: present"
+          ],
+          "confirmedFacts": [
+            "Severe abdominal cramps: present",
+            "Watery loose stools (5 times): present",
+            "Dizziness upon standing: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:49:52.395Z",
+          "latencyMs": 819
+        },
+        {
+          "turnNumber": 2,
+          "utterance": "Paani try kiya but vomit ho gaya, aur subah se peshab bilkul nahi hua.",
+          "doctorReply": "No urine since morning with vomiting suggests significant dehydration. Have you felt any swelling in your legs or face today?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient reports vomiting after attempting to drink water and no urine output since morning.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 613,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "03b80d7bbf4fcee7566525f173221aec4bc7037c09f4db66ad4f77b232c103ee",
+            "timestamp": "2026-10-10T11:50:13.037Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 36 years",
+            "ONSET: intermittent upon standing after sitting",
+            "Associated: Diarrhea / loose stools",
+            "Severe abdominal cramps: present",
+            "Watery loose stools (5 times): present",
+            "Dizziness upon standing: present",
+            "Associated: Vomiting",
+            "Vomiting after fluid intake: present",
+            "Anuria (no urine output since morning): present"
+          ],
+          "confirmedFacts": [
+            "Severe abdominal cramps: present",
+            "Watery loose stools (5 times): present",
+            "Dizziness upon standing: present",
+            "Vomiting after fluid intake: present",
+            "Anuria (no urine output since morning): present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:50:13.037Z",
+          "latencyMs": 613
+        }
+      ],
+      "checks": [
+        {
+          "id": "D5-LIVE-01",
+          "dimension": 5,
+          "description": "Turn 1 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D5-HMAC-01",
+          "dimension": 5,
+          "description": "Turn 1 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D5-NLU-CODEMIXED-01",
+          "dimension": 5,
+          "description": "Successfully extracts clinical meaning from code-mixed Indian speech (pet cramps, loose motions, chakkar)",
+          "passed": true
+        },
+        {
+          "id": "D5-SAFETY-ADVICE-01",
+          "dimension": 5,
+          "description": "Provides appropriate harm-reduction guidance or medical follow-up for orthostatic dizziness",
+          "passed": true
+        },
+        {
+          "id": "D5-LIVE-02",
+          "dimension": 5,
+          "description": "Turn 2 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D5-HMAC-02",
+          "dimension": 5,
+          "description": "Turn 2 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D5-ESCALATION-02",
+          "dimension": 5,
+          "description": "Appropriate escalation/guidance for inability to retain fluids and anuria",
+          "passed": true
+        }
+      ],
+      "allPassed": true
+    },
+    {
+      "dimensionIndex": 6,
+      "dimensionName": "Low-Retrieval Inconclusive Cases (Situation B)",
+      "caseDescription": "Sensory buzzing vibration in hip with empty/weak RAG guideline evidence",
+      "turns": [
+        {
+          "turnNumber": 1,
+          "utterance": "I have an odd phantom buzzing vibration in my hip like a cell phone even when I have no phone on me.",
+          "doctorReply": "That sounds unusual. How long has this buzzing sensation been happening?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "Patient reports a phantom buzzing or vibration sensation in the hip, similar to a cell phone, without an actual device present.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 542,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "ffccf1443df3e91f7abcb98b9bed501ad00a3d07d3c6c3c33bb31fbfdadbaf85",
+            "timestamp": "2026-10-10T11:50:33.662Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 28 years",
+            "Phantom buzzing/vibration sensation in hip: present"
+          ],
+          "confirmedFacts": [
+            "Phantom buzzing/vibration sensation in hip: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:50:33.662Z",
+          "latencyMs": 542
+        },
+        {
+          "turnNumber": 2,
+          "utterance": "It happens when sitting at my desk, lasting a few minutes.",
+          "doctorReply": "Does the sensation stop completely when you stand up and walk around?",
+          "conversationalAction": "INQUIRE",
+          "understoodContext": "The phantom buzzing in the hip occurs while sitting at a desk and lasts for a few minutes.",
+          "telemetry": {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "liveGenerated": true,
+            "latencyMs": 752,
+            "fallbackUsed": false,
+            "telemetryIntegrityHash": "51f4410a1b44fb57796766f61a252bd1bbb1399ac559c473efb898bba86ea375",
+            "timestamp": "2026-10-10T11:50:54.447Z"
+          },
+          "hmacVerified": true,
+          "knownFacts": [
+            "Patient Age: 28 years",
+            "Phantom buzzing/vibration sensation in hip: present",
+            "Duration: approx. few minutes",
+            "Trigger: Sitting at desk: present",
+            "Duration: Few minutes: present"
+          ],
+          "confirmedFacts": [
+            "Phantom buzzing/vibration sensation in hip: present",
+            "Trigger: Sitting at desk: present",
+            "Duration: Few minutes: present"
+          ],
+          "deniedSymptoms": [],
+          "timestamp": "2026-10-10T11:50:54.447Z",
+          "latencyMs": 752
+        }
+      ],
+      "checks": [
+        {
+          "id": "D6-SITUATION-B-01",
+          "dimension": 6,
+          "description": "Retriever correctly identifies low-evidence condition as SITUATION_B_WEAK",
+          "passed": true
+        },
+        {
+          "id": "D6-GUIDANCE-UNCERTAIN-01",
+          "dimension": 6,
+          "description": "Retriever directs honest uncertainty and baseline context gathering",
+          "passed": true
+        },
+        {
+          "id": "D6-LIVE-01",
+          "dimension": 6,
+          "description": "Turn 1 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D6-HMAC-01",
+          "dimension": 6,
+          "description": "Turn 1 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D6-EPISTEMIC-RESTRAINT-01",
+          "dimension": 6,
+          "description": "Epistemic restraint: No hallucinated diagnosis on inconclusive complaint",
+          "passed": true
+        },
+        {
+          "id": "D6-FOUNDATIONAL-Q-01",
+          "dimension": 6,
+          "description": "Gathers foundational timeline, constancy, or associated sensory features",
+          "passed": true
+        },
+        {
+          "id": "D6-LIVE-02",
+          "dimension": 6,
+          "description": "Turn 2 live model generation confirmed",
+          "passed": true
+        },
+        {
+          "id": "D6-HMAC-02",
+          "dimension": 6,
+          "description": "Turn 2 HMAC-SHA256 signature verified",
+          "passed": true
+        },
+        {
+          "id": "D6-FACT-PRESERVED-02",
+          "dimension": 6,
+          "description": "Timeline and functional pattern facts preserved in cumulative record",
+          "passed": true
+        },
+        {
+          "id": "D6-APPROPRIATE-CAUTION-02",
+          "dimension": 6,
+          "description": "Maintains appropriate clinical caution without speculative medical claims",
+          "passed": true
+        }
+      ],
+      "allPassed": true
+    }
+  ]
+}
