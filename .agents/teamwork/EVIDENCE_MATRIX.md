@@ -472,7 +472,7 @@ Phase 2 resolves the safety hazard of streaming unvalidated LLM output to the pa
 | **Tiered TTS without a GPU** | **Accept the architecture** | Tier 0 (Emergency cache) + Tier 1 (System voice) + Tier 2 (Kokoro CPU fallback). Decouples development from local GPU acquisition. |
 | **Streaming and incremental safety PoC** | **Accept provisionally** | Incremental chunk validation gates every clause before synthesis. Monotonic stage timestamps verified live. |
 | **Emergency cache retrieval** | **Accept within the tested scope** | Sub-1ms in-memory cache retrieval across doctor personas and emergency numbers. Zero ambulance claims. |
-| **Emergency audible latency** | **Measurement still required** | Software cache ready, queue dispatch, and playback-start events verified ($\le 2\text{ms}$); physical acoustic emission to patient's ear not independently demonstrated without hardware loopback fixture. |
+| **Emergency audible latency** | **Measurement still required** | Software cache ready, queue dispatch, and playback-start events verified ($\le 2.95\text{ms}$); physical acoustic emission to patient's ear not independently demonstrated without hardware loopback fixture. |
 | **Normal voice latency** | **Performance gate remains open** | P95 TTFA ($6.52\text{s}$) and full-turn completion ($10.01\text{s}$) miss targets ($< 1.2\text{s}$ and $< 2.0\text{s}$) due to CPU neural TTS bottleneck. Optimization remains in progress. |
 | **Independent clinical validation & vendor governance** | **Still outstanding** | Double-blind 255-case holdout trial and vendor zero-retention DPAs/BAAs unexecuted. |
 | **Production release** | **Not approved (BLOCKED)** | Strict gate: Prototype provisionally accepted; clinical production deployment blocked. |
@@ -496,7 +496,10 @@ Executed across all regression and acceptance suites against the working tree:
    - `npm run test:phase2`: **All 4 Milestones PASSED (100%)** [Exit Code 0].
 6. **Dedicated Emergency Path Latency Benchmark:**
    - `npm run test:emergency-latency`: **25 / 25 checks PASSED (100%)** [Exit Code 0].
-7. **Readiness Disposition:** Streaming PoC, tiered TTS architecture, and sub-400ms emergency escalation verified. Prototype accepted provisionally. Ambulatory full-turn conversational latency targets on CPU remain open under active optimization. Production strictly blocked.
+7. **Windows System Voice Benchmark:**
+   - `npm run test:system-voice`: **20 / 20 checks PASSED (100%)** [Exit Code 0].
+8. **Readiness Disposition:** Streaming PoC, tiered TTS architecture, and sub-400ms emergency escalation verified. Prototype accepted provisionally. Ambulatory full-turn conversational latency targets on CPU remain open under active optimization. Production strictly blocked.
+
 
 
 
