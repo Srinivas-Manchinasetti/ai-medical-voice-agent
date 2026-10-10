@@ -77,7 +77,7 @@ const sev = extractEpisodicSeverity("usually 4/10 but 9/10 when sharp");
 assert(sev?.baseline === 4, `C1: baseline 4, got ${sev?.baseline}`);
 assert(sev?.peak === 9, `C2: peak 9, got ${sev?.peak}`);
 assert(sev?.pattern === "intermittent", `C3: intermittent, got ${sev?.pattern}`);
-assert(sev?.display.includes("4/10") && sev?.display.includes("9/10"), `C4: display preserves both: ${sev?.display}`);
+assert(Boolean(sev?.display.includes("4/10") && sev?.display.includes("9/10")), `C4: display preserves both: ${sev?.display}`);
 
 console.log("\n=== D: Completeness 0–100 ===");
 assert(normalizeCompletenessPercent(0.88) === 88, "D1: 0.88 fraction → 88%");
@@ -101,7 +101,7 @@ const pre = evaluatePreArbiter({
   patient_name: "t",
   transcript: mgr.cumulativeTranscript,
   conversation_history: [],
-  demographics: {},
+  demographics: { age_group: "adult" },
   detected_symptoms: mgr.slots.known_facts,
   vitals: {},
   speech_features: undefined as any,

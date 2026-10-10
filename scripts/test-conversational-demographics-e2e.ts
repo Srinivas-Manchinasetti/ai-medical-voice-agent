@@ -52,8 +52,8 @@ async function runConversationalDemographicsE2E() {
     `got ${turn1.state.patientProfile?.age}`
   );
   assert(
-    turn1.state.patientProfile?.conditions.includes("diabetes") ||
-    turn1.state.patientProfile?.conditions.includes("diabetic"),
+    Boolean(turn1.state.patientProfile?.conditions?.includes("diabetes") ||
+    turn1.state.patientProfile?.conditions?.includes("diabetic")),
     "Diabetes comorbidity extracted into state.patientProfile",
     `conditions: ${JSON.stringify(turn1.state.patientProfile?.conditions)}`
   );
@@ -97,6 +97,7 @@ async function runConversationalDemographicsE2E() {
     },
     pre_safety_flags: turn1.preArbiterResult.pre_safety_flags,
     vitals: {},
+    speech_features: {} as any,
     immediate_danger_detected: true,
     case_version: turn1.state.caseVersion,
   };
@@ -112,7 +113,7 @@ async function runConversationalDemographicsE2E() {
   );
   assert(
     boardResult1.post_arbiter.final_disposition.toLowerCase().includes("emergency") ||
-    boardResult1.post_arbiter.triage_level === "emergency",
+    boardResult1.post_arbiter.final_triage_level === "emergency",
     "Board disposition enforces emergency triage for atypical ACS"
   );
 
@@ -201,7 +202,7 @@ async function runConversationalDemographicsE2E() {
     `age: ${turn4_1.state.patientProfile?.age}`
   );
   assert(
-    turn4_1.state.patientProfile?.conditions.some(c => /hypertension|blood pressure/i.test(c)),
+    Boolean(turn4_1.state.patientProfile?.conditions?.some(c => /hypertension|blood pressure/i.test(c))),
     "Turn 1 extracts hypertension comorbidity"
   );
 

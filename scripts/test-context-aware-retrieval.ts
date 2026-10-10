@@ -104,7 +104,7 @@ async function runContextAwareRetrievalTests() {
         drugName: "penicillin",
         reactionType: "allergy",
         severity: "severe",
-        reaction: "anaphylaxis and urticaria",
+        reactionDescription: "anaphylaxis and urticaria",
       },
     ],
   };

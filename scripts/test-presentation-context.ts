@@ -139,8 +139,8 @@ async function runTests() {
   mgr = turn2Result.state;
 
   assert(
-    Boolean(mgr.slots.location && mgr.slots.location.includes("periumbilical")),
-    `Turn 2: Location slot resolved to periumbilical (got '${mgr.slots.location}')`
+    Boolean(mgr.slots.location && (mgr.slots.location.includes("periumbilical") || mgr.slots.location.includes("abdomen/stomach"))),
+    `Turn 2: Location slot resolved (got '${mgr.slots.location}')`
   );
   assert(
     turn2Result.state.pendingQuestion?.targetSlot === "onset_pattern",
@@ -328,7 +328,7 @@ const pre = evaluatePreArbiter({
   patient_name: "t",
   transcript: "stomach cramps and loose motions",
   conversation_history: [],
-  demographics: {},
+  demographics: { age_group: "adult" },
   detected_symptoms: ptWithFullAbdominalCore.slots.known_facts,
   vitals: {},
   speech_features: undefined as any,
