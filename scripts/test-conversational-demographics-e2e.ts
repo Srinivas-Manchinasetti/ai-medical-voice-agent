@@ -97,7 +97,19 @@ async function runConversationalDemographicsE2E() {
     },
     pre_safety_flags: turn1.preArbiterResult.pre_safety_flags,
     vitals: {},
-    speech_features: {} as any,
+    speech_features: {
+      speech_pause_ratio: 0.15,
+      mean_pause_duration_ms: 350,
+      speech_rate_wpm: 130,
+      voice_energy_variability: 0.1,
+      pitch_variability: 0.12,
+      observations: [],
+      clinical_relevance: {
+        respiratory_distress_signal: "unlikely",
+        vocal_instability_signal: "none",
+        confidence: 0.5,
+      },
+    },
     immediate_danger_detected: true,
     case_version: turn1.state.caseVersion,
   };
