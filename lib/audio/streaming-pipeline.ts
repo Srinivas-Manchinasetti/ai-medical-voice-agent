@@ -25,6 +25,9 @@ import { IncrementalStreamValidator, StreamValidationContext, ChunkValidationRes
 import { kokoroService, SynthesisResult } from "./kokoro-service";
 import { splitIntoSpeechChunks } from "./sentence-splitter";
 import { evaluateUniversalRedFlags, RedFlagResult } from "../triage/universal-red-flags";
+import { emergencyAudioCache } from "./emergency-audio-cache";
+import { ttsDispatcher } from "./tts-dispatcher";
+import { TTSProviderType } from "@/config/doctors";
 
 export interface StageTimestamps {
   t_mic_first_chunk?: number;
@@ -48,6 +51,8 @@ export interface PipelineStageLatencies {
   vadSpeechDurationMs: number;
   asrDurationMs: number;
   emergencyScreenMs: number;
+  emergencyDetectionToAudioMs?: number; // Dedicated empirical measurement: red flag detection to audible prompt delivery
+  speechEndToEmergencyAudioMs?: number; // Dedicated empirical measurement: speech offset to audible prompt delivery
   llmFirstTokenMs: number;
   chunk0BufferingMs: number;
   chunk0ValidationMs: number;
@@ -65,6 +70,8 @@ export interface StreamingTurnTelemetry {
   emergencyPreempted: boolean;
   emergencyDirectivePlayed: boolean;
   emergencyFiredRule?: string;
+  emergencyPromptCached?: boolean;
+  ttsProviderUsed?: string;
   transcript: string;
   transcriptStable: boolean;
   chunksEmitted: number;
@@ -87,6 +94,7 @@ export interface StreamPipelineOptions {
   primaryEmergencyNumber?: string;
   ambulanceNumber?: string;
   model?: string;
+  ttsProvider?: TTSProviderType;
   tokenStreamSimulator?: (transcript: string) => AsyncIterable<string>;
   ttsSynthesizer?: (text: string, doctorId?: string) => Promise<SynthesisResult>;
 }
@@ -179,11 +187,26 @@ export class StreamingVoicePipeline {
   }
 
   /**
-   * Synthesize audio helper (uses Kokoro singleton or custom mock)
+   * Synthesize audio helper (uses Kokoro singleton, system voice, or custom mock)
    */
   private async synthesizeAudio(text: string): Promise<SynthesisResult> {
     if (this.options.ttsSynthesizer) {
       return this.options.ttsSynthesizer(text, this.options.doctorId);
+    }
+    if (this.options.ttsProvider === "system-voice") {
+      const dispatchRes = await ttsDispatcher.dispatchTiered(text, {
+        doctorId: this.options.doctorId,
+        preferSystemVoice: true,
+      });
+      if (dispatchRes.success) {
+        return {
+          buffer: dispatchRes.audio.buffer,
+          sampleRate: dispatchRes.audio.sampleRate || 24000,
+          durationSec: dispatchRes.audio.durationSec,
+          latencyMs: dispatchRes.audio.latencyMs,
+          voice: dispatchRes.audio.voice,
+        };
+      }
     }
     return kokoroService.synthesize(text, { doctorId: this.options.doctorId });
   }
@@ -298,12 +321,34 @@ export class StreamingVoicePipeline {
         params.onInterruption(`Emergency preempted by rule ${emergencyFiredRule}`);
       }
 
-      // 2. Synthesize approved emergency directive (Never claim ambulance dispatched!)
-      const emergencyDirectiveText = `This is a life-threatening medical emergency. Please call ${primaryNum} or ${ambNum} immediately or proceed to the nearest emergency department right now.`;
-
+      // 2. Retrieve pre-generated approved emergency directive (Never claim ambulance dispatched!)
       const tEmergencyTtsStart = performance.now();
       timestamps.t_chunk0_tts_start = tEmergencyTtsStart;
-      const emAudioResult = await this.synthesizeAudio(emergencyDirectiveText);
+
+      let emAudioResult: SynthesisResult;
+      let emergencyDirectiveText: string;
+      let cached = false;
+
+      if (this.options.ttsSynthesizer) {
+        emergencyDirectiveText = `This is a life-threatening medical emergency. Please call ${primaryNum} or ${ambNum} immediately or proceed to the nearest emergency department right now.`;
+        emAudioResult = await this.options.ttsSynthesizer(emergencyDirectiveText, this.options.doctorId);
+      } else {
+        const cachedPrompt = emergencyAudioCache.getEmergencyPrompt({
+          doctorId: this.options.doctorId,
+          primaryEmergencyNumber: primaryNum,
+          ambulanceNumber: ambNum,
+        });
+        emergencyDirectiveText = cachedPrompt.text;
+        cached = cachedPrompt.cacheHit;
+        emAudioResult = {
+          buffer: cachedPrompt.buffer,
+          sampleRate: cachedPrompt.sampleRate,
+          durationSec: cachedPrompt.durationSec,
+          latencyMs: cachedPrompt.retrievalLatencyMs,
+          voice: this.options.doctorId || "dr-sarah-chen",
+        };
+      }
+
       const tEmergencyTtsEnd = performance.now();
       timestamps.t_chunk0_tts_end = tEmergencyTtsEnd;
       timestamps.t_turn_complete = tEmergencyTtsEnd;
@@ -327,10 +372,17 @@ export class StreamingVoicePipeline {
 
       const totalPlayback = this.playbackQueue.simulatePlayAll();
 
+      const emDetectionTime = timestamps.t_emergency_triggered || timestamps.t_emergency_screen_end || t0;
+      const speechEndTime = timestamps.t_vad_speech_end || t0;
+      const detectionToAudioMs = Math.round(tEmergencyTtsEnd - emDetectionTime);
+      const speechEndToAudioMs = Math.round(tEmergencyTtsEnd - speechEndTime);
+
       const latencies: PipelineStageLatencies = {
         vadSpeechDurationMs: Math.round((timestamps.t_vad_speech_end || t0) - (timestamps.t_vad_speech_start || t0)),
         asrDurationMs: Math.round((timestamps.t_asr_final || t0) - (timestamps.t_vad_speech_start || t0)),
-        emergencyScreenMs: Math.round((timestamps.t_emergency_triggered || t0) - (timestamps.t_vad_speech_start || t0)),
+        emergencyScreenMs: Math.round(emDetectionTime - (timestamps.t_vad_speech_start || t0)),
+        emergencyDetectionToAudioMs: Math.max(0, detectionToAudioMs),
+        speechEndToEmergencyAudioMs: Math.max(0, speechEndToAudioMs),
         llmFirstTokenMs: 0, // Bypassed
         chunk0BufferingMs: 0,
         chunk0ValidationMs: 0,
@@ -348,6 +400,8 @@ export class StreamingVoicePipeline {
         emergencyPreempted: true,
         emergencyDirectivePlayed: true,
         emergencyFiredRule,
+        emergencyPromptCached: cached,
+        ttsProviderUsed: cached ? "emergency-cache" : "tts-synthesizer",
         transcript: params.simulatedTranscript,
         transcriptStable: true,
         chunksEmitted: 1,
