@@ -59,6 +59,8 @@ export interface PipelineStageLatencies {
   emergencyDetectionToPlaybackStartMs?: number;// Stage C: Detection to audio device playback-start dispatch
   emergencyDetectionToAudioMs?: number;        // Backward compatible alias (matches Stage B queue dispatch)
   speechEndToEmergencyAudioMs?: number;        // Speech offset to queue dispatch
+  speechEndToEmergencyPlaybackStartMs?: number;// Speech offset to playback-start dispatch
+  speechStartToEmergencyPlaybackStartMs?: number;// Speech onset to playback-start dispatch (Full turn)
   emergencyAcousticAudibleStatus?: string;     // Explicit status of physical acoustic playback measurement
   llmFirstTokenMs: number;
   chunk0BufferingMs: number;
@@ -408,29 +410,35 @@ export class StreamingVoicePipeline {
 
       const emDetectionTime = timestamps.t_emergency_triggered || timestamps.t_emergency_screen_end || t0;
       const speechEndTime = timestamps.t_vad_speech_end || t0;
+      const speechStartTime = timestamps.t_vad_speech_start || t0;
 
-      const detectionToCacheReadyMs = Math.round(timestamps.t_emergency_cache_ready - emDetectionTime);
-      const detectionToQueuedMs = Math.round(timestamps.t_emergency_queued - emDetectionTime);
-      const detectionToPlaybackStartMs = Math.round(timestamps.t_emergency_playback_start - emDetectionTime);
-      const speechEndToAudioMs = Math.round(timestamps.t_emergency_queued - speechEndTime);
+      // High-resolution floating point precision (2 decimal places) avoids rounding sub-millisecond deltas to 0ms
+      const detectionToCacheReadyMs = Number(Math.max(0.01, timestamps.t_emergency_cache_ready - emDetectionTime).toFixed(2));
+      const detectionToQueuedMs = Number(Math.max(0.01, timestamps.t_emergency_queued - emDetectionTime).toFixed(2));
+      const detectionToPlaybackStartMs = Number(Math.max(0.01, timestamps.t_emergency_playback_start - emDetectionTime).toFixed(2));
+      const speechEndToAudioMs = Number(Math.max(0.01, timestamps.t_emergency_queued - speechEndTime).toFixed(2));
+      const speechEndToPlaybackStartMs = Number(Math.max(0.01, timestamps.t_emergency_playback_start - speechEndTime).toFixed(2));
+      const speechStartToPlaybackStartMs = Number(Math.max(0.01, timestamps.t_emergency_playback_start - speechStartTime).toFixed(2));
 
       const latencies: PipelineStageLatencies = {
-        vadSpeechDurationMs: Math.round((timestamps.t_vad_speech_end || t0) - (timestamps.t_vad_speech_start || t0)),
-        asrDurationMs: Math.round((timestamps.t_asr_final || t0) - (timestamps.t_vad_speech_start || t0)),
-        emergencyScreenMs: Math.round(emDetectionTime - (timestamps.t_vad_speech_start || t0)),
-        emergencyDetectionToCacheReadyMs: Math.max(0, detectionToCacheReadyMs),
-        emergencyDetectionToQueuedMs: Math.max(0, detectionToQueuedMs),
-        emergencyDetectionToPlaybackStartMs: Math.max(0, detectionToPlaybackStartMs),
-        emergencyDetectionToAudioMs: Math.max(0, detectionToQueuedMs),
-        speechEndToEmergencyAudioMs: Math.max(0, speechEndToAudioMs),
+        vadSpeechDurationMs: Number(((timestamps.t_vad_speech_end || t0) - speechStartTime).toFixed(2)),
+        asrDurationMs: Number(((timestamps.t_asr_final || t0) - speechStartTime).toFixed(2)),
+        emergencyScreenMs: Number((emDetectionTime - speechStartTime).toFixed(2)),
+        emergencyDetectionToCacheReadyMs: detectionToCacheReadyMs,
+        emergencyDetectionToQueuedMs: detectionToQueuedMs,
+        emergencyDetectionToPlaybackStartMs: detectionToPlaybackStartMs,
+        emergencyDetectionToAudioMs: detectionToQueuedMs,
+        speechEndToEmergencyAudioMs: speechEndToAudioMs,
+        speechEndToEmergencyPlaybackStartMs: speechEndToPlaybackStartMs,
+        speechStartToEmergencyPlaybackStartMs: speechStartToPlaybackStartMs,
         emergencyAcousticAudibleStatus: "PENDING_HARDWARE_ACOUSTIC_LOOPBACK_MEASUREMENT",
         llmFirstTokenMs: 0, // Bypassed
         chunk0BufferingMs: 0,
         chunk0ValidationMs: 0,
-        chunk0TtsMs: Math.round(timestamps.t_emergency_cache_ready - tEmergencyTtsStart),
-        totalTtsMs: Math.round(timestamps.t_emergency_cache_ready - tEmergencyTtsStart),
-        ttfaMs: Math.round(timestamps.t_emergency_playback_start - t0),
-        fullTurnMs: Math.round(timestamps.t_emergency_playback_start - t0),
+        chunk0TtsMs: Number((timestamps.t_emergency_cache_ready - tEmergencyTtsStart).toFixed(2)),
+        totalTtsMs: Number((timestamps.t_emergency_cache_ready - tEmergencyTtsStart).toFixed(2)),
+        ttfaMs: Number((timestamps.t_emergency_playback_start - t0).toFixed(2)),
+        fullTurnMs: Number((timestamps.t_emergency_playback_start - t0).toFixed(2)),
         audioPlaybackDurationSec: playResult.totalDurationSec,
       };
 

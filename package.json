@@ -45,6 +45,7 @@
     "test:streaming-resilience": "tsx tests/verification/streaming_emergency_resilience.ts",
     "test:streaming-benchmark": "tsx tests/verification/streaming_benchmark.ts",
     "test:emergency-latency": "tsx tests/verification/emergency_latency_benchmark.ts",
+    "test:system-voice": "tsx tests/verification/system_voice_benchmark.ts",
     "test:phase2": "tsx tests/verification/verify_phase2_milestones.ts",
     "test:all": "npm run test:security && npm run test:durable-audit && npm run test:goldendialogue && npm run test:safetyarbiter && npm run test:safetyintegration && npm run test:remediations && npm run test:severity && npm run test:voicestate && npm run test:subfield && npm run test:interpreter && npm run test:planner && npm run test:engine && npm run test:adversarial && npm run test:multiclause && npm run test:provenance && npm run test:rag && npm run test:explanatory && npm run test:manager && npm run test:board && npm run test:clinical && npm run test:interview && npm run test:bargein && npm run test:discussion && npm run test:acceptance && npm run test:fhir && npm run test:dispatch"
   },

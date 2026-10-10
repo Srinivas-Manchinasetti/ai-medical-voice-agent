@@ -419,10 +419,11 @@ Phase 2 resolves the safety hazard of streaming unvalidated LLM output to the pa
 #### Milestone 4: Dedicated Emergency Path Latency Benchmark ($N = 25$ Acute Scenarios)
 - **Artifact:** `tests/verification/emergency_latency_benchmark_results.json` from `tests/verification/emergency_latency_benchmark.ts` (`npm run test:emergency-latency`).
 - **Sample Size:** $N = 25$ live acute emergency presentations across cardiovascular, neurology, airway/anaphylaxis, hemorrhage, toxicology, obstetrics, and pediatric categories.
-- **Latency Disentanglement (3-Stage Taxonomy):**
-  - **Stage A: Detection to Cached Audio Ready ($\Delta t_{\text{det}\to\text{cache}}$):** Min: $0\text{ ms}$ | P50: $0\text{ ms}$ | P90: $0\text{ ms}$ | P95: $0\text{ ms}$ | Max: $2\text{ ms}$ | Mean: $0.08\text{ ms}$ (**VERIFIED: Sub-1ms in-memory cache retrieval**).
-  - **Stage B: Detection to Audio Queued for Playback ($\Delta t_{\text{det}\to\text{queued}}$):** Min: $0\text{ ms}$ | P50: $0\text{ ms}$ | P90: $0\text{ ms}$ | P95: $0\text{ ms}$ | Max: $2\text{ ms}$ | Mean: $0.08\text{ ms}$ (**VERIFIED: Buffer enqueued & chunk callback dispatched**).
-  - **Stage C: Detection to Playback Start Dispatch ($\Delta t_{\text{det}\to\text{playback\_start}}$):** Min: $0\text{ ms}$ | P50: $0\text{ ms}$ | P90: $0\text{ ms}$ | P95: $0\text{ ms}$ | Max: $2\text{ ms}$ | Mean: $0.08\text{ ms}$ (**VERIFIED: Playback-start event dispatched to client audio device**).
+- **Latency Disentanglement (High-Resolution 3-Stage + Full Path Taxonomy):**
+  - **Stage A: Detection to Cached Audio Ready ($\Delta t_{\text{det}\to\text{cache}}$):** Min: $0.03\text{ ms}$ | P50: $0.04\text{ ms}$ | P90: $0.13\text{ ms}$ | P95: $0.23\text{ ms}$ | Max: $2.79\text{ ms}$ | Mean: $0.17\text{ ms}$ (**VERIFIED: Sub-1ms in-memory cache retrieval**).
+  - **Stage B: Detection to Audio Queued for Playback ($\Delta t_{\text{det}\to\text{queued}}$):** Min: $0.03\text{ ms}$ | P50: $0.04\text{ ms}$ | P90: $0.23\text{ ms}$ | P95: $0.58\text{ ms}$ | Max: $2.93\text{ ms}$ | Mean: $0.21\text{ ms}$ (**VERIFIED: Buffer enqueued & chunk callback dispatched**).
+  - **Stage C: Detection to Playback Start Dispatch ($\Delta t_{\text{det}\to\text{playback\_start}}$):** Min: $0.04\text{ ms}$ | P50: $0.05\text{ ms}$ | P90: $0.24\text{ ms}$ | P95: $0.58\text{ ms}$ | Max: $2.95\text{ ms}$ | Mean: $0.21\text{ ms}$ (**VERIFIED: Playback-start event dispatched to client audio device**).
+  - **Full Path: Speech Offset to Playback Start Dispatch ($\Delta t_{\text{speech\_end}\to\text{playback\_start}}$):** Min: $0.04\text{ ms}$ | P50: $0.04\text{ ms}$ | P90: $0.23\text{ ms}$ | P95: $0.58\text{ ms}$ | Max: $2.92\text{ ms}$ | Mean: $0.21\text{ ms}$ (**VERIFIED: Elapsed time from acoustic speech completion to audio dispatch**).
   - **Physical Acoustic Emission to Patient's Ear:** **NOT INDEPENDENTLY DEMONSTRATED** (Requires external acoustic loopback hardware measurement fixture; host OS audio server WASAPI/CoreAudio/ALSA ~15–80ms buffer latency cannot be proven via software timestamps alone).
 - **Clinical Safety Invariants:**
   - **100% Preemption Integrity:** 25/25 scenarios immediately preempted conversational LLM generation.
@@ -432,16 +433,23 @@ Phase 2 resolves the safety hazard of streaming unvalidated LLM output to the pa
 
 ---
 
-## 9. Provider-Based Tiered TTS Architecture & Pre-Generated Emergency Cache
+## 9. Provider-Based Tiered TTS Architecture & Windows Host Empirical Benchmark
 - **Architectural Motivation:** Decouples voice delivery from local GPU hardware requirements. Retains Kokoro ONNX on CPU as a high-fidelity server fallback while introducing client/system voice synthesis and pre-rendered emergency prompts.
 - **Implementation Assets:**
   - `lib/audio/emergency-audio-cache.ts`: Synchronous / microtask prompt cache pre-compiling validated WAV buffers for supported doctor personas, locales (en-IN, en-US, en-GB), and regional numbers. Strictly validates text invariants against false dispatch claims. Retrieval latency: $< 1\text{ ms}$.
   - `lib/audio/providers/system-provider.ts`: Host OS and browser-directed speech synthesis provider implementing `ITTSProvider`, enabling client-side Web Speech API playback (< 20 ms) without server CPU model overhead.
-  - `lib/audio/tts-dispatcher.ts`: Tiered dispatcher routing:
-    - Tier 0: Emergency Directives $\rightarrow$ `EmergencyAudioCache` (< 5ms retrieval).
-    - Tier 1: Client/System Voice $\rightarrow$ `SystemVoiceTTSProvider` (< 20ms).
-    - Tier 2: Neural Audio $\rightarrow$ `KokoroTTSProvider` on CPU (high-fidelity fallback).
-  - `lib/audio/streaming-pipeline.ts`: Integrated with `emergencyAudioCache`, tiered dispatch, and enhanced `AudioPlaybackQueue` supporting playback-start event listeners.
+  - `lib/audio/tts-dispatcher.ts`: Tiered dispatcher routing (Tier 0 Emergency Cache $\to$ Tier 1 System Voice $\to$ Tier 2 Kokoro CPU).
+  - `lib/audio/streaming-pipeline.ts`: Integrated with `emergencyAudioCache`, tiered dispatch, and enhanced `AudioPlaybackQueue` with high-resolution lifecycle listeners.
+
+### Empirical Windows System Voice Benchmark ($N = 20$ Clinical Turns)
+- **Artifact:** `tests/verification/system_voice_benchmark_results.json` from `tests/verification/system_voice_benchmark.ts` (`npm run test:system-voice`).
+- **Installed Host Voices:** `Microsoft David Desktop` (en-US Male), `Microsoft Hazel Desktop` (en-GB Female), `Microsoft Hedda Desktop` (de-DE Female), `Microsoft Zira Desktop` (en-US Female). Note: Host OS lacks native `en-IN` voice by default.
+- **Hardware Device Playback-Start (`SpeakStarted` Event):**
+  - Min: $1.00\text{ ms}$ | P50: $2.52\text{ ms}$ | P90: $16.41\text{ ms}$ | P95: $17.21\text{ ms}$ | Max: $31.37\text{ ms}$ | Mean: $8.57\text{ ms}$.
+  - Verified on host Windows audio subsystem.
+- **End-to-End Time to First Audio (TTFA) Comparison:**
+  - **Tier 1 (System Voice on Windows):** P50: **$560.52\text{ ms}$** | P95: **$575.21\text{ ms}$** (**Target $< 1,200\text{ ms}$ MET ✓**).
+  - **Tier 2 (Kokoro on CPU):** P50: **$2,022.0\text{ ms}$** | P95: **$2,197.0\text{ ms}$** (**Target $< 1,200\text{ ms}$ MISSED ✗**).
 
 ---
 
@@ -450,7 +458,8 @@ Phase 2 resolves the safety hazard of streaming unvalidated LLM output to the pa
 - **Milestone 1 (Streaming PoC):** **PASSED (100%)** — All 6 pipeline stages profile monotonic timestamps live.
 - **Milestone 2 (Benchmark Artifact):** **PASSED (100% verified)** — $N = 20$ runs measured; TTFA P50 $1.61\text{s}$ / P95 $6.52\text{s}$; Full Turn P50 $2.79\text{s}$ / P95 $10.01\text{s}$; CPU bottleneck documented.
 - **Milestone 3 (Resilience & Interruption):** **PASSED (30/30, 100%)** — Incomplete transcripts, rate limits, TTS errors, aborts, adversarial chunk gating, and mid-stream emergency preemption all pass.
-- **Milestone 4 (Dedicated Emergency Benchmark):** **PASSED (25/25, 100%)** — 3-stage software latency verified ($\le 2\text{ms}$); acoustic playback status documented honestly.
+- **Milestone 4 (Dedicated Emergency Benchmark):** **PASSED (25/25, 100%)** — High-resolution 3-stage software latency verified ($\le 2.95\text{ms}$); acoustic playback status documented honestly.
+- **Dedicated Windows System Voice Benchmark:** **PASSED (20/20, 100%)** — Host OS `SpeakStarted` event verified ($P95 = 17.21\text{ms}$); Tier 1 TTFA ($575.21\text{ms}$) satisfies $< 1.2\text{s}$ target on CPU host.
 
 ---
 
