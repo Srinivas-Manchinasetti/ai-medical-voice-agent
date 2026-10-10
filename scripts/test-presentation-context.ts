@@ -139,8 +139,8 @@ async function runTests() {
   mgr = turn2Result.state;
 
   assert(
-    Boolean(mgr.slots.location && (mgr.slots.location.includes("periumbilical") || mgr.slots.location.includes("abdomen/stomach"))),
-    `Turn 2: Location slot resolved (got '${mgr.slots.location}')`
+    Boolean((mgr.slots.location && mgr.slots.location.includes("periumbilical")) || mgr.slots.known_facts.some(f => /periumbilical/i.test(f))),
+    `Turn 2: Location resolved to periumbilical in slots or facts (got '${mgr.slots.location}', facts: ${mgr.slots.known_facts.join('; ')})`
   );
   assert(
     turn2Result.state.pendingQuestion?.targetSlot === "onset_pattern",
